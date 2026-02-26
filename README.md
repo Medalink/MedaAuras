@@ -37,7 +37,7 @@
 
 ## 📦 Install
 
-Download from [CurseForge](#) • [Wago](#) • [GitHub Releases](https://github.com/Medalink/MedaAuras/releases)
+Download from [CurseForge](https://legacy.curseforge.com/wow/addons/medaauras) • [Wago](https://addons.wago.io/addons/medaauras) • [GitHub Releases](https://github.com/Medalink/MedaAuras/releases)
 
 Extract to `World of Warcraft/_retail_/Interface/AddOns/` → `/reload`
 
