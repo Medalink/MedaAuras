@@ -746,6 +746,22 @@ local function StartTicker(db)
         else
             unit = UnitPriorityService:FocusOrTarget()
         end
+
+        -- Focus-only: fully hide everything when no focus exists
+        if db.focusOnly and not unit then
+            if isIconMode then
+                if iconFrame then iconFrame:Hide() end
+            else
+                SetOverlayState("hidden", db)
+            end
+            return
+        end
+
+        -- Restore icon visibility if it was hidden by focus-only
+        if isIconMode and iconFrame and not iconFrame:IsShown() then
+            iconFrame:Show()
+        end
+
         local state
 
         if not unit then
