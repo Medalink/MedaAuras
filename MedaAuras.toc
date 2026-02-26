@@ -1,0 +1,21 @@
+## Interface: 120001
+## Title: MedaAuras
+## Notes: Modular aura and indicator toolkit
+## Author: Medalink
+## Version: 1.0.0
+## SavedVariables: MedaAurasDB
+## OptionalDeps: MedaDebug
+
+# Libraries
+Libs\MedaUI\MedaUI.xml
+
+# Core
+Core\Core.lua
+
+# Shared Services (load before modules)
+Services\SpellCastTracker.lua
+Services\CooldownTimer.lua
+Services\UnitPriority.lua
+
+# Modules
+Modules\FocusInterruptHelper.lua

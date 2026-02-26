@@ -1,0 +1,10 @@
+package-as: MedaAuras
+
+externals:
+  Libs/MedaUI: https://github.com/Medalink/MedaUI
+
+ignore:
+  - .github
+  - .gitignore
+  - README.md
+  - .pkgmeta
