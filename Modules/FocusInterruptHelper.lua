@@ -740,7 +740,12 @@ local function StartTicker(db)
         local onCD = not CooldownTimer:IsReady(activeSpellID)
         local remaining = onCD and CooldownTimer:GetRemaining(activeSpellID) or 0
 
-        local unit = UnitPriorityService:FocusOrTarget()
+        local unit
+        if db.focusOnly then
+            unit = UnitExists("focus") and "focus" or nil
+        else
+            unit = UnitPriorityService:FocusOrTarget()
+        end
         local state
 
         if not unit then
@@ -909,6 +914,7 @@ local MODULE_DEFAULTS = {
     colorReady = { r = 0,   g = 0.8, b = 0   },
     colorOOR   = { r = 0.8, g = 0,   b = 0   },
     colorOnCD  = { r = 1,   g = 0.5, b = 0   },
+    focusOnly = false,
     spellID = nil,
     cooldownDuration = nil,
     cooldownManual = false,
@@ -939,6 +945,15 @@ local function BuildConfig(parent, db)
             MedaAuras:DisableModule("FocusInterruptHelper")
         end
         MedaAuras:RefreshSidebarDot("FocusInterruptHelper")
+    end
+    yOff = yOff - 35
+
+    -- Focus-only toggle
+    local focusCB = MedaUI:CreateCheckbox(parent, "Focus target only (hide when no focus)")
+    focusCB:SetPoint("TOPLEFT", 0, yOff)
+    focusCB:SetChecked(db.focusOnly)
+    focusCB.OnValueChanged = function(_, checked)
+        db.focusOnly = checked
     end
     yOff = yOff - 35
 

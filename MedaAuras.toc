@@ -5,6 +5,8 @@
 ## Version: 1.0.0
 ## SavedVariables: MedaAurasDB
 ## OptionalDeps: MedaDebug
+## X-Curse-Project-ID: 1472556
+## X-Wago-ID: mKODAEGx
 
 # Libraries
 Libs\MedaUI\MedaUI.xml
