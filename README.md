@@ -36,7 +36,8 @@
 ## 🚀 Quick Start
 
 ```
-/mauras       → Open settings panel
+/mwa          → Open settings panel
+/mauras       → Open settings panel (alias)
 ```
 
 ---

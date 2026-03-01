@@ -209,6 +209,14 @@ local function CreateBarDisplay(parent, db)
     text:SetShadowColor(0, 0, 0, 1)
     d.text = text
 
+    local outerBorder = CreateFrame("Frame", nil, parent)
+    outerBorder:SetFrameLevel(math.max(d:GetFrameLevel() - 1, 0))
+    local outerTex = outerBorder:CreateTexture(nil, "BACKGROUND")
+    outerTex:SetAllPoints()
+    outerTex:SetColorTexture(0, 0, 0, 1)
+    d.outerBorder = outerBorder
+    d.outerBorderTex = outerTex
+
     d._lastManaColor = nil
     d._lastFontPath = false
     d._lastTextSize = 0
@@ -255,6 +263,19 @@ local function UpdateBarDisplay(d, current, max, db)
         d:SetBackdropBorderColor(bc[1], bc[2], bc[3], bc[4] or 1)
     end
 
+    -- Outer border
+    if db.showOuterBorder == false then
+        d.outerBorder:Hide()
+    else
+        d.outerBorder:Show()
+        local obs = db.outerBorderSize or 2
+        d.outerBorder:ClearAllPoints()
+        d.outerBorder:SetPoint("TOPLEFT", d, "TOPLEFT", -obs, obs)
+        d.outerBorder:SetPoint("BOTTOMRIGHT", d, "BOTTOMRIGHT", obs, -obs)
+        local obc = db.outerBorderColor or { 0, 0, 0, 1 }
+        d.outerBorderTex:SetColorTexture(obc[1], obc[2], obc[3], obc[4] or 1)
+    end
+
     -- Font
     local textSize = db.textSize or 14
     local fontPath = db.font
@@ -264,13 +285,17 @@ local function UpdateBarDisplay(d, current, max, db)
         d._lastTextSize = textSize
     end
 
-    -- Text anchor
+    -- Text anchor + user offsets
     local anchor = db.textAnchor or "CENTER"
-    if d._lastAnchor ~= anchor then
+    local txOff = db.textOffsetX or 0
+    local tyOff = db.textOffsetY or 0
+    if d._lastAnchor ~= anchor or d._lastTxOff ~= txOff or d._lastTyOff ~= tyOff then
         local offsets = ANCHOR_OFFSETS[anchor] or ANCHOR_OFFSETS.CENTER
         d.text:ClearAllPoints()
-        d.text:SetPoint(anchor, d, anchor, offsets[1], offsets[2])
+        d.text:SetPoint(anchor, d, anchor, offsets[1] + txOff, offsets[2] + tyOff)
         d._lastAnchor = anchor
+        d._lastTxOff = txOff
+        d._lastTyOff = tyOff
     end
 
     -- Text content (secret-safe)
@@ -291,6 +316,13 @@ local function CreateOrbDisplay(parent, db)
 
     local d = CreateFrame("Frame", nil, parent)
     d:SetAllPoints()
+
+    -- Outer border (circular, behind everything)
+    local outerBorderTex = d:CreateTexture(nil, "BACKGROUND", nil, -8)
+    outerBorderTex:SetTexture(maskPath)
+    local obc = db.outerBorderColor or { 0, 0, 0, 1 }
+    outerBorderTex:SetVertexColor(obc[1], obc[2], obc[3], obc[4] or 1)
+    d.outerBorderTex = outerBorderTex
 
     -- Background orb (dark)
     local bg = d:CreateTexture(nil, "BACKGROUND")
@@ -358,6 +390,7 @@ local function UpdateOrbDisplay(d, current, max, db)
         d.bg:SetTexture(maskPath)
         d.mask:SetTexture(maskPath)
         d.ring:SetTexture(ringPath)
+        d.outerBorderTex:SetTexture(maskPath)
         d._maskPath = maskPath
         d._lastOrbTexture = orbTex
     end
@@ -391,6 +424,19 @@ local function UpdateOrbDisplay(d, current, max, db)
         d.ring:SetVertexColor(bc[1], bc[2], bc[3], bc[4] or 1)
     end
 
+    -- Outer border
+    if db.showOuterBorder == false then
+        d.outerBorderTex:Hide()
+    else
+        d.outerBorderTex:Show()
+        local obs = db.outerBorderSize or 2
+        d.outerBorderTex:ClearAllPoints()
+        d.outerBorderTex:SetPoint("TOPLEFT", -obs, obs)
+        d.outerBorderTex:SetPoint("BOTTOMRIGHT", obs, -obs)
+        local obc = db.outerBorderColor or { 0, 0, 0, 1 }
+        d.outerBorderTex:SetVertexColor(obc[1], obc[2], obc[3], obc[4] or 1)
+    end
+
     -- Font
     local textSize = db.textSize or 12
     local fontPath = db.font
@@ -400,13 +446,17 @@ local function UpdateOrbDisplay(d, current, max, db)
         d._lastTextSize = textSize
     end
 
-    -- Text anchor
+    -- Text anchor + user offsets
     local anchor = db.textAnchor or "CENTER"
-    if d._lastAnchor ~= anchor then
+    local txOff = db.textOffsetX or 0
+    local tyOff = db.textOffsetY or 0
+    if d._lastAnchor ~= anchor or d._lastTxOff ~= txOff or d._lastTyOff ~= tyOff then
         local offsets = ANCHOR_OFFSETS[anchor] or ANCHOR_OFFSETS.CENTER
         d.text:ClearAllPoints()
-        d.text:SetPoint(anchor, d, anchor, offsets[1], offsets[2])
+        d.text:SetPoint(anchor, d, anchor, offsets[1] + txOff, offsets[2] + tyOff)
         d._lastAnchor = anchor
+        d._lastTxOff = txOff
+        d._lastTyOff = tyOff
     end
 
     -- Text content (secret-safe)
@@ -774,6 +824,70 @@ local function BuildConfig(parent, db)
 
     yOff = yOff - PREVIEW_AREA_H - 10
 
+    -- === Border settings (near preview for real-time feedback) ===
+    local _, _, borderHeader = MedaUI:CreateSectionHeader(parent, "Border")
+    borderHeader:SetPoint("TOPLEFT", 0, yOff)
+    yOff = yOff - 40
+
+    local showBorderCb = MedaUI:CreateCheckbox(parent, "Show Border")
+    showBorderCb:SetPoint("TOPLEFT", 0, yOff)
+    showBorderCb:SetChecked(db.showBorder ~= false)
+    showBorderCb.OnValueChanged = function(_, checked)
+        db.showBorder = checked
+        OnManaEvent(db)
+    end
+    yOff = yOff - 30
+
+    local bc = db.borderColor or DEFAULT_BORDER_COLOR
+    local borderColorPicker = MedaUI:CreateColorPicker(parent, 24, 24, true)
+    borderColorPicker:SetPoint("TOPLEFT", 0, yOff)
+    borderColorPicker:SetColor(bc[1], bc[2], bc[3], bc[4] or 1)
+    borderColorPicker:SetScript("OnColorChanged", function(_, r, g, b, a)
+        db.borderColor = { r, g, b, a }
+        OnManaEvent(db)
+    end)
+    local borderColorLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    borderColorLabel:SetPoint("LEFT", borderColorPicker, "RIGHT", 10, 0)
+    borderColorLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
+    borderColorLabel:SetText("Border Color")
+    yOff = yOff - 35
+
+    local showOuterBorderCb = MedaUI:CreateCheckbox(parent, "Show Outer Border")
+    showOuterBorderCb:SetPoint("TOPLEFT", 0, yOff)
+    showOuterBorderCb:SetChecked(db.showOuterBorder ~= false)
+    showOuterBorderCb.OnValueChanged = function(_, checked)
+        db.showOuterBorder = checked
+        OnManaEvent(db)
+    end
+    yOff = yOff - 30
+
+    local outerBorderSizeSlider = MedaUI:CreateSlider(parent, 200, 1, 10, 1)
+    outerBorderSizeSlider:SetPoint("TOPLEFT", 0, yOff)
+    outerBorderSizeSlider:SetValue(db.outerBorderSize or 2)
+    outerBorderSizeSlider.OnValueChanged = function(_, value)
+        db.outerBorderSize = value
+        OnManaEvent(db)
+    end
+    local outerBorderSizeLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    outerBorderSizeLabel:SetPoint("LEFT", outerBorderSizeSlider, "RIGHT", 10, 0)
+    outerBorderSizeLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
+    outerBorderSizeLabel:SetText("Outer Border Size")
+    yOff = yOff - 35
+
+    local obc = db.outerBorderColor or { 0.0, 0.0, 0.0, 1.0 }
+    local outerBorderColorPicker = MedaUI:CreateColorPicker(parent, 24, 24, true)
+    outerBorderColorPicker:SetPoint("TOPLEFT", 0, yOff)
+    outerBorderColorPicker:SetColor(obc[1], obc[2], obc[3], obc[4] or 1)
+    outerBorderColorPicker:SetScript("OnColorChanged", function(_, r, g, b, a)
+        db.outerBorderColor = { r, g, b, a }
+        OnManaEvent(db)
+    end)
+    local outerBorderColorLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    outerBorderColorLabel:SetPoint("LEFT", outerBorderColorPicker, "RIGHT", 10, 0)
+    outerBorderColorLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
+    outerBorderColorLabel:SetText("Outer Border Color")
+    yOff = yOff - 35
+
     -- === Bar-specific settings ===
     if isBar then
         local _, _, barHeader = MedaUI:CreateSectionHeader(parent, "Bar Settings")
@@ -944,20 +1058,6 @@ local function BuildConfig(parent, db)
     manaColorLabel:SetText("Mana Color")
     yOff = yOff - 35
 
-    local bc = db.borderColor or DEFAULT_BORDER_COLOR
-    local borderColorPicker = MedaUI:CreateColorPicker(parent, 24, 24, true)
-    borderColorPicker:SetPoint("TOPLEFT", 0, yOff)
-    borderColorPicker:SetColor(bc[1], bc[2], bc[3], bc[4] or 1)
-    borderColorPicker:SetScript("OnColorChanged", function(_, r, g, b, a)
-        db.borderColor = { r, g, b, a }
-        OnManaEvent(db)
-    end)
-    local borderColorLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    borderColorLabel:SetPoint("LEFT", borderColorPicker, "RIGHT", 10, 0)
-    borderColorLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
-    borderColorLabel:SetText("Border Color")
-    yOff = yOff - 35
-
     local bgc = db.backgroundColor or DEFAULT_BG_COLOR
     local bgColorPicker = MedaUI:CreateColorPicker(parent, 24, 24, false)
     bgColorPicker:SetPoint("TOPLEFT", 0, yOff)
@@ -1008,15 +1108,6 @@ local function BuildConfig(parent, db)
     end
     yOff = yOff - 30
 
-    local showBorderCb = MedaUI:CreateCheckbox(parent, "Show Border")
-    showBorderCb:SetPoint("TOPLEFT", 0, yOff)
-    showBorderCb:SetChecked(db.showBorder ~= false)
-    showBorderCb.OnValueChanged = function(_, checked)
-        db.showBorder = checked
-        OnManaEvent(db)
-    end
-    yOff = yOff - 30
-
     local textSizeSlider = MedaUI:CreateSlider(parent, 200, 8, 28, 1)
     textSizeSlider:SetPoint("TOPLEFT", 0, yOff)
     textSizeSlider:SetValue(db.textSize or 14)
@@ -1049,6 +1140,41 @@ local function BuildConfig(parent, db)
     anchorLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
     anchorLabel:SetText("Text Anchor")
     yOff = yOff - 40
+
+    local xOffsetBox = MedaUI:CreateEditBox(parent, 60, 24)
+    xOffsetBox:SetPoint("TOPLEFT", 0, yOff)
+    xOffsetBox:SetText(tostring(db.textOffsetX or 0))
+    local function ApplyXOffset(text)
+        local val = tonumber(text)
+        if val then
+            db.textOffsetX = val
+            OnManaEvent(db)
+        end
+    end
+    xOffsetBox.OnEnterPressed = function(_, text) ApplyXOffset(text) end
+    xOffsetBox.OnTextChanged = function(_, text) ApplyXOffset(text) end
+    local xOffsetLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    xOffsetLabel:SetPoint("LEFT", xOffsetBox, "RIGHT", 8, 0)
+    xOffsetLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
+    xOffsetLabel:SetText("Horizontal Offset")
+
+    local yOffsetBox = MedaUI:CreateEditBox(parent, 60, 24)
+    yOffsetBox:SetPoint("TOPLEFT", 180, yOff)
+    yOffsetBox:SetText(tostring(db.textOffsetY or 0))
+    local function ApplyYOffset(text)
+        local val = tonumber(text)
+        if val then
+            db.textOffsetY = val
+            OnManaEvent(db)
+        end
+    end
+    yOffsetBox.OnEnterPressed = function(_, text) ApplyYOffset(text) end
+    yOffsetBox.OnTextChanged = function(_, text) ApplyYOffset(text) end
+    local yOffsetLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    yOffsetLabel:SetPoint("LEFT", yOffsetBox, "RIGHT", 8, 0)
+    yOffsetLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
+    yOffsetLabel:SetText("Vertical Offset")
+    yOff = yOff - 35
 
     -- Reset
     local resetBtn = MedaUI:CreateButton(parent, "Reset to Defaults")
@@ -1093,10 +1219,15 @@ local MODULE_DEFAULTS = {
     borderColor = { 0.2, 0.4, 0.7, 1.0 },
     backgroundOpacity = 0.8,
     showBorder = true,
+    showOuterBorder = true,
+    outerBorderSize = 2,
+    outerBorderColor = { 0.0, 0.0, 0.0, 1.0 },
     showText = true,
     showPercentage = true,
     textSize = 14,
     textAnchor = "CENTER",
+    textOffsetX = 0,
+    textOffsetY = 0,
     font = nil,
 }
 

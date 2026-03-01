@@ -632,15 +632,15 @@ local function SlashHandler(msg)
     end
 
     print("|cff00ccffMedaAuras:|r Commands:")
-    print("  /ma - Open settings")
-    print("  /ma debug - Toggle verbose debug logging")
-    print("  /ma lock - Lock all frames")
-    print("  /ma unlock - Unlock all frames")
-    print("  /ma enable <module> - Enable a module")
-    print("  /ma disable <module> - Disable a module")
+    print("  /mwa - Open settings")
+    print("  /mwa debug - Toggle verbose debug logging")
+    print("  /mwa lock - Lock all frames")
+    print("  /mwa unlock - Unlock all frames")
+    print("  /mwa enable <module> - Enable a module")
+    print("  /mwa disable <module> - Disable a module")
 end
 
-SLASH_MEDAAURAS1 = "/ma"
+SLASH_MEDAAURAS1 = "/mwa"
 SLASH_MEDAAURAS2 = "/mauras"
 SlashCmdList["MEDAAURAS"] = SlashHandler
 
@@ -718,7 +718,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         if debugAPI then
             Log("MedaDebug integration active")
         else
-            print("|cff00ccffMedaAuras:|r MedaDebug not detected. Use /ma debug for chat fallback.")
+            print("|cff00ccffMedaAuras:|r MedaDebug not detected. Use /mwa debug for chat fallback.")
         end
     end
 end)
