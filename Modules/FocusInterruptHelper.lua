@@ -20,6 +20,10 @@ local INTERRUPTS = {
     { id = 183752, name = "Disrupt",           class = "DEMONHUNTER",  baseCD = 15 },
     { id = 116705, name = "Spear Hand Strike", class = "MONK",         baseCD = 15 },
     { id = 15487,  name = "Silence",           class = "PRIEST",       baseCD = 45 },
+    { id = 119910,  name = "Spell Lock",            class = "WARLOCK", baseCD = 24, pet = true, altIDs = {19647, 119898, 1276467, 89766} },
+    { id = 19647,   name = "Spell Lock",            class = "WARLOCK", baseCD = 24, pet = true, altIDs = {119910, 119898, 1276467, 89766} },
+    { id = 89766,   name = "Axe Toss",              class = "WARLOCK", baseCD = 30, pet = true, altIDs = {119910, 19647, 119898, 1276467} },
+    { id = 1276467, name = "Grimoire: Fel Ravager",  class = "WARLOCK", baseCD = 24, pet = false, altIDs = {119910, 19647, 89766} },
 }
 
 -- ============================================================================
@@ -28,6 +32,8 @@ local INTERRUPTS = {
 
 local activeSpellID
 local activeSpellName
+local activeIsPetSpell
+local activeSpellTexture
 local updateTicker
 local iconFrame
 local overlayTextures = {}  -- [buttonFrame] = texture
@@ -129,15 +135,26 @@ end
 -- Auto-detect interrupt spell
 -- ============================================================================
 
+local function IsSpellAvailable(info)
+    if info.pet then
+        local ok, known = pcall(IsSpellKnown, info.id, true)
+        if ok and known then return true end
+        local ok2, known2 = pcall(IsPlayerSpell, info.id)
+        if ok2 and known2 then return true end
+        return false
+    end
+    return IsPlayerSpell(info.id)
+end
+
 local function DetectInterrupt()
     local _, classToken = UnitClass("player")
     MedaAuras.LogDebug(format("[FIH] DetectInterrupt: player class = %s", tostring(classToken)))
 
     for _, info in ipairs(INTERRUPTS) do
         if info.class == classToken then
-            local known = IsPlayerSpell(info.id)
-            MedaAuras.LogDebug(format("[FIH] Checking %s (ID %d, class %s): IsPlayerSpell = %s",
-                info.name, info.id, info.class, tostring(known)))
+            local known = IsSpellAvailable(info)
+            MedaAuras.LogDebug(format("[FIH] Checking %s (ID %d, class %s, pet %s): known = %s",
+                info.name, info.id, info.class, tostring(info.pet or false), tostring(known)))
             if known then
                 MedaAuras.Log(format("[FIH] Detected interrupt: %s (ID %d)", info.name, info.id))
                 return info
@@ -147,7 +164,7 @@ local function DetectInterrupt()
 
     MedaAuras.LogDebug("[FIH] No class match, trying fallback (all classes)")
     for _, info in ipairs(INTERRUPTS) do
-        local known = IsPlayerSpell(info.id)
+        local known = IsSpellAvailable(info)
         if known then
             MedaAuras.Log(format("[FIH] Fallback detected: %s (ID %d)", info.name, info.id))
             return info
@@ -162,14 +179,39 @@ end
 -- Icon texture resolution
 -- ============================================================================
 
+local function ResolveSpellTexture(spellID)
+    if not spellID then return nil end
+    local tex = C_Spell.GetSpellTexture(spellID)
+    if tex then return tex end
+    if C_Spell.GetSpellInfo then
+        local ok, info = pcall(C_Spell.GetSpellInfo, spellID)
+        if ok and info and info.iconID then return info.iconID end
+    end
+    return nil
+end
+
 local function ResolveIconTexture(db)
     if db.iconSpellID then
-        local tex = C_Spell.GetSpellTexture(db.iconSpellID)
+        local tex = ResolveSpellTexture(db.iconSpellID)
         if tex then return tex end
     end
+    if activeSpellTexture then return activeSpellTexture end
     if activeSpellID then
-        local tex = C_Spell.GetSpellTexture(activeSpellID)
+        local tex = ResolveSpellTexture(activeSpellID)
         if tex then return tex end
+    end
+    local _, classToken = UnitClass("player")
+    for _, info in ipairs(INTERRUPTS) do
+        if info.class == classToken then
+            local tex = ResolveSpellTexture(info.id)
+            if tex then return tex end
+            if info.altIDs then
+                for _, altID in ipairs(info.altIDs) do
+                    tex = ResolveSpellTexture(altID)
+                    if tex then return tex end
+                end
+            end
+        end
     end
     return 134400
 end
@@ -298,16 +340,40 @@ local StartCDMScanning
 
 local cachedButtons = {}
 
+local WARLOCK_INTERRUPT_IDS = {
+    [119910] = true, [19647] = true, [119898] = true,
+    [89766] = true, [1276467] = true,
+}
+
+local function MatchSpellID(id)
+    if not id then return false end
+    if id == activeSpellID then return true end
+    if WARLOCK_INTERRUPT_IDS[activeSpellID] and WARLOCK_INTERRUPT_IDS[id] then return true end
+    if activeSpellName then
+        local ok, name = pcall(C_Spell.GetSpellName, id)
+        if ok and name and name == activeSpellName then return true end
+    end
+    if C_Spell.GetOverrideSpell then
+        local ok, overrideID = pcall(C_Spell.GetOverrideSpell, id)
+        if ok and overrideID and overrideID ~= id then
+            if overrideID == activeSpellID then return true end
+            if WARLOCK_INTERRUPT_IDS[activeSpellID] and WARLOCK_INTERRUPT_IDS[overrideID] then return true end
+        end
+    end
+    return false
+end
+
 local function MatchButtonToSpell(btn)
     local actionSlot = GetButtonActionSlot(btn)
     if not actionSlot or not HasAction(actionSlot) then return false end
 
     local actionType, id = GetActionInfo(actionSlot)
     if actionType == "spell" then
-        if id == activeSpellID then return true end
-        if activeSpellName then
-            local name = C_Spell.GetSpellName(id)
-            if name and name == activeSpellName then return true end
+        if MatchSpellID(id) then return true end
+    elseif actionType == "macro" and id then
+        local ok, macroSpell = pcall(GetMacroSpell, id)
+        if ok and macroSpell then
+            if MatchSpellID(macroSpell) then return true end
         end
     end
     return false
@@ -321,22 +387,33 @@ local function ScanActionButtons()
         return
     end
 
-    -- Primary method: Blizzard API slot lookup
-    local slots = C_ActionBar.FindSpellActionButtons(activeSpellID)
-    if slots and #slots > 0 then
-        MedaAuras.LogDebug(format("[FIH:Overlay] FindSpellActionButtons(%d) returned %d slot(s)", activeSpellID, #slots))
-        for _, slot in ipairs(slots) do
-            local btn = SlotToButton(slot)
-            if btn then
-                MedaAuras.LogDebug(format("[FIH:Overlay] Slot %d -> %s", slot, btn:GetName() or "unnamed"))
-                cachedButtons[#cachedButtons + 1] = btn
-            else
-                MedaAuras.LogWarn(format("[FIH:Overlay] Slot %d could not resolve to button", slot))
+    -- Primary method: Blizzard API slot lookup (try active ID + warlock alternates)
+    local idsToTry = { activeSpellID }
+    if WARLOCK_INTERRUPT_IDS[activeSpellID] then
+        for id in pairs(WARLOCK_INTERRUPT_IDS) do
+            if id ~= activeSpellID then
+                idsToTry[#idsToTry + 1] = id
             end
         end
     end
 
-    -- Fallback: iterate all bar buttons and match by action info
+    local seenBtn = {}
+    for _, tryID in ipairs(idsToTry) do
+        local ok, slots = pcall(C_ActionBar.FindSpellActionButtons, tryID)
+        if ok and slots and #slots > 0 then
+            MedaAuras.LogDebug(format("[FIH:Overlay] FindSpellActionButtons(%d) returned %d slot(s)", tryID, #slots))
+            for _, slot in ipairs(slots) do
+                local btn = SlotToButton(slot)
+                if btn and not seenBtn[btn] then
+                    seenBtn[btn] = true
+                    MedaAuras.LogDebug(format("[FIH:Overlay] Slot %d -> %s", slot, btn:GetName() or "unnamed"))
+                    cachedButtons[#cachedButtons + 1] = btn
+                end
+            end
+        end
+    end
+
+    -- Fallback: iterate all bar buttons and match by action info (catches macros & pet spells)
     if #cachedButtons == 0 then
         MedaAuras.LogDebug("[FIH:Overlay] API scan empty, trying brute-force")
         local allButtons = ScanAllBarButtons()
@@ -767,7 +844,23 @@ local function StartTicker(db)
         if not unit then
             state = "hidden"
         else
-            local inRange = C_Spell.IsSpellInRange(activeSpellID, unit)
+            local ok, inRange = pcall(C_Spell.IsSpellInRange, activeSpellID, unit)
+            if not ok then inRange = nil end
+
+            if activeIsPetSpell and inRange == nil then
+                local petUnit = "pet"
+                if UnitExists(petUnit) then
+                    local checkOk, checkRange = pcall(C_Spell.IsSpellInRange, 19647, unit)
+                    if checkOk and checkRange ~= nil then
+                        inRange = checkRange
+                    else
+                        inRange = UnitExists(unit) and true or nil
+                    end
+                else
+                    inRange = nil
+                end
+            end
+
             if inRange == nil then
                 state = "hidden"
             elseif not inRange then
@@ -821,6 +914,14 @@ local function OnInitialize(db)
     if info then
         activeSpellID = info.id
         activeSpellName = info.name
+        activeIsPetSpell = info.pet or false
+        activeSpellTexture = ResolveSpellTexture(info.id)
+        if not activeSpellTexture and info.altIDs then
+            for _, altID in ipairs(info.altIDs) do
+                activeSpellTexture = ResolveSpellTexture(altID)
+                if activeSpellTexture then break end
+            end
+        end
 
         if not db.cooldownManual or not db.cooldownDuration then
             db.cooldownDuration = info.baseCD
@@ -871,6 +972,8 @@ local function OnDisable(db)
     HideHookMode()
     activeSpellID = nil
     activeSpellName = nil
+    activeIsPetSpell = false
+    activeSpellTexture = nil
 end
 
 -- ============================================================================
@@ -1190,15 +1293,11 @@ local function BuildConfig(parent, db)
     yOff = yOff - 48
 
     -- ================================================================
-    -- Live icon preview (all 4 states)
+    -- Floating Side Preview (all 4 states)
     -- ================================================================
 
-    local _, _, previewHeader = MedaUI:CreateSectionHeader(parent, "Preview")
-    previewHeader:SetPoint("TOPLEFT", 0, yOff)
-    yOff = yOff - 35
-
     local PREVIEW_SIZE = 46
-    local PREVIEW_GAP = 50
+    local PREVIEW_GAP = 12
     local previewIcons = {}
 
     local spellTex = ResolveIconTexture(db)
@@ -1210,37 +1309,59 @@ local function BuildConfig(parent, db)
         { key = "hidden", color = nil,                                 label = "No Target",    cdText = "" },
     }
 
-    for i, info in ipairs(previewStates) do
-        local xOff = (i - 1) * (PREVIEW_SIZE + PREVIEW_GAP)
+    local pvContainer
+    do
+        local anchor = MedaAurasSettingsPanel or _G["MedaAurasSettingsPanel"]
+        if anchor then
+            local PREVIEW_COLS = 2
+            local PREVIEW_ROWS = 2
+            local PV_PAD = 14
+            local pvW = PV_PAD * 2 + PREVIEW_COLS * PREVIEW_SIZE + (PREVIEW_COLS - 1) * PREVIEW_GAP
+            local pvH = PV_PAD + PREVIEW_ROWS * (PREVIEW_SIZE + 20) + (PREVIEW_ROWS - 1) * PREVIEW_GAP
 
-        local f = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-        f:SetSize(PREVIEW_SIZE, PREVIEW_SIZE)
-        f:SetPoint("TOPLEFT", xOff, yOff)
-        f:SetBackdrop(MedaUI:CreateBackdrop(true))
-        f:SetBackdropColor(0, 0, 0, 0.6)
+            pvContainer = CreateFrame("Frame", nil, anchor)
+            pvContainer:SetFrameStrata("HIGH")
+            pvContainer:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 6, 0)
+            pvContainer:SetSize(pvW, pvH)
 
-        f.icon = f:CreateTexture(nil, "ARTWORK")
-        f.icon:SetPoint("TOPLEFT", 3, -3)
-        f.icon:SetPoint("BOTTOMRIGHT", -3, 3)
-        f.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-        f.icon:SetTexture(spellTex)
+            for i, info in ipairs(previewStates) do
+                local col = (i - 1) % PREVIEW_COLS
+                local row = math.floor((i - 1) / PREVIEW_COLS)
+                local xOff = PV_PAD + col * (PREVIEW_SIZE + PREVIEW_GAP)
+                local pvYOff = -(PV_PAD + row * (PREVIEW_SIZE + 20 + PREVIEW_GAP))
 
-        f.colorOverlay = f:CreateTexture(nil, "ARTWORK", nil, 1)
-        f.colorOverlay:SetPoint("TOPLEFT", f.icon, "TOPLEFT")
-        f.colorOverlay:SetPoint("BOTTOMRIGHT", f.icon, "BOTTOMRIGHT")
-        f.colorOverlay:SetColorTexture(0, 0, 0, 0)
+                local f = CreateFrame("Frame", nil, pvContainer, "BackdropTemplate")
+                f:SetSize(PREVIEW_SIZE, PREVIEW_SIZE)
+                f:SetPoint("TOPLEFT", xOff, pvYOff)
+                f:SetBackdrop(MedaUI:CreateBackdrop(true))
+                f:SetBackdropColor(0, 0, 0, 0.6)
 
-        f.cdText = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        f.cdText:SetPoint("CENTER", 0, 0)
-        f.cdText:SetTextColor(1, 1, 1, 1)
-        f.cdText:SetShadowOffset(1, -1)
+                f.icon = f:CreateTexture(nil, "ARTWORK")
+                f.icon:SetPoint("TOPLEFT", 3, -3)
+                f.icon:SetPoint("BOTTOMRIGHT", -3, 3)
+                f.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+                f.icon:SetTexture(spellTex)
 
-        local label = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        label:SetPoint("TOP", f, "BOTTOM", 0, -5)
-        label:SetTextColor(unpack(MedaUI.Theme.textDim))
-        label:SetText(info.label)
+                f.colorOverlay = f:CreateTexture(nil, "ARTWORK", nil, 1)
+                f.colorOverlay:SetPoint("TOPLEFT", f.icon, "TOPLEFT")
+                f.colorOverlay:SetPoint("BOTTOMRIGHT", f.icon, "BOTTOMRIGHT")
+                f.colorOverlay:SetColorTexture(0, 0, 0, 0)
 
-        previewIcons[i] = { frame = f, info = info }
+                f.cdText = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                f.cdText:SetPoint("CENTER", 0, 0)
+                f.cdText:SetTextColor(1, 1, 1, 1)
+                f.cdText:SetShadowOffset(1, -1)
+
+                local label = pvContainer:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                label:SetPoint("TOP", f, "BOTTOM", 0, -4)
+                label:SetTextColor(unpack(MedaUI.Theme.textDim))
+                label:SetText(info.label)
+
+                previewIcons[i] = { frame = f, info = info }
+            end
+
+            pvContainer:Show()
+        end
     end
 
     UpdatePreviews = function()
@@ -1269,7 +1390,6 @@ local function BuildConfig(parent, db)
     end
 
     UpdatePreviews()
-    yOff = yOff - PREVIEW_SIZE - 30
 
     -- Detected spell info
     if activeSpellName and activeSpellID then
@@ -1293,6 +1413,19 @@ local function BuildConfig(parent, db)
     yOff = yOff - 45
 
     MedaAuras:SetContentHeight(math.abs(yOff))
+
+    -- Sentinel: when the config page is cleared, hide the floating preview
+    local sentinel = CreateFrame("Frame", nil, parent)
+    sentinel:SetSize(1, 1)
+    sentinel:SetPoint("TOPLEFT")
+    sentinel:Show()
+    sentinel:SetScript("OnHide", function()
+        if pvContainer then
+            pvContainer:Hide()
+            pvContainer:SetParent(nil)
+            pvContainer = nil
+        end
+    end)
 end
 
 -- ============================================================================

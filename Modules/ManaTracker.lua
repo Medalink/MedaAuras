@@ -41,7 +41,7 @@ local display
 local eventFrame
 local currentDisplayMode
 
-local previewContainer
+local previewContainer   -- floating side panel
 local previewDisplay
 local previewDisplayMode
 
@@ -529,11 +529,21 @@ local function DestroyPreview()
         previewDisplay:SetParent(nil)
         previewDisplay = nil
     end
+    if previewContainer then
+        previewContainer:Hide()
+        previewContainer:SetParent(nil)
+        previewContainer = nil
+    end
     previewDisplayMode = nil
 end
 
 local function CreatePreviewDisplay(db)
-    DestroyPreview()
+    if previewDisplay then
+        previewDisplay:Hide()
+        previewDisplay:SetParent(nil)
+        previewDisplay = nil
+    end
+    previewDisplayMode = nil
     if not previewContainer then return end
 
     local mode = db.displayMode or "bar"
@@ -747,6 +757,46 @@ local function OnDisable(db)
 end
 
 -- ============================================================================
+-- Module Defaults
+-- ============================================================================
+
+local MODULE_DEFAULTS = {
+    enabled = false,
+    locked = false,
+    position = { point = "CENTER", x = 0, y = -200 },
+
+    displayMode = "bar",
+
+    -- Bar settings
+    width = DEFAULT_WIDTH,
+    height = DEFAULT_HEIGHT,
+    barTexture = "solid",
+    barOrientation = "HORIZONTAL",
+
+    -- Orb settings
+    orbRadius = DEFAULT_ORB_SIZE / 2,
+    orbTexture = "solid",
+    orbFillTexture = "solid",
+
+    -- Shared visual settings
+    backgroundColor = { 0.1, 0.1, 0.2, 1.0 },
+    manaColor = { 0.0, 0.56, 1.0, 1.0 },
+    borderColor = { 0.2, 0.4, 0.7, 1.0 },
+    backgroundOpacity = 0.8,
+    showBorder = true,
+    showOuterBorder = true,
+    outerBorderSize = 2,
+    outerBorderColor = { 0.0, 0.0, 0.0, 1.0 },
+    showText = true,
+    showPercentage = true,
+    textSize = 14,
+    textAnchor = "CENTER",
+    textOffsetX = 0,
+    textOffsetY = 0,
+    font = nil,
+}
+
+-- ============================================================================
 -- Settings Panel (BuildConfig)
 -- ============================================================================
 
@@ -795,34 +845,28 @@ local function BuildConfig(parent, db)
     end
     yOff = yOff - 35
 
-    -- === Live Preview ===
-    local _, _, pvHeader = MedaUI:CreateSectionHeader(parent, "Preview")
-    pvHeader:SetPoint("TOPLEFT", 0, yOff)
-    yOff = yOff - 30
+    -- === Floating Side Preview ===
+    DestroyPreview()
+    do
+        local PREVIEW_W = 280
+        local PREVIEW_H = 180
+        local anchor = MedaAurasSettingsPanel or _G["MedaAurasSettingsPanel"]
+        if anchor then
+            local pvBg = CreateFrame("Frame", nil, anchor)
+            pvBg:SetFrameStrata("HIGH")
+            pvBg:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 6, 0)
+            pvBg:SetSize(PREVIEW_W, PREVIEW_H)
 
-    local PREVIEW_AREA_W = 280
-    local PREVIEW_AREA_H = 140
+            local pvInner = CreateFrame("Frame", nil, pvBg)
+            pvInner:SetPoint("CENTER", 0, 0)
+            pvBg.inner = pvInner
 
-    local pvBg = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-    pvBg:SetPoint("TOPLEFT", 0, yOff)
-    pvBg:SetSize(PREVIEW_AREA_W, PREVIEW_AREA_H)
-    pvBg:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    pvBg:SetBackdropColor(0.04, 0.04, 0.06, 0.9)
-    pvBg:SetBackdropBorderColor(0.25, 0.25, 0.35, 0.6)
-
-    local pvInner = CreateFrame("Frame", nil, pvBg)
-    pvInner:SetPoint("CENTER")
-    pvBg.inner = pvInner
-
-    previewContainer = pvBg
-    CreatePreviewDisplay(db)
-    UpdatePreview(db)
-
-    yOff = yOff - PREVIEW_AREA_H - 10
+            previewContainer = pvBg
+            pvBg:Show()
+            CreatePreviewDisplay(db)
+            UpdatePreview(db)
+        end
+    end
 
     -- === Border settings (near preview for real-time feedback) ===
     local _, _, borderHeader = MedaUI:CreateSectionHeader(parent, "Border")
@@ -1189,47 +1233,16 @@ local function BuildConfig(parent, db)
     yOff = yOff - 45
 
     MedaAuras:SetContentHeight(math.abs(yOff))
+
+    -- Sentinel: when the config page is cleared, hide the floating preview
+    local sentinel = CreateFrame("Frame", nil, parent)
+    sentinel:SetSize(1, 1)
+    sentinel:SetPoint("TOPLEFT")
+    sentinel:Show()
+    sentinel:SetScript("OnHide", function()
+        DestroyPreview()
+    end)
 end
-
--- ============================================================================
--- Module Defaults
--- ============================================================================
-
-local MODULE_DEFAULTS = {
-    enabled = false,
-    locked = false,
-    position = { point = "CENTER", x = 0, y = -200 },
-
-    displayMode = "bar",
-
-    -- Bar settings
-    width = DEFAULT_WIDTH,
-    height = DEFAULT_HEIGHT,
-    barTexture = "solid",
-    barOrientation = "HORIZONTAL",
-
-    -- Orb settings
-    orbRadius = DEFAULT_ORB_SIZE / 2,
-    orbTexture = "solid",
-    orbFillTexture = "solid",
-
-    -- Shared visual settings
-    backgroundColor = { 0.1, 0.1, 0.2, 1.0 },
-    manaColor = { 0.0, 0.56, 1.0, 1.0 },
-    borderColor = { 0.2, 0.4, 0.7, 1.0 },
-    backgroundOpacity = 0.8,
-    showBorder = true,
-    showOuterBorder = true,
-    outerBorderSize = 2,
-    outerBorderColor = { 0.0, 0.0, 0.0, 1.0 },
-    showText = true,
-    showPercentage = true,
-    textSize = 14,
-    textAnchor = "CENTER",
-    textOffsetX = 0,
-    textOffsetY = 0,
-    font = nil,
-}
 
 -- ============================================================================
 -- Register Module
