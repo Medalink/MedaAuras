@@ -21,3 +21,5 @@ Services\UnitPriority.lua
 
 # Modules
 Modules\FocusInterruptHelper.lua
+Modules\GroupManaTracker.lua
+Modules\ManaTracker.lua
