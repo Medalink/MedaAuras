@@ -28,15 +28,8 @@
 ### Mana Tracker
 
 - 🔵 **Always-visible mana display** — shows your current mana regardless of combat state or druid form
-- 🛡️ **Secret value safe** — handles WoW 12.0+ secret numbers without crashing; StatusBar fill, color curves, and text rendering all protected via `pcall` fallbacks
-- 📊 **Two display styles:**
-  - **Bar** — configurable width, height, orientation (horizontal/vertical), and fill texture
-  - **Orb** — circular sphere that fills and drains via MaskTexture clipping; adjustable radius, orb shape (solid, glow, glass), and fill texture
-- 🎨 **Full customization** — mana color, background color, border color, opacity, text size, text anchor, show/hide text, percentage or raw value display
-- 🖼️ **Texture browser** — browse built-in, custom, and LibSharedMedia textures with inline previews; bar textures render full-width fills, orb shapes show a side preview panel
-- 👁️ **Live preview** — real-time preview panel in settings shows exactly how the display looks as you tweak options
-- 🔀 **Live mode switching** — swap between bar and orb at any time; settings panel shows only the controls relevant to the active mode
-- 📝 **Diagnostic logging** — throttled snapshots to MedaDebug showing secret value status, curve results, and display mode
+- 🛡️ **Secret value safe** — handles WoW 12.0+ secret numbers without crashing
+- 📊 **Bar or Orb** — two display styles, fully customizable colors, textures, and sizing
 
 ---
 
