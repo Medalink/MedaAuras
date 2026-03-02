@@ -317,11 +317,15 @@ local function HookPoolTooltip()
     if poolTooltipHooked then return end
     poolTooltipHooked = true
     GameTooltip:HookScript("OnShow", function(self)
-        local line = _G[self:GetName() .. "TextLeft1"]
-        if not line then return end
-        local text = line:GetText()
-        if LooksLikePool(text) then
-            lastSeenPoolName = text
+        local ok, name = pcall(function()
+            local line = _G[self:GetName() .. "TextLeft1"]
+            if not line then return nil end
+            local text = line:GetText()
+            if LooksLikePool(text) then return text end
+            return nil
+        end)
+        if ok and name then
+            lastSeenPoolName = name
         end
     end)
 end
