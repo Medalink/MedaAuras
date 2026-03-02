@@ -7,7 +7,10 @@ local MedaUI = LibStub("MedaUI-1.0")
 -- ============================================================================
 
 local MODULE_NAME = "GoneFishin"
-local FISHING_SPELL_NAME = "Fishing"
+local FISHING_SPELL_NAMES = {
+    ["Fishing"] = true,
+    ["Void Hole Fishing"] = true,
+}
 local MAX_RECENT = 6
 local ICON_ZOOM = 0.22
 local ICON_TEXCOORD = { 0.11, 0.89, 0.11, 0.89 }
@@ -2188,7 +2191,7 @@ local function OnEvent(self, event, ...)
         local unit, _, spellID = ...
         if unit ~= "player" then return end
         local spellName = C_Spell.GetSpellName(spellID)
-        if spellName == FISHING_SPELL_NAME then
+        if FISHING_SPELL_NAMES[spellName] then
             CancelSessionTimeout()
             if not sessionActive then
                 db.sessionCount = db.sessionCount + 1
@@ -2511,6 +2514,11 @@ local function BuildConfig(parent, moduleDB)
 
     local _, _, hdr5 = MedaUI:CreateSectionHeader(parent, "Data Management")
     hdr5:SetPoint("TOPLEFT", 0, yOff)
+    yOff = yOff - 45
+
+    local exportBtn = MedaUI:CreateButton(parent, "Export Data")
+    exportBtn:SetPoint("TOPLEFT", 0, yOff)
+    exportBtn:SetScript("OnClick", function() ShowExportWindow() end)
     yOff = yOff - 45
 
     local resetDataBtn = MedaUI:CreateButton(parent, "Reset All Fishing Data")
