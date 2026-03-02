@@ -3,10 +3,6 @@ local _, ns = ...
 ns.GoneFishinData = ns.GoneFishinData or {}
 ns.GoneFishinData.dataVersion = 2
 
--- ============================================================================
--- Category constants (used in midnightItems and runtime classification)
--- ============================================================================
-
 ns.GoneFishinData.CATEGORIES = {
     FISH     = "fish",
     RECIPE   = "recipe",
@@ -24,39 +20,34 @@ ns.GoneFishinData.CATEGORIES = {
 
 local CAT = ns.GoneFishinData.CATEGORIES
 
--- ============================================================================
--- Midnight Items  (Pokedex checklist)
---
--- Keys are item IDs.  Every entry has at minimum:
---   name, category
--- Fish add: icon, quality, rarity, openWaterZones, pools, notes?
--- Recipes add: craftedName, targetFishName, reagents, notes?
--- Treasures add: source, notes?
--- Line fragments add: quality, chain, tier, notes?
--- Rods add: quality, notes?
--- ============================================================================
-
 ns.GoneFishinData.midnightItems = {
-
-    -- =======================================================================
-    -- FISH  (20)  –  data from wow-professions.com + WoWDB icons/quality
-    -- =======================================================================
-
-    -- Common ----------------------------------------------------------------
-
+    [236949] = {
+        name = "Mote of Light",
+        icon = "inv_12_profession_thematicfoozles_moteofpurelight_gold",
+        quality = 3, category = CAT.REAGENT, rarity = "",
+        openWaterZones = { "Zul'Aman" },
+        pools = { "Obscured School" },
+    },
+    [236951] = {
+        name = "Mote of Wild Magic",
+        icon = "inv_12_profession_thematicfoozles_moteofwildmadic_lightgreen",
+        quality = 3, category = CAT.REAGENT, rarity = "",
+        openWaterZones = { "Zul'Aman" },
+        pools = { "Obscured School" },
+    },
     [238365] = {
         name = "Sin'dorei Swarmer",
         icon = "inv_misc_fish_41",
         quality = 1, category = CAT.FISH, rarity = "common",
         openWaterZones = { "Eversong", "Zul'Aman" },
-        pools = { "Bubbling Bloom", "Sunwell Swarm", "Surface Ripple" },
+        pools = { "Bubbling Bloom", "Sunwell Swarm", "Surface Ripple", "Obscured School", "Hunter Surge" },
     },
     [238366] = {
         name = "Lynxfish",
         icon = "inv_12_profession_fishing_lynxfish_yellow",
         quality = 1, category = CAT.FISH, rarity = "common",
         openWaterZones = { "Eversong", "Zul'Aman" },
-        pools = { "Bubbling Bloom", "Sunwell Swarm", "Surface Ripple" },
+        pools = { "Bubbling Bloom", "Sunwell Swarm", "Surface Ripple", "Obscured School" },
     },
     [238367] = {
         name = "Root Crab",
@@ -65,23 +56,13 @@ ns.GoneFishinData.midnightItems = {
         openWaterZones = { "Zul'Aman", "Harandar" },
         pools = { "Obscured School", "Surface Ripple" },
     },
-    [238371] = {
-        name = "Arcane Wyrmfish",
-        icon = "inv_crystalinefish_blue",
-        quality = 1, category = CAT.FISH, rarity = "common",
-        openWaterZones = { "Eversong", "Harandar" },
-        pools = { "Bubbling Bloom", "Sunwell Swarm", "Blossoming Torrent" },
+    [238368] = {
+        name = "Twisted Tetra",
+        icon = "inv_misc_fish_64",
+        quality = 3, category = CAT.FISH, rarity = "rare",
+        openWaterZones = { "Eversong", "Zul'Aman", "Harandar" },
+        pools = { "Obscured School", "Surface Ripple" },
     },
-    [238382] = {
-        name = "Gore Guppy",
-        icon = "inv_12_profession_fishing_goreguppies_red",
-        quality = 2, category = CAT.FISH, rarity = "common",
-        openWaterZones = { "Zul'Aman" },
-        pools = { "Hunter Surge", "Surface Ripple" },
-    },
-
-    -- Uncommon ---------------------------------------------------------------
-
     [238369] = {
         name = "Bloomtail Minnow",
         icon = "inv_10_fishing_fishice_color4",
@@ -93,15 +74,29 @@ ns.GoneFishinData.midnightItems = {
         name = "Shimmer Spinefish",
         icon = "inv_misc_fish_77",
         quality = 2, category = CAT.FISH, rarity = "uncommon",
-        openWaterZones = { "Eversong", "Harandar" },
-        pools = { "Bloom Swarm", "Bubbling Bloom", "Sunwell Swarm", "Blossoming Torrent" },
+        openWaterZones = { "Eversong", "Zul'Aman", "Harandar" },
+        pools = { "Bloom Swarm", "Bubbling Bloom", "Sunwell Swarm", "Blossoming Torrent", "Obscured School" },
+    },
+    [238371] = {
+        name = "Arcane Wyrmfish",
+        icon = "inv_crystalinefish_blue",
+        quality = 1, category = CAT.FISH, rarity = "common",
+        openWaterZones = { "Eversong", "Zul'Aman", "Harandar" },
+        pools = { "Bubbling Bloom", "Sunwell Swarm", "Blossoming Torrent", "Obscured School" },
     },
     [238372] = {
         name = "Restored Songfish",
         icon = "inv_misc_fish_36",
         quality = 2, category = CAT.FISH, rarity = "uncommon",
-        openWaterZones = { "Eversong", "Harandar" },
-        pools = { "Bloom Swarm", "Bubbling Bloom", "Sunwell Swarm", "Blossoming Torrent" },
+        openWaterZones = { "Eversong", "Zul'Aman", "Harandar" },
+        pools = { "Bloom Swarm", "Bubbling Bloom", "Sunwell Swarm", "Blossoming Torrent", "Obscured School" },
+    },
+    [238373] = {
+        name = "Ominous Octopus",
+        icon = "inv_babyoctopus_black",
+        quality = 3, category = CAT.FISH, rarity = "rare",
+        openWaterZones = { "Voidstorm" },
+        pools = { "Viscous Void", "Oceanic Vortex" },
     },
     [238374] = {
         name = "Tender Lumifin",
@@ -117,12 +112,19 @@ ns.GoneFishinData.midnightItems = {
         openWaterZones = { "Zul'Aman", "Harandar" },
         pools = { "Lashing Waves", "Obscured School", "Surface Ripple" },
     },
+    [238376] = {
+        name = "Lucky Loa",
+        icon = "inv_fishing_elysianthade",
+        quality = 3, category = CAT.FISH, rarity = "rare",
+        openWaterZones = { "Zul'Aman" },
+        pools = { "Obscured School", "Surface Ripple" },
+    },
     [238377] = {
         name = "Blood Hunter",
         icon = "inv_10_fishing_fishlava_color4",
         quality = 2, category = CAT.FISH, rarity = "uncommon",
         openWaterZones = { "Zul'Aman", "Voidstorm" },
-        pools = { "Surface Ripple", "Hunter Surge", "Viscous Void", "Oceanic Vortex" },
+        pools = { "Surface Ripple", "Hunter Surge", "Viscous Void", "Oceanic Vortex", "Obscured School" },
         notes = "Spawns a hostile Blood Hunter Spirit when caught. Use Amani Angler's Ward to prevent.",
     },
     [238378] = {
@@ -131,37 +133,6 @@ ns.GoneFishinData.midnightItems = {
         quality = 2, category = CAT.FISH, rarity = "uncommon",
         openWaterZones = { "Voidstorm" },
         pools = { "Viscous Void", "Oceanic Vortex" },
-    },
-    [238384] = {
-        name = "Sunwell Fish",
-        icon = "inv_misc_fish_53",
-        quality = 2, category = CAT.FISH, rarity = "uncommon",
-        openWaterZones = { "Eversong" },
-        pools = { "Sunwell Swarm", "Blossoming Torrent" },
-    },
-
-    -- Rare -------------------------------------------------------------------
-
-    [238368] = {
-        name = "Twisted Tetra",
-        icon = "inv_misc_fish_64",
-        quality = 3, category = CAT.FISH, rarity = "rare",
-        openWaterZones = { "Eversong", "Zul'Aman", "Harandar" },
-        pools = {},
-    },
-    [238373] = {
-        name = "Ominous Octopus",
-        icon = "inv_babyoctopus_black",
-        quality = 3, category = CAT.FISH, rarity = "rare",
-        openWaterZones = { "Voidstorm" },
-        pools = { "Viscous Void", "Oceanic Vortex" },
-    },
-    [238376] = {
-        name = "Lucky Loa",
-        icon = "inv_fishing_elysianthade",
-        quality = 3, category = CAT.FISH, rarity = "rare",
-        openWaterZones = { "Zul'Aman" },
-        pools = { "Obscured School", "Surface Ripple" },
     },
     [238379] = {
         name = "Warping Wise",
@@ -185,6 +156,13 @@ ns.GoneFishinData.midnightItems = {
         openWaterZones = { "Voidstorm" },
         pools = { "Viscous Void", "Oceanic Vortex" },
     },
+    [238382] = {
+        name = "Gore Guppy",
+        icon = "inv_12_profession_fishing_goreguppies_red",
+        quality = 2, category = CAT.FISH, rarity = "uncommon",
+        openWaterZones = { "Zul'Aman" },
+        pools = { "Hunter Surge", "Surface Ripple", "Obscured School" },
+    },
     [238383] = {
         name = "Eversong Trout",
         icon = "inv_fishing_lanesnapper",
@@ -192,16 +170,80 @@ ns.GoneFishinData.midnightItems = {
         openWaterZones = { "Eversong" },
         pools = { "Sunwell Swarm", "Bubbling Bloom" },
     },
-
-    -- =======================================================================
-    -- LURE / WARD RECIPES  (5)  –  drop from treasure pools
-    -- Key = recipe item ID (the item that drops while fishing)
-    -- =======================================================================
-
+    [238384] = {
+        name = "Sunwell Fish",
+        icon = "inv_misc_fish_53",
+        quality = 2, category = CAT.FISH, rarity = "uncommon",
+        openWaterZones = { "Eversong", "Zul'Aman" },
+        pools = { "Sunwell Swarm", "Blossoming Torrent", "Hunter Surge", "Obscured School" },
+    },
+    [238477] = {
+        name = "Rotten Meat",
+        icon = "inv_misc_food_meat_rawtigersteak_color04",
+        quality = 0, category = CAT.JUNK, rarity = "",
+        openWaterZones = { "Zul'Aman" },
+        pools = { "Obscured School" },
+    },
+    [238479] = {
+        name = "Torn Caster's Net",
+        icon = "inv_fishing_netlinen02",
+        quality = 0, category = CAT.JUNK, rarity = "",
+        openWaterZones = { "Zul'Aman" },
+        pools = { "Obscured School" },
+    },
+    [238482] = {
+        name = "A Whole Lot of Nothing",
+        icon = "inv_cosmicvoid_groundstate",
+        quality = 0, category = CAT.JUNK, rarity = "",
+        openWaterZones = {  },
+        pools = {  },
+    },
+    [238492] = {
+        name = "Silent Rock",
+        icon = "inv_stone_16",
+        quality = 0, category = CAT.JUNK, rarity = "",
+        openWaterZones = { "Zul'Aman" },
+        pools = { "Obscured School" },
+    },
+    [242639] = {
+        name = "Practically Pork",
+        icon = "inv_misc_food_141_fish",
+        quality = 1, category = CAT.REAGENT, rarity = "",
+        openWaterZones = { "Zul'Aman" },
+        pools = {  },
+    },
+    [260636] = {
+        name = "Algae Covered Stone",
+        icon = "inv_misc_herb_evergreenmoss",
+        quality = 0, category = CAT.JUNK, rarity = "",
+        openWaterZones = {  },
+        pools = {  },
+    },
+    [260654] = {
+        name = "Abrasive Sand",
+        icon = "inv_misc_dust_06",
+        quality = 0, category = CAT.JUNK, rarity = "",
+        openWaterZones = { "Zul'Aman" },
+        pools = {  },
+    },
+    [260685] = {
+        name = "Large Brittle Bone",
+        icon = "inv_misc_wailingbone",
+        quality = 0, category = CAT.JUNK, rarity = "",
+        openWaterZones = { "Zul'Aman" },
+        pools = {  },
+    },
+    [263938] = {
+        name = "Idol of Peril",
+        icon = "inv_pet_babyshark",
+        quality = 1, category = CAT.OTHER, rarity = "",
+        openWaterZones = { "Zul'Aman" },
+        pools = { "Obscured School" },
+    },
     [244817] = {
         name = "Recipe: Blood Hunter Lure",
         category = CAT.RECIPE,
-        craftedName   = "Blood Hunter Lure",
+        craftedName = "Blood Hunter Lure",
         targetFishName = "Blood Hunter",
         reagents = { { 238382, 5 } },
         source = "Careless Cargo, Lost Treasures",
@@ -209,7 +251,7 @@ ns.GoneFishinData.midnightItems = {
     [244816] = {
         name = "Recipe: Lucky Loa Lure",
         category = CAT.RECIPE,
-        craftedName   = "Lucky Loa Lure",
+        craftedName = "Lucky Loa Lure",
         targetFishName = "Lucky Loa",
         reagents = { { 238365, 5 } },
         source = "Careless Cargo, Lost Treasures",
@@ -217,7 +259,7 @@ ns.GoneFishinData.midnightItems = {
     [244815] = {
         name = "Recipe: Ominous Octopus Lure",
         category = CAT.RECIPE,
-        craftedName    = "Ominous Octopus Lure",
+        craftedName = "Ominous Octopus Lure",
         targetFishName = "Ominous Octopus",
         reagents = { { 238380, 5 } },
         source = "Careless Cargo, Lost Treasures",
@@ -225,7 +267,7 @@ ns.GoneFishinData.midnightItems = {
     [258511] = {
         name = "Recipe: Sunwell Fish Lure",
         category = CAT.RECIPE,
-        craftedName    = "Sunwell Fish Lure",
+        craftedName = "Sunwell Fish Lure",
         targetFishName = "Sunwell Fish",
         reagents = { { 238365, 5 } },
         source = "Careless Cargo, Lost Treasures",
@@ -233,71 +275,43 @@ ns.GoneFishinData.midnightItems = {
     [244791] = {
         name = "Recipe: Amani Angler's Ward",
         category = CAT.RECIPE,
-        craftedName    = "Amani Angler's Ward",
+        craftedName = "Amani Angler's Ward",
         targetFishName = nil,
         reagents = { { 238377, 2 } },
-        notes  = "Prevents Blood Hunter Spirits from spawning for 30 min.",
         source = "Careless Cargo, Lost Treasures",
+        notes = "Prevents Blood Hunter Spirits from spawning for 30 min.",
     },
-
-    -- =======================================================================
-    -- TREASURE / SPECIAL ITEMS  (3)
-    -- =======================================================================
-
     [243343] = {
         name = "Angler's Anomaly",
         category = CAT.TREASURE,
-        notes  = "Creates an Oceanic Vortex pool at your location. Lasts longer than natural pools.",
+        notes = "Creates an Oceanic Vortex pool at your location.",
         source = "Treasure pools",
     },
     [262649] = {
         name = "An Angler's Deep Dive",
         category = CAT.TREASURE,
-        notes  = "Increases Midnight Fishing skill by 10.",
+        notes = "Increases Midnight Fishing skill by 10.",
         source = "Careless Cargo, Lost Treasures, Patient Treasures",
     },
     [243302] = {
         name = "Aquarius Bloom",
         category = CAT.TREASURE,
-        notes  = "Turns any fishing pool into a Bloom Swarm.",
+        notes = "Turns any fishing pool into a Bloom Swarm.",
         source = "Treasure pools",
     },
-
-    -- =======================================================================
-    -- FISHING LINE FRAGMENTS  (9)  –  fished up while fishing anywhere
-    -- =======================================================================
-
-    -- Bloomline chain: 100 Shredded -> 1 Stranded, 20 Stranded -> 1 Weak, 5 Weak -> 1 Angler's
-    [262792] = { name = "Shredded Bloomline",   category = CAT.LINE, quality = 1, chain = "bloom",   tier = 1 },
-    [262793] = { name = "Stranded Bloomline",   category = CAT.LINE, quality = 1, chain = "bloom",   tier = 2 },
-    [262794] = { name = "Weak Bloomline",       category = CAT.LINE, quality = 2, chain = "bloom",   tier = 3 },
-    [262795] = { name = "Angler's Bloomline",   category = CAT.LINE, quality = 3, chain = "bloom",   tier = 4 },
-
-    -- Glimmerline chain: 100 Shredded -> 1 Stranded, 20 Stranded -> 1 Weak, 20 Weak -> 1 Angler's
+    [262792] = { name = "Shredded Bloomline", category = CAT.LINE, quality = 1, chain = "bloom", tier = 1 },
+    [262793] = { name = "Stranded Bloomline", category = CAT.LINE, quality = 1, chain = "bloom", tier = 2 },
+    [262794] = { name = "Weak Bloomline", category = CAT.LINE, quality = 2, chain = "bloom", tier = 3 },
+    [262795] = { name = "Angler's Bloomline", category = CAT.LINE, quality = 3, chain = "bloom", tier = 4 },
     [262797] = { name = "Shredded Glimmerline", category = CAT.LINE, quality = 1, chain = "glimmer", tier = 1 },
     [262798] = { name = "Stranded Glimmerline", category = CAT.LINE, quality = 1, chain = "glimmer", tier = 2 },
-    [262799] = { name = "Weak Glimmerline",     category = CAT.LINE, quality = 2, chain = "glimmer", tier = 3 },
+    [262799] = { name = "Weak Glimmerline", category = CAT.LINE, quality = 2, chain = "glimmer", tier = 3 },
     [262800] = { name = "Angler's Glimmerline", category = CAT.LINE, quality = 3, chain = "glimmer", tier = 4 },
-
-    -- Final combine: 1 Angler's Bloomline + 1 Angler's Glimmerline
-    [262796] = {
-        name = "Midnight Angler's Grand Line",
-        category = CAT.LINE, quality = 4, chain = "final", tier = 5,
-        notes = "Doubles treasure drops. Combine Angler's Bloomline + Angler's Glimmerline.",
-    },
-
-    -- =======================================================================
-    -- FISHING RODS  (3)  –  crafted by Engineers, shown for reference
-    -- =======================================================================
-
+    [262796] = { name = "Midnight Angler's Grand Line", category = CAT.LINE, quality = 4, chain = "final", tier = 5, notes = "Doubles treasure drops. Combine Angler's Bloomline + Angler's Glimmerline." },
     [244711] = { name = "Farstrider Hobbyist Rod", category = CAT.ROD, quality = 2, notes = "Green quality, tradeable on AH." },
-    [244712] = { name = "Sin'dorei Angler's Rod",  category = CAT.ROD, quality = 3, notes = "Rare, BoP. Place a Crafting Order." },
-    [259179] = { name = "Sin'dorei Reeler's Rod",  category = CAT.ROD, quality = 4, notes = "Epic, BoP. Requires Fused Vitality." },
+    [244712] = { name = "Sin'dorei Angler's Rod", category = CAT.ROD, quality = 3, notes = "Rare, BoP. Place a Crafting Order." },
+    [259179] = { name = "Sin'dorei Reeler's Rod", category = CAT.ROD, quality = 4, notes = "Epic, BoP. Requires Fused Vitality." },
 }
-
--- ============================================================================
--- Pools  –  enriched with fish contents and zone locations
--- ============================================================================
 
 ns.GoneFishinData.pools = {
     ["Bubbling Bloom"] = {
@@ -310,15 +324,15 @@ ns.GoneFishinData.pools = {
     },
     ["Surface Ripple"] = {
         zones = { "Zul'Aman" },
-        fish  = { 238365, 238366, 238367, 238375, 238376, 238377, 238382 },
+        fish  = { 238365, 238366, 238367, 238368, 238375, 238376, 238377, 238382 },
     },
     ["Hunter Surge"] = {
         zones = { "Zul'Aman" },
-        fish  = { 238377, 238382 },
+        fish  = { 238365, 238377, 238382, 238384 },
     },
     ["Obscured School"] = {
         zones = { "Zul'Aman", "Harandar" },
-        fish  = { 238367, 238375, 238376 },
+        fish  = { 236949, 236951, 238365, 238366, 238367, 238368, 238370, 238371, 238372, 238375, 238376, 238377, 238382, 238384, 238477, 238479, 238492, 263938 },
     },
     ["Bloom Swarm"] = {
         zones = { "Eversong", "Harandar" },
@@ -332,14 +346,6 @@ ns.GoneFishinData.pools = {
         zones = { "Harandar" },
         fish  = { 238369, 238375 },
     },
-    ["Song Swarm"] = {
-        zones = { "Eversong" },
-        fish  = {},
-    },
-    ["Sunbath School"] = {
-        zones = { "Eversong" },
-        fish  = {},
-    },
     ["Viscous Void"] = {
         zones = { "Voidstorm" },
         fish  = { 238373, 238377, 238378, 238379, 238380, 238381 },
@@ -352,25 +358,29 @@ ns.GoneFishinData.pools = {
     },
     ["Careless Cargo"] = {
         zones = { "Any" },
-        fish  = {},
+        fish  = { 262792, 262793, 262794, 262795, 262797, 262798, 262799, 262800, 262796 },
         type  = "treasure",
         notes = "Lure recipes, fishing line components, Motes, and other treasures.",
     },
     ["Lost Treasures"] = {
         zones = { "Any" },
-        fish  = {},
+        fish  = { 262792, 262793, 262794, 262795, 262797, 262798, 262799, 262800, 262796 },
         type  = "treasure",
         notes = "Very rare. Similar loot to Careless Cargo.",
     },
+    ["Song Swarm"] = {
+        zones = { "Eversong" },
+        fish  = {  },
+    },
+    ["Sunbath School"] = {
+        zones = { "Eversong" },
+        fish  = {  },
+    },
     ["Salmon Pool"] = {
         zones = { "Eversong" },
-        fish  = {},
+        fish  = {  },
     },
 }
-
--- ============================================================================
--- Zones  –  skill thresholds and metadata
--- ============================================================================
 
 ns.GoneFishinData.zones = {
     ["Eversong"] = {
@@ -396,32 +406,6 @@ ns.GoneFishinData.zones = {
     },
 }
 
--- ============================================================================
--- Lure-to-fish quick-lookup  (built from midnightItems at load time)
--- Maps target fish name -> { lureName, recipeItemID, reagents }
--- ============================================================================
+-- Lure-to-fish lookup and zone alias map are built at load time in Lua
+-- See GoneFishinFish.lua for the runtime initialization code
 
-ns.GoneFishinData.lureLookup = {}
-for itemID, info in pairs(ns.GoneFishinData.midnightItems) do
-    if info.category == CAT.RECIPE and info.targetFishName then
-        ns.GoneFishinData.lureLookup[info.targetFishName] = {
-            lureName     = info.craftedName or info.name,
-            recipeItemID = itemID,
-            reagents     = info.reagents,
-        }
-    end
-end
-
--- ============================================================================
--- Zone alias reverse-lookup  (alias string -> canonical zone name)
--- ============================================================================
-
-ns.GoneFishinData.zoneAliasMap = {}
-for canonical, zoneInfo in pairs(ns.GoneFishinData.zones) do
-    ns.GoneFishinData.zoneAliasMap[canonical] = canonical
-    if zoneInfo.aliases then
-        for _, alias in ipairs(zoneInfo.aliases) do
-            ns.GoneFishinData.zoneAliasMap[alias] = canonical
-        end
-    end
-end

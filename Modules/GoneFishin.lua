@@ -15,6 +15,9 @@ local OUTLINE_MAP = { none = "", outline = "OUTLINE", thick = "THICKOUTLINE" }
 local QUALITY_COLORS = ITEM_QUALITY_COLORS or {}
 local DISTANCE_INTERVAL = 2
 local TIMER_INTERVAL = 1
+local CHECKLIST_MAX_VISIBLE = 6
+local CHECKLIST_ROW_HEIGHT = 20
+local RARITY_SORT = { common = 1, uncommon = 2, rare = 3 }
 
 -- ============================================================================
 -- State
@@ -39,6 +42,7 @@ local itemInfoCache = {}
 
 local eventFrame
 local hudFrame, hudFadeCtrl
+local leftPanel, rightPanel, bottomPanel
 local statsPanel, tabBar, minimapButton
 local scanTip
 
@@ -51,6 +55,13 @@ local tabFrames = {}
 local tabRendered = {}
 local collectionList, zonesList
 local collectionSearchBox
+
+local checklistScroll, checklistContent
+local checklistRows = {}
+local expandRows = {}
+local junkExpanded = false
+local missingExpanded = false
+local junkHeaderBtn, missingHeaderBtn
 
 -- Font cache
 local fontCache = {}
@@ -75,7 +86,7 @@ end
 -- Data Migration
 -- ============================================================================
 
-local DB_VERSION = 2
+local DB_VERSION = 3
 
 local MIGRATIONS = {
     [1] = function(mdb)
@@ -100,6 +111,12 @@ local MIGRATIONS = {
             entry.expansionID = entry.expansionID or nil
             entry.category    = entry.category or nil
         end
+    end,
+    [3] = function(mdb)
+        if mdb.auraShowRecent ~= nil and mdb.auraShowChecklist == nil then
+            mdb.auraShowChecklist = mdb.auraShowRecent
+        end
+        mdb.poolObjectNames = mdb.poolObjectNames or {}
     end,
 }
 
@@ -276,11 +293,25 @@ end
 local function CreateScanTooltip()
     if scanTip then return end
     scanTip = CreateFrame("GameTooltip", "GoneFishinScanTip", nil, "GameTooltipTemplate")
-    scanTip:SetOwner(WorldFrame, "ANCHOR_NONE")
+    scanTip:SetOwner(UIParent, "ANCHOR_NONE")
 end
 
 local lastSeenPoolName = nil
 local poolTooltipHooked = false
+
+local POOL_KEYWORDS = {
+    "School", "Pool", "Swarm", "Surge", "Ripple", "Bloom",
+    "Torrent", "Vortex", "Cargo", "Treasures", "Salmon",
+}
+
+local function LooksLikePool(text)
+    if not text then return false end
+    if poolNameSet[text] then return true end
+    for _, kw in ipairs(POOL_KEYWORDS) do
+        if text:find(kw) then return true end
+    end
+    return false
+end
 
 local function HookPoolTooltip()
     if poolTooltipHooked then return end
@@ -289,12 +320,50 @@ local function HookPoolTooltip()
         local line = _G[self:GetName() .. "TextLeft1"]
         if not line then return end
         local text = line:GetText()
-        if not text then return end
-        if poolNameSet[text]
-            or text:find("School") or text:find("Pool") or text:find("Swarm") then
+        if LooksLikePool(text) then
             lastSeenPoolName = text
         end
     end)
+end
+
+local function LearnPoolObjectName(objectID, realName)
+    if not db or not objectID or not realName then return end
+    if not db.poolObjectNames then db.poolObjectNames = {} end
+    if db.poolObjectNames[objectID] then return end
+    db.poolObjectNames[objectID] = realName
+    MedaAuras.Log(format("[GoneFishin] Learned pool: #%s = %s", objectID, realName))
+end
+
+local function RepairPoolNames()
+    if not db or not db.poolObjectNames then return end
+    local repaired = 0
+
+    for objectID, realName in pairs(db.poolObjectNames) do
+        local badKey = "Pool #" .. objectID
+
+        for _, ps in pairs(db.poolStats) do
+            if ps.pools and ps.pools[badKey] then
+                ps.pools[realName] = (ps.pools[realName] or 0) + ps.pools[badKey]
+                ps.pools[badKey] = nil
+                repaired = repaired + 1
+            end
+        end
+
+        if db.discoveredPools then
+            for itemID, pools in pairs(db.discoveredPools) do
+                if pools[badKey] then
+                    pools[realName] = (pools[realName] or 0) + pools[badKey]
+                    pools[badKey] = nil
+                    repaired = repaired + 1
+                end
+            end
+        end
+    end
+
+    if repaired > 0 then
+        MedaAuras.Log(format("[GoneFishin] Repaired %d pool name entries", repaired))
+    end
+    return repaired
 end
 
 local function DetectPool()
@@ -303,12 +372,30 @@ local function DetectPool()
         if sources[1] then
             local guid = sources[1]
             if type(guid) == "string" and guid:find("^GameObject") then
-                if lastSeenPoolName then
-                    local name = lastSeenPoolName
-                    lastSeenPoolName = nil
-                    return name
-                end
                 local _, _, _, _, _, objectID = strsplit("-", guid)
+
+                local resolvedName = lastSeenPoolName
+                if not resolvedName and GameTooltip:IsShown() then
+                    local line = _G[GameTooltip:GetName() .. "TextLeft1"]
+                    if line then
+                        local text = line:GetText()
+                        if text and text ~= "" and not text:find("^Player") then
+                            resolvedName = text
+                        end
+                    end
+                end
+
+                lastSeenPoolName = nil
+
+                if resolvedName and objectID then
+                    LearnPoolObjectName(objectID, resolvedName)
+                    return resolvedName
+                end
+
+                if objectID and db and db.poolObjectNames and db.poolObjectNames[objectID] then
+                    return db.poolObjectNames[objectID]
+                end
+
                 return format("Pool #%s", objectID or "0")
             end
         end
@@ -496,20 +583,93 @@ end
 -- ============================================================================
 
 local leftTexts = {}
-local rightIcons = {}
-local rightTexts = {}
 local centerTexts = {}
 local faveButton
 local endSessionBtn
 
 local LINE_SPACING = 18
 
+local function MakePanelDraggable(panel, dbKey)
+    panel:SetMovable(true)
+    panel:SetClampedToScreen(true)
+    panel:EnableMouse(not db.auraLockPanels)
+    panel:RegisterForDrag("LeftButton")
+    panel:SetScript("OnDragStart", function(self)
+        if not db.auraLockPanels then self:StartMoving() end
+    end)
+    panel:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        local cx, cy = self:GetCenter()
+        local hcx, hcy = hudFrame:GetCenter()
+        self:ClearAllPoints()
+        self:SetPoint("CENTER", hudFrame, "CENTER", cx - hcx, cy - hcy)
+        db[dbKey] = { x = cx - hcx, y = cy - hcy }
+    end)
+end
+
+local function SetPanelsLocked(locked)
+    if leftPanel then leftPanel:EnableMouse(not locked) end
+    if rightPanel then rightPanel:EnableMouse(not locked) end
+    if bottomPanel then bottomPanel:EnableMouse(not locked) end
+end
+
+local function RestorePanelPos(panel, dbKey, defX, defY)
+    panel:ClearAllPoints()
+    local pos = db[dbKey]
+    if pos then
+        panel:SetPoint("CENTER", hudFrame, "CENTER", pos.x, pos.y)
+    else
+        panel:SetPoint("CENTER", hudFrame, "CENTER", defX, defY)
+    end
+end
+
+local function CreateRow(parent)
+    local iconSz = db.auraIconSize or 20
+    local textFont = GetFontObj(db.auraFont or "default", db.auraTextSize or 13, db.auraTextOutline or "outline")
+
+    local row = CreateFrame("Frame", nil, parent)
+    row:SetSize(250, CHECKLIST_ROW_HEIGHT)
+
+    local icon = CreateFrame("Frame", nil, row)
+    icon:SetSize(iconSz, iconSz)
+    icon:SetPoint("LEFT", row, "LEFT", 0, 0)
+    local tex = icon:CreateTexture(nil, "ARTWORK")
+    tex:SetAllPoints()
+    tex:SetTexCoord(unpack(ICON_TEXCOORD))
+    icon.tex = tex
+    row.icon = icon
+
+    local fs = row:CreateFontString(nil, "OVERLAY")
+    fs:SetFontObject(textFont)
+    fs:SetJustifyH("LEFT")
+    fs:SetWordWrap(false)
+    fs:SetPoint("LEFT", icon, "RIGHT", 4, 0)
+    fs:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+    row.text = fs
+
+    return row
+end
+
+local function GetChecklistRow(index)
+    if checklistRows[index] then return checklistRows[index] end
+    local row = CreateRow(checklistContent)
+    checklistRows[index] = row
+    return row
+end
+
+local function GetExpandRow(index)
+    if expandRows[index] then return expandRows[index] end
+    local row = CreateRow(rightPanel)
+    expandRows[index] = row
+    return row
+end
+
 local function CreateHUD()
     if hudFrame then return end
 
     hudFrame = CreateFrame("Frame", "MedaAuras_GoneFishinHUD", UIParent)
     hudFrame:SetSize(1, 1)
-    hudFrame:SetPoint("CENTER", UIParent, "CENTER", 0, db.auraVerticalOffset or -20)
+    hudFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
     hudFrame:SetFrameStrata("BACKGROUND")
     hudFrame:SetFrameLevel(1)
     hudFrame:Hide()
@@ -518,40 +678,90 @@ local function CreateHUD()
     local headerFont = GetFontObj(db.auraFont or "default", (db.auraTextSize or 13) + 2, "thick")
     local smallFont = GetFontObj(db.auraFont or "default", math.max((db.auraTextSize or 13) - 3, 8), db.auraTextOutline or "outline")
 
+    -- ---- Left Panel (zone, session stats) ----
+    leftPanel = CreateFrame("Frame", nil, hudFrame)
+    leftPanel:SetSize(300, 8 * LINE_SPACING)
+    MakePanelDraggable(leftPanel, "leftPanelPos")
+
     for i = 1, 8 do
-        local fs = hudFrame:CreateFontString(nil, "OVERLAY")
+        local fs = leftPanel:CreateFontString(nil, "OVERLAY")
         local font = (i <= 2 and headerFont) or textFont
         fs:SetFontObject(font)
         fs:SetJustifyH("RIGHT")
         fs:SetWordWrap(false)
+        fs:SetPoint("TOPRIGHT", leftPanel, "TOPRIGHT", 0, -(i - 1) * LINE_SPACING)
         leftTexts[i] = fs
     end
 
-    for i = 1, MAX_RECENT do
-        local iconFrame = CreateFrame("Frame", nil, hudFrame)
-        iconFrame:SetSize(db.auraIconSize or 20, db.auraIconSize or 20)
-        local tex = iconFrame:CreateTexture(nil, "ARTWORK")
-        tex:SetAllPoints()
-        tex:SetTexCoord(unpack(ICON_TEXCOORD))
-        iconFrame.tex = tex
-        rightIcons[i] = iconFrame
+    -- ---- Right Panel (zone fish checklist) ----
+    rightPanel = CreateFrame("Frame", nil, hudFrame)
+    rightPanel:SetSize(280, CHECKLIST_MAX_VISIBLE * CHECKLIST_ROW_HEIGHT)
+    MakePanelDraggable(rightPanel, "rightPanelPos")
 
-        local fs = hudFrame:CreateFontString(nil, "OVERLAY")
-        fs:SetFontObject(textFont)
-        fs:SetJustifyH("LEFT")
-        fs:SetWordWrap(false)
-        rightTexts[i] = fs
+    local scrollHeight = CHECKLIST_MAX_VISIBLE * CHECKLIST_ROW_HEIGHT
+    checklistScroll = CreateFrame("ScrollFrame", nil, rightPanel, "UIPanelScrollFrameTemplate")
+    checklistScroll:SetPoint("TOPLEFT", rightPanel, "TOPLEFT", 0, 0)
+    checklistScroll:SetSize(280, scrollHeight)
+
+    local scrollBar = checklistScroll.ScrollBar or _G[checklistScroll:GetName() and (checklistScroll:GetName() .. "ScrollBar")]
+    if scrollBar then
+        scrollBar:SetAlpha(0)
+        scrollBar:EnableMouse(false)
     end
 
+    checklistContent = CreateFrame("Frame", nil, checklistScroll)
+    checklistContent:SetSize(280, 1)
+    checklistScroll:SetScrollChild(checklistContent)
+
+    checklistScroll:EnableMouseWheel(true)
+    checklistScroll:SetScript("OnMouseWheel", function(self, delta)
+        local cur = self:GetVerticalScroll()
+        local maxScroll = self:GetVerticalScrollRange()
+        local step = CHECKLIST_ROW_HEIGHT * 2
+        local newVal = math.max(0, math.min(cur - delta * step, maxScroll))
+        self:SetVerticalScroll(newVal)
+    end)
+
+    -- Collapsible section headers (outside scroll area, in rightPanel)
+    junkHeaderBtn = CreateFrame("Button", nil, rightPanel)
+    junkHeaderBtn:SetSize(280, CHECKLIST_ROW_HEIGHT)
+    junkHeaderBtn.text = junkHeaderBtn:CreateFontString(nil, "OVERLAY")
+    junkHeaderBtn.text:SetFontObject(smallFont)
+    junkHeaderBtn.text:SetAllPoints()
+    junkHeaderBtn.text:SetJustifyH("LEFT")
+    junkHeaderBtn:SetScript("OnClick", function()
+        junkExpanded = not junkExpanded
+        arcDirty = true
+    end)
+
+    missingHeaderBtn = CreateFrame("Button", nil, rightPanel)
+    missingHeaderBtn:SetSize(280, CHECKLIST_ROW_HEIGHT)
+    missingHeaderBtn.text = missingHeaderBtn:CreateFontString(nil, "OVERLAY")
+    missingHeaderBtn.text:SetFontObject(smallFont)
+    missingHeaderBtn.text:SetAllPoints()
+    missingHeaderBtn.text:SetJustifyH("LEFT")
+    missingHeaderBtn:SetScript("OnClick", function()
+        missingExpanded = not missingExpanded
+        arcDirty = true
+    end)
+
+    -- ---- Bottom Panel (fave, best spot, lure hint) ----
+    bottomPanel = CreateFrame("Frame", nil, hudFrame)
+    bottomPanel:SetSize(300, 70)
+    MakePanelDraggable(bottomPanel, "bottomPanelPos")
+
     for i = 1, 3 do
-        local fs = hudFrame:CreateFontString(nil, "OVERLAY")
+        local fs = bottomPanel:CreateFontString(nil, "OVERLAY")
         fs:SetFontObject(textFont)
         fs:SetJustifyH("CENTER")
         fs:SetWordWrap(false)
         centerTexts[i] = fs
     end
+    centerTexts[1]:SetPoint("TOP", bottomPanel, "TOP", 10, 0)
+    centerTexts[2]:SetPoint("TOP", bottomPanel, "TOP", 0, -16)
+    centerTexts[3]:SetPoint("TOP", bottomPanel, "TOP", 0, -32)
 
-    faveButton = CreateFrame("Button", nil, hudFrame)
+    faveButton = CreateFrame("Button", nil, bottomPanel)
     faveButton:SetSize(16, 16)
     faveButton.tex = faveButton:CreateTexture(nil, "ARTWORK")
     faveButton.tex:SetAllPoints()
@@ -570,8 +780,9 @@ local function CreateHUD()
         GameTooltip:Show()
     end)
     faveButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    faveButton:SetPoint("RIGHT", centerTexts[1], "LEFT", -2, 0)
 
-    endSessionBtn = CreateFrame("Button", nil, hudFrame)
+    endSessionBtn = CreateFrame("Button", nil, bottomPanel)
     endSessionBtn:SetSize(80, 16)
     endSessionBtn.text = endSessionBtn:CreateFontString(nil, "OVERLAY")
     endSessionBtn.text:SetFontObject(textFont)
@@ -595,6 +806,7 @@ local function CreateHUD()
         self.text:SetText("|cff888888End Session|r")
         GameTooltip:Hide()
     end)
+    endSessionBtn:SetPoint("TOP", bottomPanel, "TOP", 0, -52)
 
     hudFadeCtrl = MedaUI:CreateFadeEffect(hudFrame, {
         fadeInDuration = db.auraFadeIn or 0.4,
@@ -605,40 +817,31 @@ end
 local function RecalcPositions()
     if not hudFrame then return end
 
-    local xOff = db.auraHOffset or 200
     local scale = db.auraScale or 1.0
     hudFrame:SetScale(scale)
     hudFrame:SetAlpha(db.auraOpacity or 0.92)
-    hudFrame:ClearAllPoints()
-    hudFrame:SetPoint("CENTER", UIParent, "CENTER", 0, db.auraVerticalOffset or -20)
 
-    local topY = 60
+    local xOff = db.auraHOffset or 200
+    local vOff = db.auraVerticalOffset or -20
 
-    for i = 1, 8 do
-        leftTexts[i]:ClearAllPoints()
-        leftTexts[i]:SetPoint("RIGHT", hudFrame, "CENTER", -xOff, topY - (i - 1) * LINE_SPACING)
+    local leftDefX = -xOff - 150
+    local leftDefY = vOff + 60 + LINE_SPACING / 2 - 4 * LINE_SPACING
+    RestorePanelPos(leftPanel, "leftPanelPos", leftDefX, leftDefY)
+
+    local rightDefX = xOff + 140
+    local rightDefY = leftDefY
+    RestorePanelPos(rightPanel, "rightPanelPos", rightDefX, rightDefY)
+
+    local bottomDefY = vOff + 60 - 8 * LINE_SPACING - 8 - 35
+    RestorePanelPos(bottomPanel, "bottomPanelPos", 0, bottomDefY)
+
+    local iconSz = db.auraIconSize or 20
+    for _, row in ipairs(checklistRows) do
+        if row.icon then row.icon:SetSize(iconSz, iconSz) end
     end
-
-    for i = 1, MAX_RECENT do
-        rightIcons[i]:ClearAllPoints()
-        rightIcons[i]:SetPoint("LEFT", hudFrame, "CENTER", xOff, topY - (i - 1) * LINE_SPACING)
-        rightTexts[i]:ClearAllPoints()
-        rightTexts[i]:SetPoint("LEFT", rightIcons[i], "RIGHT", 4, 0)
+    for _, row in ipairs(expandRows) do
+        if row.icon then row.icon:SetSize(iconSz, iconSz) end
     end
-
-    local cy = topY - 8 * LINE_SPACING - 8
-    centerTexts[1]:ClearAllPoints()
-    centerTexts[1]:SetPoint("CENTER", hudFrame, "CENTER", 10, cy)
-    centerTexts[2]:ClearAllPoints()
-    centerTexts[2]:SetPoint("CENTER", hudFrame, "CENTER", 0, cy - 16)
-    centerTexts[3]:ClearAllPoints()
-    centerTexts[3]:SetPoint("CENTER", hudFrame, "CENTER", 0, cy - 30)
-
-    faveButton:ClearAllPoints()
-    faveButton:SetPoint("RIGHT", centerTexts[1], "LEFT", -2, 0)
-
-    endSessionBtn:ClearAllPoints()
-    endSessionBtn:SetPoint("CENTER", hudFrame, "CENTER", 0, cy - 48)
 end
 
 -- Lure hint state for rotation
@@ -710,6 +913,111 @@ local function GetLureHint(zone, area)
     return lureHintPool[idx]
 end
 
+-- ============================================================================
+-- Zone Fish Checklist Data
+-- ============================================================================
+
+local function GetZoneFishLists(zone, area)
+    local gfd = ns.GoneFishinData
+    if not gfd or not gfd.midnightItems or not gfd.zoneAliasMap then
+        return {}, {}, {}
+    end
+
+    local canonical = gfd.zoneAliasMap[zone] or gfd.zoneAliasMap[area]
+    if not canonical then return {}, {}, {} end
+
+    local zoneFishSet = {}
+    for itemID, info in pairs(gfd.midnightItems) do
+        if info.category == "fish" and info.openWaterZones then
+            for _, z in ipairs(info.openWaterZones) do
+                if z == canonical then
+                    zoneFishSet[itemID] = true
+                    break
+                end
+            end
+        end
+    end
+    if gfd.pools then
+        for _, poolInfo in pairs(gfd.pools) do
+            local inZone = false
+            if poolInfo.zones then
+                for _, z in ipairs(poolInfo.zones) do
+                    if z == canonical then inZone = true; break end
+                end
+            end
+            if inZone and poolInfo.fish then
+                for _, fishID in ipairs(poolInfo.fish) do
+                    zoneFishSet[fishID] = true
+                end
+            end
+        end
+    end
+
+    local caught, missing = {}, {}
+    for itemID in pairs(zoneFishSet) do
+        local info = gfd.midnightItems[itemID]
+        if info then
+            local logEntry = db and db.fishLog[itemID]
+            local count = logEntry and logEntry.count or 0
+            local entry = {
+                itemID = itemID,
+                name = info.name,
+                icon = info.icon,
+                quality = info.quality or 1,
+                rarity = info.rarity or "common",
+                count = count,
+            }
+            if count > 0 then
+                caught[#caught + 1] = entry
+            else
+                missing[#missing + 1] = entry
+            end
+        end
+    end
+
+    local junk = {}
+    local junkSeen = {}
+    if db then
+        local zs = db.zoneStats[zone]
+        if zs and zs.subZones then
+            for _, subInfo in pairs(zs.subZones) do
+                if subInfo.items then
+                    for itemID, cnt in pairs(subInfo.items) do
+                        if not junkSeen[itemID] then
+                            local cat = ClassifyItem(itemID)
+                            if cat == "junk" then
+                                junkSeen[itemID] = true
+                                local logEntry = db.fishLog[itemID]
+                                junk[#junk + 1] = {
+                                    itemID = itemID,
+                                    name = logEntry and logEntry.name or ("Item " .. itemID),
+                                    icon = logEntry and logEntry.icon or "inv_misc_questionmark",
+                                    quality = logEntry and logEntry.quality or 0,
+                                    count = logEntry and logEntry.count or cnt,
+                                }
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    table.sort(caught, function(a, b)
+        if a.quality ~= b.quality then return a.quality > b.quality end
+        return a.name < b.name
+    end)
+    table.sort(missing, function(a, b)
+        local ra = RARITY_SORT[a.rarity] or 0
+        local rb = RARITY_SORT[b.rarity] or 0
+        if ra ~= rb then return ra < rb end
+        return a.name < b.name
+    end)
+    table.sort(junk, function(a, b) return a.name < b.name end)
+
+    return caught, missing, junk
+end
+
 local function UpdateHUDContent()
     if not hudFrame or not db then return end
 
@@ -735,10 +1043,7 @@ local function UpdateHUDContent()
     leftTexts[5]:SetText(format("Casts: %d | Rate: %d%%", sessionCasts, rate))
     leftTexts[5]:SetTextColor(dim[1], dim[2], dim[3])
 
-    local elapsed = 0
-    if isFishing and fishingStartTime > 0 then
-        elapsed = GetTime() - sessionStartTime
-    end
+    local elapsed = sessionActive and sessionStartTime > 0 and (GetTime() - sessionStartTime) or 0
     leftTexts[6]:SetText(format("Time: %s", FormatTime(elapsed)))
     leftTexts[6]:SetTextColor(dim[1], dim[2], dim[3])
 
@@ -753,80 +1058,180 @@ local function UpdateHUDContent()
         leftTexts[8]:SetText("")
     end
 
-    local showRecent = db.auraShowRecent ~= false
-    local recent = db.recentCatches or {}
-    for i = 1, MAX_RECENT do
-        local catch = showRecent and recent[i]
-        if catch then
-            rightIcons[i]:Show()
-            local iconPath = catch.icon
+    local showChecklist = db.auraShowChecklist ~= false
+    if showChecklist and checklistContent then
+        rightPanel:Show()
+        local caught, missingList, junkList = GetZoneFishLists(zone, area)
+
+        local function PopulateRow(row, entry, desaturate)
+            local iconPath = entry.icon
             if type(iconPath) == "string" and not iconPath:find("\\") then
                 iconPath = "Interface\\Icons\\" .. iconPath
             end
-            rightIcons[i].tex:SetTexture(iconPath)
-            local r, g, b = GetQualityColor(catch.quality or 1)
-            local logEntry = db.fishLog[catch.itemID]
-            local lifetimeCount = logEntry and logEntry.count or 0
-            rightTexts[i]:SetText(format("|cff%02x%02x%02x%s|r |cff999999(x%d)|r", r * 255, g * 255, b * 255, catch.name or "?", lifetimeCount))
-        else
-            rightIcons[i]:Hide()
-            rightTexts[i]:SetText("")
+            row.icon:Show()
+            row.icon.tex:SetTexture(iconPath)
+            row.icon.tex:SetDesaturated(desaturate or false)
+
+            local r, g, b = GetQualityColor(entry.quality or 1)
+            if desaturate then
+                row.text:SetText(format("|cff666666%s|r", entry.name or "?"))
+            elseif entry.count and entry.count > 0 then
+                row.text:SetText(format("|cff%02x%02x%02x%s|r |cff999999(x%d)|r", r * 255, g * 255, b * 255, entry.name or "?", entry.count))
+            else
+                row.text:SetText(format("|cff%02x%02x%02x%s|r", r * 255, g * 255, b * 255, entry.name or "?"))
+            end
         end
+
+        -- Caught fish inside the scroll area
+        for i, entry in ipairs(caught) do
+            local row = GetChecklistRow(i)
+            row:Show()
+            row:ClearAllPoints()
+            row:SetPoint("TOPLEFT", checklistContent, "TOPLEFT", 0, -(i - 1) * CHECKLIST_ROW_HEIGHT)
+            PopulateRow(row, entry, false)
+        end
+        for i = #caught + 1, #checklistRows do
+            checklistRows[i]:Hide()
+        end
+
+        local caughtHeight = #caught * CHECKLIST_ROW_HEIGHT
+        checklistContent:SetHeight(math.max(caughtHeight, 1))
+
+        local scrollVisibleH = math.min(CHECKLIST_MAX_VISIBLE, #caught) * CHECKLIST_ROW_HEIGHT
+        checklistScroll:SetHeight(math.max(scrollVisibleH, 1))
+
+        -- Expand sections below the scroll area
+        local belowY = -scrollVisibleH
+        local expIdx = 0
+
+        if #junkList > 0 then
+            junkHeaderBtn:Show()
+            junkHeaderBtn:ClearAllPoints()
+            junkHeaderBtn:SetPoint("TOPLEFT", rightPanel, "TOPLEFT", 0, belowY)
+            local arrow = junkExpanded and "[-]" or "[+]"
+            junkHeaderBtn.text:SetText(format("|cff888888%s Junk (%d)|r", arrow, #junkList))
+            belowY = belowY - CHECKLIST_ROW_HEIGHT
+            if junkExpanded then
+                for _, entry in ipairs(junkList) do
+                    expIdx = expIdx + 1
+                    local row = GetExpandRow(expIdx)
+                    row:Show()
+                    row:ClearAllPoints()
+                    row:SetPoint("TOPLEFT", rightPanel, "TOPLEFT", 0, belowY)
+                    PopulateRow(row, entry, false)
+                    belowY = belowY - CHECKLIST_ROW_HEIGHT
+                end
+            end
+        else
+            junkHeaderBtn:Hide()
+        end
+
+        if #missingList > 0 then
+            missingHeaderBtn:Show()
+            missingHeaderBtn:ClearAllPoints()
+            missingHeaderBtn:SetPoint("TOPLEFT", rightPanel, "TOPLEFT", 0, belowY)
+            local arrow = missingExpanded and "[-]" or "[+]"
+            missingHeaderBtn.text:SetText(format("|cff888888%s Missing (%d)|r", arrow, #missingList))
+            belowY = belowY - CHECKLIST_ROW_HEIGHT
+            if missingExpanded then
+                for _, entry in ipairs(missingList) do
+                    expIdx = expIdx + 1
+                    local row = GetExpandRow(expIdx)
+                    row:Show()
+                    row:ClearAllPoints()
+                    row:SetPoint("TOPLEFT", rightPanel, "TOPLEFT", 0, belowY)
+                    PopulateRow(row, entry, true)
+                    belowY = belowY - CHECKLIST_ROW_HEIGHT
+                end
+            end
+        else
+            missingHeaderBtn:Hide()
+        end
+
+        for i = expIdx + 1, #expandRows do
+            expandRows[i]:Hide()
+        end
+
+        rightPanel:SetHeight(math.max(-belowY, CHECKLIST_ROW_HEIGHT))
+    elseif rightPanel then
+        rightPanel:Hide()
     end
 
-    if IsCurrentSpotFaved() then
-        faveButton.tex:SetAtlas("Waypoint-MapPin-Tracked")
-        faveButton.tex:SetDesaturated(false)
-        local subzone = GetCurrentArea()
-        centerTexts[1]:SetText(format("|cffffd100Fave: %s|r", subzone))
+    if db.auraShowFaves ~= false then
+        faveButton:Show()
+        if IsCurrentSpotFaved() then
+            faveButton.tex:SetAtlas("Waypoint-MapPin-Tracked")
+            faveButton.tex:SetDesaturated(false)
+            local subzone = GetCurrentArea()
+            centerTexts[1]:SetText(format("|cffffd100Fave: %s|r", subzone))
+        else
+            faveButton.tex:SetAtlas("Waypoint-MapPin-Untracked")
+            faveButton.tex:SetDesaturated(true)
+            centerTexts[1]:SetText("|cff666666No favorite set|r")
+        end
     else
-        faveButton.tex:SetAtlas("Waypoint-MapPin-Untracked")
-        faveButton.tex:SetDesaturated(true)
-        centerTexts[1]:SetText("|cff666666No favorite set|r")
+        faveButton:Hide()
+        centerTexts[1]:SetText("")
     end
 
-    local bestSpot = db.bestSpot
-    if bestSpot then
-        local ps = db.poolStats[bestSpot]
-        local poolCount = ps and ps.poolCatches or 0
-        centerTexts[2]:SetText(format("Best Spot: |cffffffff%s|r |cff999999(%d pool catches)|r", bestSpot, poolCount))
+    if db.auraShowBestSpot ~= false then
+        local bestSpot = db.bestSpot
+        if bestSpot then
+            local ps = db.poolStats[bestSpot]
+            local poolCount = ps and ps.poolCatches or 0
+            centerTexts[2]:SetText(format("Best Spot: |cffffffff%s|r |cff999999(%d pool catches)|r", bestSpot, poolCount))
+        else
+            centerTexts[2]:SetText("|cff666666No pool data yet|r")
+        end
     else
-        centerTexts[2]:SetText("|cff666666No pool data yet|r")
+        centerTexts[2]:SetText("")
     end
 
-    -- Lure hint: suggest lures for uncaught/low-count fish in the current zone
-    local lureHint = GetLureHint(zone, area)
-    centerTexts[3]:SetText(lureHint or "")
+    if db.auraShowTips ~= false then
+        local lureHint = GetLureHint(zone, area)
+        centerTexts[3]:SetText(lureHint or "")
+    else
+        centerTexts[3]:SetText("")
+    end
 end
 
 local function UpdateDistanceText()
     if not hudFrame or not db then return end
-    local mapID, px, py = GetPlayerMapPos()
-    if not mapID then
-        local zone = GetCurrentZone()
-        local area = GetCurrentArea()
-        centerTexts[3]:SetText(GetLureHint(zone, area) or "")
+
+    local showFaves = db.auraShowFaves ~= false
+    local showTips = db.auraShowTips ~= false
+
+    if not showFaves and not showTips then
+        centerTexts[3]:SetText("")
         return
     end
 
-    local nearestDist = math.huge
-    for _, fav in pairs(db.favorites) do
-        if fav.mapID == mapID and fav.x and fav.y then
-            local dx, dy = px - fav.x, py - fav.y
-            local dist = math.sqrt(dx * dx + dy * dy)
-            if dist < nearestDist then
-                nearestDist = dist
+    local mapID, px, py = GetPlayerMapPos()
+
+    if showFaves and mapID then
+        local nearestDist = math.huge
+        for _, fav in pairs(db.favorites) do
+            if fav.mapID == mapID and fav.x and fav.y then
+                local dx, dy = px - fav.x, py - fav.y
+                local dist = math.sqrt(dx * dx + dy * dy)
+                if dist < nearestDist then
+                    nearestDist = dist
+                end
             end
+        end
+        if nearestDist < math.huge then
+            local yards = nearestDist * 1000
+            centerTexts[3]:SetText(format("|cff999999~%d yd to fave|r", math.floor(yards)))
+            return
         end
     end
 
-    if nearestDist < math.huge then
-        local yards = nearestDist * 1000
-        centerTexts[3]:SetText(format("|cff999999~%d yd to fave|r", math.floor(yards)))
-    else
+    if showTips then
         local zone = GetCurrentZone()
         local area = GetCurrentArea()
         centerTexts[3]:SetText(GetLureHint(zone, area) or "")
+    else
+        centerTexts[3]:SetText("")
     end
 end
 
@@ -840,7 +1245,7 @@ local function HUD_OnUpdate(self, elapsed)
     timerElapsed = timerElapsed + elapsed
     if timerElapsed >= TIMER_INTERVAL then
         timerElapsed = 0
-        if isFishing then
+        if sessionActive and sessionStartTime > 0 then
             local sessionTime = GetTime() - sessionStartTime
             local dim = MedaUI.Theme and MedaUI.Theme.textDim or { 0.6, 0.6, 0.6 }
             leftTexts[6]:SetText(format("Time: %s", FormatTime(sessionTime)))
@@ -1934,26 +2339,60 @@ local function BuildConfig(parent, moduleDB)
     end
     yOff = yOff - 30
 
-    local recentCB = MedaUI:CreateCheckbox(parent, "Show Recent Catches")
-    recentCB:SetPoint("TOPLEFT", 0, yOff)
-    recentCB:SetChecked(moduleDB.auraShowRecent ~= false)
-    recentCB.OnValueChanged = function(_, checked)
-        moduleDB.auraShowRecent = checked
+    local checklistCB = MedaUI:CreateCheckbox(parent, "Show Zone Checklist")
+    checklistCB:SetPoint("TOPLEFT", 0, yOff)
+    checklistCB:SetChecked(moduleDB.auraShowChecklist ~= false)
+    checklistCB.OnValueChanged = function(_, checked)
+        moduleDB.auraShowChecklist = checked
         arcDirty = true
     end
     yOff = yOff - 30
 
-    local hOffSlider = MedaUI:CreateLabeledSlider(parent, "Horizontal Offset", 200, 50, 400, 10)
-    hOffSlider:SetPoint("TOPLEFT", 0, yOff)
-    hOffSlider:SetValue(moduleDB.auraHOffset or 200)
-    hOffSlider.OnValueChanged = function(_, v) moduleDB.auraHOffset = v; MarkDirty() end
-    yOff = yOff - 55
+    local faveCB = MedaUI:CreateCheckbox(parent, "Show Favorite Spot")
+    faveCB:SetPoint("TOPLEFT", 0, yOff)
+    faveCB:SetChecked(moduleDB.auraShowFaves ~= false)
+    faveCB.OnValueChanged = function(_, checked)
+        moduleDB.auraShowFaves = checked
+        arcDirty = true
+    end
+    yOff = yOff - 30
 
-    local vOffSlider = MedaUI:CreateLabeledSlider(parent, "Vertical Offset", 200, -200, 100, 5)
-    vOffSlider:SetPoint("TOPLEFT", 0, yOff)
-    vOffSlider:SetValue(moduleDB.auraVerticalOffset or -20)
-    vOffSlider.OnValueChanged = function(_, v) moduleDB.auraVerticalOffset = v; MarkDirty() end
-    yOff = yOff - 55
+    local bestCB = MedaUI:CreateCheckbox(parent, "Show Best Spot")
+    bestCB:SetPoint("TOPLEFT", 0, yOff)
+    bestCB:SetChecked(moduleDB.auraShowBestSpot ~= false)
+    bestCB.OnValueChanged = function(_, checked)
+        moduleDB.auraShowBestSpot = checked
+        arcDirty = true
+    end
+    yOff = yOff - 30
+
+    local tipsCB = MedaUI:CreateCheckbox(parent, "Show Lure Tips")
+    tipsCB:SetPoint("TOPLEFT", 0, yOff)
+    tipsCB:SetChecked(moduleDB.auraShowTips ~= false)
+    tipsCB.OnValueChanged = function(_, checked)
+        moduleDB.auraShowTips = checked
+        arcDirty = true
+    end
+    yOff = yOff - 30
+
+    local lockCB = MedaUI:CreateCheckbox(parent, "Lock HUD Panels")
+    lockCB:SetPoint("TOPLEFT", 0, yOff)
+    lockCB:SetChecked(moduleDB.auraLockPanels ~= false)
+    lockCB.OnValueChanged = function(_, checked)
+        moduleDB.auraLockPanels = checked
+        SetPanelsLocked(checked)
+    end
+    yOff = yOff - 30
+
+    local resetPosBtn = MedaUI:CreateButton(parent, "Reset Panel Positions")
+    resetPosBtn:SetPoint("TOPLEFT", 0, yOff)
+    resetPosBtn:SetScript("OnClick", function()
+        moduleDB.leftPanelPos = nil
+        moduleDB.rightPanelPos = nil
+        moduleDB.bottomPanelPos = nil
+        MarkDirty()
+    end)
+    yOff = yOff - 45
 
     local scaleSlider = MedaUI:CreateLabeledSlider(parent, "Scale (%)", 200, 50, 200, 5)
     scaleSlider:SetPoint("TOPLEFT", 0, yOff)
@@ -2305,6 +2744,7 @@ local function StartModule()
 
     RegisterEvents()
     SyncMapPins()
+    RepairPoolNames()
 
     MedaAuras.Log("[GoneFishin] Module enabled")
 end
@@ -2423,6 +2863,15 @@ local slashCommands = {
         end
         print("|cff00ccffGone Fishin':|r Session ended.")
     end,
+    ["repairpools"] = function(moduleDB)
+        db = moduleDB
+        local count = RepairPoolNames()
+        if count > 0 then
+            print(format("|cff00ccffGone Fishin':|r Repaired %d pool name entries.", count))
+        else
+            print("|cff00ccffGone Fishin':|r No pool entries to repair.")
+        end
+    end,
 }
 
 -- ============================================================================
@@ -2450,10 +2899,16 @@ local MODULE_DEFAULTS = {
 
     discoveredZones = {},
     discoveredPools = {},
+    poolObjectNames = {},
     collectionSort = "missing",
 
     auraEnabled = true,
+    auraLockPanels = true,
+    auraShowChecklist = true,
     auraShowRecent = true,
+    auraShowTips = true,
+    auraShowFaves = true,
+    auraShowBestSpot = true,
     auraHOffset = 200,
     auraVerticalOffset = -20,
     auraScale = 1.0,
@@ -2465,6 +2920,10 @@ local MODULE_DEFAULTS = {
     auraFadeIn = 0.4,
     auraFadeOut = 0.6,
     auraHideDelay = 2,
+
+    leftPanelPos = nil,
+    rightPanelPos = nil,
+    bottomPanelPos = nil,
 
     statsPosition = nil,
     statsSize = nil,
@@ -2479,8 +2938,9 @@ MedaAuras:RegisterModule({
     name          = MODULE_NAME,
     title         = "Gone Fishin'",
     description   = "Tracks every fish and item caught while fishing. "
-                 .. "Displays an arc-shaped aura HUD around your character with zone info, "
-                 .. "session stats, recent catches, best spots, and favorites. "
+                 .. "Displays a three-panel HUD with zone stats, a zone fish checklist "
+                 .. "(with collapsible junk and missing sections), and favorites/tips. "
+                 .. "Each panel can be dragged independently. "
                  .. "Includes a stats window with Midnight fish collection checklist, "
                  .. "zone breakdowns, and custom map pins for favorite fishing spots.",
     defaults      = MODULE_DEFAULTS,

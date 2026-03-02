@@ -39,6 +39,23 @@
 - 🍺 **Drinking alert** — configurable banner with countdown bar when a healer starts drinking, with optional sound
 - 🔒 **Taint safe** — displays secret mana values directly without breaking in M+ or restricted contexts
 
+### Gone Fishin'
+
+- 🎣 **Three-panel HUD** — left (zone & session stats), right (zone fish checklist), and bottom (favorites, best spot, lure tips) panels appear while fishing; each panel can be dragged independently and remembers its position
+- 🔒 **Lock / unlock** — panels are locked by default to prevent accidental moves; unlock from settings to reposition, then re-lock
+- 🐟 **Zone fish checklist** — live checklist of every fish available in the current zone with quality-colored names and lifetime counts; scrolls via mouse wheel when more than 6 are caught
+- 📂 **Collapsible junk & missing** — `[+] Junk` and `[+] Missing` sections sit below the fish list and expand on click to show junk items caught in the zone or fish you haven't caught yet (dimmed/desaturated)
+- ⭐ **Favorite spots** — mark any fishing location as a favorite with world map pins and distance indicator on the HUD
+- 🏆 **Best spot tracking** — automatically surfaces the zone with the most fishing pool catches
+- 🧪 **Lure hints** — HUD suggests lures for uncaught fish in your current zone
+- 📊 **Stats window** — draggable panel with three tabs:
+  - **Overview** — total caught, casts, catch rate, time fished, fish/hour, longest streak, rarest catch, unique count
+  - **Collection** — Midnight Pokedex with per-category progress bars (Fish, Lures, Treasures, Lines, Rods, Recipes) plus dynamic "Other Catches" section; sort, search, and rich hover tooltips with zone/pool/rarity data
+  - **Zones** — expandable zone rows with subzone breakdowns and favorite buttons
+- 🗺️ **Map pins** — favorite fishing spots appear on the world map
+- 📤 **Export** — dump discovery data for crowd-sourcing static datasets
+- 🔄 **Versioned migrations** — SavedVariables safely upgraded across addon updates, never losing data
+
 ---
 
 ## 🚀 Quick Start
