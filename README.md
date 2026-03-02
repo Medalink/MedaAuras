@@ -39,6 +39,19 @@
 - 🍺 **Drinking alert** — configurable banner with countdown bar when a healer starts drinking, with optional sound
 - 🔒 **Taint safe** — displays secret mana values directly without breaking in M+ or restricted contexts
 
+### Reminders
+
+- 🛡️ **Group coverage panel** — live dispel and utility audit for your dungeon party, auto-triggered on instance entry
+- 💊 **Dispel tracking** — shows which debuff types your group can remove (curse, poison, disease, magic) with severity-coded rows
+- ⚔️ **Utility tracking** — monitors Bloodlust and Battle Res coverage with gap warnings
+- 📊 **Build recommendations** — surfaces top M+ talent builds from Archon, Wowhead, and Icy Veins with export strings, popularity, key level, and DPS
+- 🔀 **Source filtering** — enable or disable recommendation sources (Wowhead, Icy Veins, Archon) individually; at least one must stay active
+- 🎯 **Personal talent reminders** — spec-specific suggestions when you're missing key talents for your content
+- 🔔 **Notification banners** — configurable severity-gated alerts with adjustable duration when entering dungeons with coverage gaps
+- 🗺️ **Context override** — test your group composition against any dungeon from the dropdown without zoning in
+- 📌 **Minimap button** — one-click toggle for the coverage panel
+- 🎨 **Theme controls** — panel width, background toggle, and opacity slider
+
 ### Gone Fishin'
 
 - 🎣 **Three-panel HUD** — left (zone & session stats), right (zone fish checklist), and bottom (favorites, best spot, lure tips) panels appear while fishing; each panel can be dragged independently and remembers its position
