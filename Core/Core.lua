@@ -657,6 +657,13 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         InitDebug()
 
         MedaAurasDB = MergeDefaults(MedaAurasDB or {}, DEFAULT_DB)
+
+        -- Migrate SavedVariables: TalentReminder -> Reminders
+        if MedaAurasDB.modules and MedaAurasDB.modules.TalentReminder and not MedaAurasDB.modules.Reminders then
+            MedaAurasDB.modules.Reminders = MedaAurasDB.modules.TalentReminder
+            MedaAurasDB.modules.TalentReminder = nil
+        end
+
         Log("ADDON_LOADED: DB initialized")
 
         for _, modName in ipairs(moduleOrder) do

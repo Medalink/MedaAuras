@@ -14,12 +14,26 @@ Libs\MedaUI\MedaUI.xml
 # Core
 Core\Core.lua
 
+# Data (load first, init before domain files)
+Data\RemindersInit.lua
+Data\Dispels.lua
+Data\Utility.lua
+Data\Dungeons.lua
+Data\Rules.lua
+Data\GroupCompDisplay.lua
+Data\Recommendations.lua
+Data\GoneFishinFish.lua
+
 # Shared Services (load before modules)
 Services\SpellCastTracker.lua
 Services\CooldownTimer.lua
 Services\UnitPriority.lua
+Services\GroupInspector.lua
+Services\MapPinProvider.lua
 
 # Modules
 Modules\FocusInterruptHelper.lua
 Modules\GroupManaTracker.lua
 Modules\ManaTracker.lua
+Modules\Reminders.lua
+Modules\GoneFishin.lua
