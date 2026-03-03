@@ -6,6 +6,9 @@ local MedaUI = LibStub("MedaUI-1.0")
 -- Constants
 -- ============================================================================
 
+local MODULE_VERSION   = "1.0"
+local MODULE_STABILITY = "experimental"   -- "experimental" | "beta" | "stable"
+
 local MANA_POWER_TYPE = 0
 local MAX_PARTY = 4
 local MAX_RAID = 40
@@ -1032,13 +1035,10 @@ end
 -- ============================================================================
 
 local function BuildConfig(parent, moduleDB)
-    local yOff = 0
+    local LEFT_X, RIGHT_X = 0, 238
     db = moduleDB
 
-    local function pv()
-        UpdatePreview()
-    end
-
+    local function pv() UpdatePreview() end
     local function lv()
         if not alertFrame then return end
         ApplyAlertStyle()
@@ -1048,499 +1048,471 @@ local function BuildConfig(parent, moduleDB)
         end
     end
 
-    -- ---- General ----
-    local _, _, hdr1 = MedaUI:CreateSectionHeader(parent, "General")
-    hdr1:SetPoint("TOPLEFT", 0, yOff)
-    yOff = yOff - 45
-
-    local enableCB = MedaUI:CreateCheckbox(parent, "Enable Module")
-    enableCB:SetPoint("TOPLEFT", 0, yOff)
-    enableCB:SetChecked(moduleDB.enabled)
-    enableCB.OnValueChanged = function(_, checked)
-        if checked then MedaAuras:EnableModule(MODULE_NAME) else MedaAuras:DisableModule(MODULE_NAME) end
-        MedaAuras:RefreshSidebarDot(MODULE_NAME)
-    end
-    yOff = yOff - 30
-
-    local showManaListCB = MedaUI:CreateCheckbox(parent, "Show Mana List")
-    showManaListCB:SetPoint("TOPLEFT", 0, yOff)
-    showManaListCB:SetChecked(moduleDB.showManaList ~= false)
-    showManaListCB.OnValueChanged = function(_, checked)
-        moduleDB.showManaList = checked
-        if isEnabled then UpdateDisplay() end
-        pv()
-    end
-    yOff = yOff - 30
-
-    local lockCB = MedaUI:CreateCheckbox(parent, "Lock Mana List Position")
-    lockCB:SetPoint("TOPLEFT", 0, yOff)
-    lockCB:SetChecked(moduleDB.locked)
-    lockCB.OnValueChanged = function(_, checked) moduleDB.locked = checked end
-    yOff = yOff - 30
-
-    local showSelfCB = MedaUI:CreateCheckbox(parent, "Show Self (if healer)")
-    showSelfCB:SetPoint("TOPLEFT", 0, yOff)
-    showSelfCB:SetChecked(moduleDB.showSelf)
-    showSelfCB.OnValueChanged = function(_, checked)
-        moduleDB.showSelf = checked
-        if isEnabled then ScanHealers(); UpdateDisplay() end
-    end
-    yOff = yOff - 30
-
-    local showMaxCB = MedaUI:CreateCheckbox(parent, "Show Max Mana")
-    showMaxCB:SetPoint("TOPLEFT", 0, yOff)
-    showMaxCB:SetChecked(moduleDB.showMaxMana)
-    showMaxCB.OnValueChanged = function(_, checked)
-        moduleDB.showMaxMana = checked
-        wipe(lastKnownMana)
-        if isEnabled then UpdateDisplay() end
-        pv()
-    end
-    yOff = yOff - 40
-
-    -- ---- Floating Preview (anchored to right of settings panel) ----
     DestroyFloatingPreview()
     CreateFloatingPreview()
-
-    -- ---- Content ----
-    local _, _, hdr2 = MedaUI:CreateSectionHeader(parent, "Content")
-    hdr2:SetPoint("TOPLEFT", 0, yOff)
-    yOff = yOff - 45
-
-    local showDrinkCB = MedaUI:CreateCheckbox(parent, "Show Drinking Status (on rows)")
-    showDrinkCB:SetPoint("TOPLEFT", 0, yOff)
-    showDrinkCB:SetChecked(moduleDB.showDrinking ~= false)
-    showDrinkCB.OnValueChanged = function(_, checked)
-        moduleDB.showDrinking = checked
-        if isEnabled then UpdateDisplay() end
-        pv()
-    end
-    yOff = yOff - 30
-
-    local showDeadCB = MedaUI:CreateCheckbox(parent, "Show Dead Status (on rows)")
-    showDeadCB:SetPoint("TOPLEFT", 0, yOff)
-    showDeadCB:SetChecked(moduleDB.showDead ~= false)
-    showDeadCB.OnValueChanged = function(_, checked)
-        moduleDB.showDead = checked
-        if isEnabled then UpdateDisplay() end
-    end
-    yOff = yOff - 40
-
-    -- ---- Mana List — Layout ----
-    local _, _, hdr3 = MedaUI:CreateSectionHeader(parent, "Mana List — Layout")
-    hdr3:SetPoint("TOPLEFT", 0, yOff)
-    yOff = yOff - 45
-
-    local scaleSlider = MedaUI:CreateLabeledSlider(parent, "Frame Scale", 200, 50, 200, 5)
-    scaleSlider:SetPoint("TOPLEFT", 0, yOff)
-    scaleSlider:SetValue((moduleDB.frameScale or 1) * 100)
-    scaleSlider.OnValueChanged = function(_, value)
-        moduleDB.frameScale = value / 100
-        if isEnabled then ApplyFrameStyle() end
-    end
-    yOff = yOff - 55
-
-    local growDirDD = MedaUI:CreateLabeledDropdown(parent, "Grow Direction", 200, {
-        { value = false, label = "Down" },
-        { value = true, label = "Up" },
-    })
-    growDirDD:SetPoint("TOPLEFT", 0, yOff)
-    growDirDD:SetSelected(moduleDB.growUp or false)
-    growDirDD.OnValueChanged = function(_, value)
-        moduleDB.growUp = value
-        if isEnabled then UpdateDisplay() end
-        pv()
-    end
-    yOff = yOff - 55
-
-    local frameWidthSlider = MedaUI:CreateLabeledSlider(parent, "Frame Width", 200, 120, 300, 10)
-    frameWidthSlider:SetPoint("TOPLEFT", 0, yOff)
-    frameWidthSlider:SetValue(moduleDB.frameWidth or 160)
-    frameWidthSlider.OnValueChanged = function(_, value)
-        moduleDB.frameWidth = value
-        if isEnabled then UpdateDisplay() end
-        pv()
-    end
-    yOff = yOff - 55
-
-    local paddingSlider = MedaUI:CreateLabeledSlider(parent, "Frame Padding", 200, 0, 20, 1)
-    paddingSlider:SetPoint("TOPLEFT", 0, yOff)
-    paddingSlider:SetValue(moduleDB.framePadding or 5)
-    paddingSlider.OnValueChanged = function(_, value)
-        moduleDB.framePadding = value
-        if isEnabled then UpdateDisplay() end
-        pv()
-    end
-    yOff = yOff - 55
-
-    local rowSpacingSlider = MedaUI:CreateLabeledSlider(parent, "Row Spacing", 200, 0, 8, 1)
-    rowSpacingSlider:SetPoint("TOPLEFT", 0, yOff)
-    rowSpacingSlider:SetValue(moduleDB.rowSpacing or 2)
-    rowSpacingSlider.OnValueChanged = function(_, value)
-        moduleDB.rowSpacing = value
-        if isEnabled then UpdateDisplay() end
-        pv()
-    end
-    yOff = yOff - 55
-
-    local iconSizeSlider = MedaUI:CreateLabeledSlider(parent, "Icon Size", 200, 10, 32, 1)
-    iconSizeSlider:SetPoint("TOPLEFT", 0, yOff)
-    iconSizeSlider:SetValue(moduleDB.iconSize or 18)
-    iconSizeSlider.OnValueChanged = function(_, value)
-        moduleDB.iconSize = value
-        if isEnabled then UpdateDisplay() end
-        pv()
-    end
-    yOff = yOff - 55
-
-    -- ---- Mana List — Text ----
-    local _, _, hdr4 = MedaUI:CreateSectionHeader(parent, "Mana List — Text")
-    hdr4:SetPoint("TOPLEFT", 0, yOff)
-    yOff = yOff - 45
-
-    local fontPicker = MedaUI:CreateLabeledDropdown(parent, "Font", 200, MedaUI:GetFontList(), "font")
-    fontPicker:SetPoint("TOPLEFT", 0, yOff)
-    fontPicker:SetSelected(moduleDB.font or "default")
-    fontPicker.OnValueChanged = function(_, value)
-        moduleDB.font = value
-        wipe(fontCache)
-        if isEnabled then UpdateDisplay() end
-        pv()
-    end
-    yOff = yOff - 55
-
-    local textSizeSlider = MedaUI:CreateLabeledSlider(parent, "Name Text Size", 200, 1, 48, 1)
-    textSizeSlider:SetPoint("TOPLEFT", 0, yOff)
-    textSizeSlider:SetValue(moduleDB.textSize or 16)
-    textSizeSlider.OnValueChanged = function(_, value)
-        moduleDB.textSize = value
-        wipe(fontCache)
-        if isEnabled then UpdateDisplay() end
-        pv()
-    end
-    yOff = yOff - 55
-
-    local manaSizeSlider = MedaUI:CreateLabeledSlider(parent, "Mana Text Size", 200, 1, 48, 1)
-    manaSizeSlider:SetPoint("TOPLEFT", 0, yOff)
-    manaSizeSlider:SetValue(moduleDB.manaTextSize or 15)
-    manaSizeSlider.OnValueChanged = function(_, value)
-        moduleDB.manaTextSize = value
-        wipe(fontCache)
-        if isEnabled then UpdateDisplay() end
-        pv()
-    end
-    yOff = yOff - 55
-
-    local outlineDD = MedaUI:CreateLabeledDropdown(parent, "Text Outline", 200, {
-        { value = "none", label = "None" },
-        { value = "outline", label = "Outline" },
-        { value = "thick", label = "Thick Outline" },
-    })
-    outlineDD:SetPoint("TOPLEFT", 0, yOff)
-    outlineDD:SetSelected(moduleDB.textOutline or "none")
-    outlineDD.OnValueChanged = function(_, value)
-        moduleDB.textOutline = value
-        wipe(fontCache)
-        if isEnabled then UpdateDisplay() end
-        pv()
-    end
-    yOff = yOff - 55
-
-    local iconModeDD = MedaUI:CreateLabeledDropdown(parent, "Icon Mode", 200, {
-        { value = "class", label = "Class Icon" },
-        { value = "role",  label = "Role Icon" },
-        { value = "none",  label = "None (hidden)" },
-    })
-    iconModeDD:SetPoint("TOPLEFT", 0, yOff)
-    iconModeDD:SetSelected(moduleDB.iconMode or "class")
-    iconModeDD.OnValueChanged = function(_, value)
-        moduleDB.iconMode = value
-        moduleDB.showClassIcon = value ~= "none"
-        if isEnabled then UpdateDisplay() end
-        pv()
-    end
-    yOff = yOff - 55
-
-    local iconZoomSlider = MedaUI:CreateLabeledSlider(parent, "Icon Zoom (%)", 200, 0, 50, 5)
-    iconZoomSlider:SetPoint("TOPLEFT", 0, yOff)
-    iconZoomSlider:SetValue(moduleDB.iconZoom or 0)
-    iconZoomSlider.OnValueChanged = function(_, value)
-        moduleDB.iconZoom = value
-        if isEnabled then UpdateDisplay() end
-        pv()
-    end
-    yOff = yOff - 55
-
-    -- ---- Mana List — Colors ----
-    local _, _, hdr5 = MedaUI:CreateSectionHeader(parent, "Mana List — Colors")
-    hdr5:SetPoint("TOPLEFT", 0, yOff)
-    yOff = yOff - 45
-
-    local nameColorDD = MedaUI:CreateLabeledDropdown(parent, "Name Color", 200, {
-        { value = "class", label = "Class Color" },
-        { value = "custom", label = "Custom" },
-    })
-    nameColorDD:SetPoint("TOPLEFT", 0, yOff)
-    nameColorDD:SetSelected(moduleDB.nameColorMode or "class")
-    yOff = yOff - 55
-
-    local customNamePicker = MedaUI:CreateLabeledColorPicker(parent, "Custom Name Color")
-    customNamePicker:SetPoint("TOPLEFT", 0, yOff)
-    local cnc = moduleDB.customNameColor or {1, 1, 1}
-    customNamePicker:SetColor(cnc[1], cnc[2], cnc[3])
-    customNamePicker.OnColorChanged = function(_, r, g, b)
-        moduleDB.customNameColor = {r, g, b}
-        if isEnabled then UpdateDisplay() end
-        pv()
-    end
-    if (moduleDB.nameColorMode or "class") ~= "custom" then
-        customNamePicker:SetAlpha(0.4)
-    end
-    yOff = yOff - 35
-
-    nameColorDD.OnValueChanged = function(_, value)
-        moduleDB.nameColorMode = value
-        customNamePicker:SetAlpha(value == "custom" and 1 or 0.4)
-        if isEnabled then UpdateDisplay() end
-        pv()
-    end
-
-    local manaColorPicker = MedaUI:CreateLabeledColorPicker(parent, "Mana Color")
-    manaColorPicker:SetPoint("TOPLEFT", 0, yOff)
-    local mc = moduleDB.manaColor or {0.7, 0.85, 1.0}
-    manaColorPicker:SetColor(mc[1], mc[2], mc[3])
-    manaColorPicker.OnColorChanged = function(_, r, g, b)
-        moduleDB.manaColor = {r, g, b}
-        if isEnabled then UpdateDisplay() end
-        pv()
-    end
-    yOff = yOff - 35
-
-    local staleColorPicker = MedaUI:CreateLabeledColorPicker(parent, "Stale Mana Color")
-    staleColorPicker:SetPoint("TOPLEFT", 0, yOff)
-    local sc = moduleDB.staleColor or {0.5, 0.6, 0.7}
-    staleColorPicker:SetColor(sc[1], sc[2], sc[3])
-    staleColorPicker.OnColorChanged = function(_, r, g, b)
-        moduleDB.staleColor = {r, g, b}
-        if isEnabled then UpdateDisplay() end
-        pv()
-    end
-    yOff = yOff - 40
-
-    -- ---- Mana List — Frame ----
-    local _, _, hdr6 = MedaUI:CreateSectionHeader(parent, "Mana List — Frame")
-    hdr6:SetPoint("TOPLEFT", 0, yOff)
-    yOff = yOff - 45
-
-    local bgAlphaSlider = MedaUI:CreateLabeledSlider(parent, "Background Opacity", 200, 0, 100, 5)
-    bgAlphaSlider:SetPoint("TOPLEFT", 0, yOff)
-    bgAlphaSlider:SetValue((moduleDB.backgroundOpacity or 0.8) * 100)
-    bgAlphaSlider.OnValueChanged = function(_, value)
-        moduleDB.backgroundOpacity = value / 100
-        if isEnabled then ApplyFrameStyle() end
-        pv()
-    end
-    yOff = yOff - 55
-
-    local showBorderCB = MedaUI:CreateCheckbox(parent, "Show Border")
-    showBorderCB:SetPoint("TOPLEFT", 0, yOff)
-    showBorderCB:SetChecked(moduleDB.showBorder ~= false)
-    showBorderCB.OnValueChanged = function(_, checked)
-        moduleDB.showBorder = checked
-        if isEnabled then ApplyFrameStyle() end
-        pv()
-    end
-    yOff = yOff - 40
-
-    -- ---- Drinking Alert ----
-    local _, _, hdr7 = MedaUI:CreateSectionHeader(parent, "Drinking Alert")
-    hdr7:SetPoint("TOPLEFT", 0, yOff)
-    yOff = yOff - 45
-
-    local alertEnCB = MedaUI:CreateCheckbox(parent, "Enable Drinking Alert")
-    alertEnCB:SetPoint("TOPLEFT", 0, yOff)
-    alertEnCB:SetChecked(moduleDB.alertEnabled ~= false)
-    alertEnCB.OnValueChanged = function(_, checked)
-        moduleDB.alertEnabled = checked
-        if checked then
-            EnsureAlertFrame()
-            lv()
-            alertFrame:ShowPreview("Healer Drinking (Preview)")
-        else
-            HideAlert()
-            if alertFrame then alertFrame:DismissPreview() end
-        end
-        pv()
-    end
-    yOff = yOff - 30
-
-    local alertCombatCB = MedaUI:CreateCheckbox(parent, "Only Alert During Combat")
-    alertCombatCB:SetPoint("TOPLEFT", 0, yOff)
-    alertCombatCB:SetChecked(moduleDB.alertOnlyInCombat ~= false)
-    alertCombatCB.OnValueChanged = function(_, checked)
-        moduleDB.alertOnlyInCombat = checked
-    end
-    yOff = yOff - 30
-
-    local alertLockCB = MedaUI:CreateCheckbox(parent, "Lock Alert Position")
-    alertLockCB:SetPoint("TOPLEFT", 0, yOff)
-    alertLockCB:SetChecked(moduleDB.alertLocked)
-    alertLockCB.OnValueChanged = function(_, checked) moduleDB.alertLocked = checked end
-    yOff = yOff - 30
-
-    local alertShowBarCB = MedaUI:CreateCheckbox(parent, "Show Countdown Bar")
-    alertShowBarCB:SetPoint("TOPLEFT", 0, yOff)
-    alertShowBarCB:SetChecked(moduleDB.alertShowBar ~= false)
-    alertShowBarCB.OnValueChanged = function(_, checked)
-        moduleDB.alertShowBar = checked
-        lv(); pv()
-    end
-    yOff = yOff - 35
-
-    local alertSoundDD = MedaUI:CreateLabeledDropdown(parent, "Alert Sound", 200, MedaUI:GetSoundList())
-    alertSoundDD:SetPoint("TOPLEFT", 0, yOff)
-    alertSoundDD:SetSelected(moduleDB.alertSound or "none")
-    alertSoundDD.OnValueChanged = function(_, value)
-        moduleDB.alertSound = value
-    end
-    local soundPreviewBtn = MedaUI:CreateButton(parent, "Preview", 60, 24)
-    soundPreviewBtn:SetPoint("LEFT", alertSoundDD, "RIGHT", 8, -6)
-    soundPreviewBtn:SetScript("OnClick", function()
-        local path = MedaUI:GetSoundPath(moduleDB.alertSound)
-        if path then pcall(PlaySoundFile, path, "Master") end
-    end)
-    yOff = yOff - 55
-
-    local alertDurSlider = MedaUI:CreateLabeledSlider(parent, "Alert Duration (sec)", 200, 1, 15, 0.5)
-    alertDurSlider:SetPoint("TOPLEFT", 0, yOff)
-    alertDurSlider:SetValue(moduleDB.alertDuration or 3)
-    alertDurSlider.OnValueChanged = function(_, value) moduleDB.alertDuration = value end
-    yOff = yOff - 55
-
-    local alertScaleSlider = MedaUI:CreateLabeledSlider(parent, "Alert Scale", 200, 50, 200, 5)
-    alertScaleSlider:SetPoint("TOPLEFT", 0, yOff)
-    alertScaleSlider:SetValue((moduleDB.alertScale or 1) * 100)
-    alertScaleSlider.OnValueChanged = function(_, value)
-        moduleDB.alertScale = value / 100
-        lv()
-    end
-    yOff = yOff - 55
-
-    local alertFontPicker = MedaUI:CreateLabeledDropdown(parent, "Alert Font", 200, MedaUI:GetFontList(), "font")
-    alertFontPicker:SetPoint("TOPLEFT", 0, yOff)
-    alertFontPicker:SetSelected(moduleDB.alertFont or "default")
-    alertFontPicker.OnValueChanged = function(_, value)
-        moduleDB.alertFont = value
-        wipe(fontCache)
-        lv(); pv()
-    end
-    yOff = yOff - 55
-
-    local alertSizeSlider = MedaUI:CreateLabeledSlider(parent, "Alert Text Size", 200, 8, 48, 1)
-    alertSizeSlider:SetPoint("TOPLEFT", 0, yOff)
-    alertSizeSlider:SetValue(moduleDB.alertTextSize or 18)
-    alertSizeSlider.OnValueChanged = function(_, value)
-        moduleDB.alertTextSize = value
-        wipe(fontCache)
-        lv(); pv()
-    end
-    yOff = yOff - 55
-
-    local alertOutlineDD = MedaUI:CreateLabeledDropdown(parent, "Alert Text Outline", 200, {
-        { value = "none", label = "None" },
-        { value = "outline", label = "Outline" },
-        { value = "thick", label = "Thick Outline" },
-    })
-    alertOutlineDD:SetPoint("TOPLEFT", 0, yOff)
-    alertOutlineDD:SetSelected(moduleDB.alertTextOutline or "outline")
-    alertOutlineDD.OnValueChanged = function(_, value)
-        moduleDB.alertTextOutline = value
-        wipe(fontCache)
-        lv(); pv()
-    end
-    yOff = yOff - 55
-
-    local alertTextPicker = MedaUI:CreateLabeledColorPicker(parent, "Alert Text Color")
-    alertTextPicker:SetPoint("TOPLEFT", 0, yOff)
-    local atc = moduleDB.alertTextColor or {0.33, 0.87, 1.0}
-    alertTextPicker:SetColor(atc[1], atc[2], atc[3])
-    alertTextPicker.OnColorChanged = function(_, r, g, b)
-        moduleDB.alertTextColor = {r, g, b}
-        lv(); pv()
-    end
-    yOff = yOff - 35
-
-    local alertBarPicker = MedaUI:CreateLabeledColorPicker(parent, "Alert Bar Color")
-    alertBarPicker:SetPoint("TOPLEFT", 0, yOff)
-    local abc = moduleDB.alertBarColor or {0.2, 0.58, 1.0}
-    alertBarPicker:SetColor(abc[1], abc[2], abc[3])
-    alertBarPicker.OnColorChanged = function(_, r, g, b)
-        moduleDB.alertBarColor = {r, g, b}
-        lv(); pv()
-    end
-    yOff = yOff - 35
-
-    local alertBarHSlider = MedaUI:CreateLabeledSlider(parent, "Alert Bar Height", 200, 2, 10, 1)
-    alertBarHSlider:SetPoint("TOPLEFT", 0, yOff)
-    alertBarHSlider:SetValue(moduleDB.alertBarHeight or 4)
-    alertBarHSlider.OnValueChanged = function(_, value)
-        moduleDB.alertBarHeight = value
-        lv(); pv()
-    end
-    yOff = yOff - 55
-
-    local alertBgSlider = MedaUI:CreateLabeledSlider(parent, "Alert Background Opacity", 200, 0, 100, 5)
-    alertBgSlider:SetPoint("TOPLEFT", 0, yOff)
-    alertBgSlider:SetValue((moduleDB.alertBgOpacity or 0.85) * 100)
-    alertBgSlider.OnValueChanged = function(_, value)
-        moduleDB.alertBgOpacity = value / 100
-        lv(); pv()
-    end
-    yOff = yOff - 55
-
-    local alertResetBtn = MedaUI:CreateButton(parent, "Reset Alert Position")
-    alertResetBtn:SetPoint("TOPLEFT", 0, yOff)
-    alertResetBtn:SetScript("OnClick", function()
-        moduleDB.alertPoint = nil
-        if alertFrame then
-            alertFrame:RestorePosition(nil)
-            if alertFrame:IsShown() then
-                alertFrame:ShowPreview("Healer Drinking (Preview)")
-            end
-        end
-    end)
-    yOff = yOff - 40
-
-    -- ---- Actions ----
-    local _, _, hdr8 = MedaUI:CreateSectionHeader(parent, "Actions")
-    hdr8:SetPoint("TOPLEFT", 0, yOff)
-    yOff = yOff - 45
-
-    local resetBtn = MedaUI:CreateButton(parent, "Reset Mana List Position")
-    resetBtn:SetPoint("TOPLEFT", 0, yOff)
-    resetBtn:SetScript("OnClick", function()
-        moduleDB.framePoint = nil
-        if displayFrame then RestorePosition() end
-    end)
-    yOff = yOff - 45
-
-    MedaAuras:SetContentHeight(math.abs(yOff))
-
-    -- Show the real alert banner as a draggable preview in the game world
     EnsureAlertFrame()
     ApplyAlertStyle()
     alertFrame:RestorePosition(moduleDB.alertPoint)
     alertFrame:SetLocked(false)
     alertFrame:SetShowBar(moduleDB.alertShowBar ~= false)
     alertFrame:ShowPreview("Healer Drinking (Preview)")
-
-    -- Persist drags immediately
     alertFrame:SetScript("OnDragStop", function(self)
         self:StopMovingOrSizing()
         if db then db.alertPoint = self:SavePosition() end
     end)
 
-    -- Sentinel: when the config page is cleared, hide previews
+    local tabBar, tabs = MedaAuras:CreateConfigTabs(parent, {
+        { id = "general",    label = "General" },
+        { id = "layout",     label = "Layout" },
+        { id = "appearance", label = "Appearance" },
+        { id = "alert",      label = "Drinking Alert" },
+    })
+
+    -- ===== General Tab =====
+    do
+        local p = tabs["general"]
+        local yOff = 0
+
+        local hdr = MedaUI:CreateSectionHeader(p, "General")
+        hdr:SetPoint("TOPLEFT", LEFT_X, yOff)
+        yOff = yOff - 45
+
+        local enableCB = MedaUI:CreateCheckbox(p, "Enable Module")
+        enableCB:SetPoint("TOPLEFT", LEFT_X, yOff)
+        enableCB:SetChecked(moduleDB.enabled)
+        enableCB.OnValueChanged = function(_, checked)
+            if checked then MedaAuras:EnableModule(MODULE_NAME) else MedaAuras:DisableModule(MODULE_NAME) end
+            MedaAuras:RefreshSidebarDot(MODULE_NAME)
+        end
+        yOff = yOff - 30
+
+        local showManaListCB = MedaUI:CreateCheckbox(p, "Show Mana List")
+        showManaListCB:SetPoint("TOPLEFT", LEFT_X, yOff)
+        showManaListCB:SetChecked(moduleDB.showManaList ~= false)
+        showManaListCB.OnValueChanged = function(_, checked)
+            moduleDB.showManaList = checked
+            if isEnabled then UpdateDisplay() end
+            pv()
+        end
+        local lockCB = MedaUI:CreateCheckbox(p, "Lock Mana List Position")
+        lockCB:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        lockCB:SetChecked(moduleDB.locked)
+        lockCB.OnValueChanged = function(_, checked) moduleDB.locked = checked end
+        yOff = yOff - 30
+
+        local showSelfCB = MedaUI:CreateCheckbox(p, "Show Self (if healer)")
+        showSelfCB:SetPoint("TOPLEFT", LEFT_X, yOff)
+        showSelfCB:SetChecked(moduleDB.showSelf)
+        showSelfCB.OnValueChanged = function(_, checked)
+            moduleDB.showSelf = checked
+            if isEnabled then ScanHealers(); UpdateDisplay() end
+        end
+        local showMaxCB = MedaUI:CreateCheckbox(p, "Show Max Mana")
+        showMaxCB:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        showMaxCB:SetChecked(moduleDB.showMaxMana)
+        showMaxCB.OnValueChanged = function(_, checked)
+            moduleDB.showMaxMana = checked
+            wipe(lastKnownMana)
+            if isEnabled then UpdateDisplay() end
+            pv()
+        end
+        yOff = yOff - 40
+
+        local hdr2 = MedaUI:CreateSectionHeader(p, "Content")
+        hdr2:SetPoint("TOPLEFT", LEFT_X, yOff)
+        yOff = yOff - 45
+
+        local showDrinkCB = MedaUI:CreateCheckbox(p, "Show Drinking Status")
+        showDrinkCB:SetPoint("TOPLEFT", LEFT_X, yOff)
+        showDrinkCB:SetChecked(moduleDB.showDrinking ~= false)
+        showDrinkCB.OnValueChanged = function(_, checked)
+            moduleDB.showDrinking = checked
+            if isEnabled then UpdateDisplay() end
+            pv()
+        end
+        local showDeadCB = MedaUI:CreateCheckbox(p, "Show Dead Status")
+        showDeadCB:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        showDeadCB:SetChecked(moduleDB.showDead ~= false)
+        showDeadCB.OnValueChanged = function(_, checked)
+            moduleDB.showDead = checked
+            if isEnabled then UpdateDisplay() end
+        end
+        yOff = yOff - 40
+
+        local resetBtn = MedaUI:CreateButton(p, "Reset Mana List Position")
+        resetBtn:SetPoint("TOPLEFT", LEFT_X, yOff)
+        resetBtn:SetScript("OnClick", function()
+            moduleDB.framePoint = nil
+            if displayFrame then RestorePosition() end
+        end)
+    end
+
+    -- ===== Layout Tab =====
+    do
+        local p = tabs["layout"]
+        local yOff = 0
+
+        local hdr = MedaUI:CreateSectionHeader(p, "Mana List Layout")
+        hdr:SetPoint("TOPLEFT", LEFT_X, yOff)
+        yOff = yOff - 45
+
+        local scaleSlider = MedaUI:CreateLabeledSlider(p, "Frame Scale", 200, 50, 200, 5)
+        scaleSlider:SetPoint("TOPLEFT", LEFT_X, yOff)
+        scaleSlider:SetValue((moduleDB.frameScale or 1) * 100)
+        scaleSlider.OnValueChanged = function(_, value)
+            moduleDB.frameScale = value / 100
+            if isEnabled then ApplyFrameStyle() end
+        end
+        local growDirDD = MedaUI:CreateLabeledDropdown(p, "Grow Direction", 200, {
+            { value = false, label = "Down" },
+            { value = true, label = "Up" },
+        })
+        growDirDD:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        growDirDD:SetSelected(moduleDB.growUp or false)
+        growDirDD.OnValueChanged = function(_, value)
+            moduleDB.growUp = value
+            if isEnabled then UpdateDisplay() end
+            pv()
+        end
+        yOff = yOff - 55
+
+        local frameWidthSlider = MedaUI:CreateLabeledSlider(p, "Frame Width", 200, 120, 300, 10)
+        frameWidthSlider:SetPoint("TOPLEFT", LEFT_X, yOff)
+        frameWidthSlider:SetValue(moduleDB.frameWidth or 160)
+        frameWidthSlider.OnValueChanged = function(_, value)
+            moduleDB.frameWidth = value
+            if isEnabled then UpdateDisplay() end
+            pv()
+        end
+        local paddingSlider = MedaUI:CreateLabeledSlider(p, "Frame Padding", 200, 0, 20, 1)
+        paddingSlider:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        paddingSlider:SetValue(moduleDB.framePadding or 5)
+        paddingSlider.OnValueChanged = function(_, value)
+            moduleDB.framePadding = value
+            if isEnabled then UpdateDisplay() end
+            pv()
+        end
+        yOff = yOff - 55
+
+        local rowSpacingSlider = MedaUI:CreateLabeledSlider(p, "Row Spacing", 200, 0, 8, 1)
+        rowSpacingSlider:SetPoint("TOPLEFT", LEFT_X, yOff)
+        rowSpacingSlider:SetValue(moduleDB.rowSpacing or 2)
+        rowSpacingSlider.OnValueChanged = function(_, value)
+            moduleDB.rowSpacing = value
+            if isEnabled then UpdateDisplay() end
+            pv()
+        end
+        local iconSizeSlider = MedaUI:CreateLabeledSlider(p, "Icon Size", 200, 10, 32, 1)
+        iconSizeSlider:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        iconSizeSlider:SetValue(moduleDB.iconSize or 18)
+        iconSizeSlider.OnValueChanged = function(_, value)
+            moduleDB.iconSize = value
+            if isEnabled then UpdateDisplay() end
+            pv()
+        end
+    end
+
+    -- ===== Appearance Tab =====
+    do
+        local p = tabs["appearance"]
+        local yOff = 0
+
+        local hdr = MedaUI:CreateSectionHeader(p, "Text")
+        hdr:SetPoint("TOPLEFT", LEFT_X, yOff)
+        yOff = yOff - 45
+
+        local fontPicker = MedaUI:CreateLabeledDropdown(p, "Font", 200, MedaUI:GetFontList(), "font")
+        fontPicker:SetPoint("TOPLEFT", LEFT_X, yOff)
+        fontPicker:SetSelected(moduleDB.font or "default")
+        fontPicker.OnValueChanged = function(_, value)
+            moduleDB.font = value
+            wipe(fontCache)
+            if isEnabled then UpdateDisplay() end
+            pv()
+        end
+        local outlineDD = MedaUI:CreateLabeledDropdown(p, "Text Outline", 200, {
+            { value = "none", label = "None" },
+            { value = "outline", label = "Outline" },
+            { value = "thick", label = "Thick Outline" },
+        })
+        outlineDD:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        outlineDD:SetSelected(moduleDB.textOutline or "none")
+        outlineDD.OnValueChanged = function(_, value)
+            moduleDB.textOutline = value
+            wipe(fontCache)
+            if isEnabled then UpdateDisplay() end
+            pv()
+        end
+        yOff = yOff - 55
+
+        local textSizeSlider = MedaUI:CreateLabeledSlider(p, "Name Text Size", 200, 1, 48, 1)
+        textSizeSlider:SetPoint("TOPLEFT", LEFT_X, yOff)
+        textSizeSlider:SetValue(moduleDB.textSize or 16)
+        textSizeSlider.OnValueChanged = function(_, value)
+            moduleDB.textSize = value
+            wipe(fontCache)
+            if isEnabled then UpdateDisplay() end
+            pv()
+        end
+        local manaSizeSlider = MedaUI:CreateLabeledSlider(p, "Mana Text Size", 200, 1, 48, 1)
+        manaSizeSlider:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        manaSizeSlider:SetValue(moduleDB.manaTextSize or 15)
+        manaSizeSlider.OnValueChanged = function(_, value)
+            moduleDB.manaTextSize = value
+            wipe(fontCache)
+            if isEnabled then UpdateDisplay() end
+            pv()
+        end
+        yOff = yOff - 55
+
+        local iconModeDD = MedaUI:CreateLabeledDropdown(p, "Icon Mode", 200, {
+            { value = "class", label = "Class Icon" },
+            { value = "role",  label = "Role Icon" },
+            { value = "none",  label = "None (hidden)" },
+        })
+        iconModeDD:SetPoint("TOPLEFT", LEFT_X, yOff)
+        iconModeDD:SetSelected(moduleDB.iconMode or "class")
+        iconModeDD.OnValueChanged = function(_, value)
+            moduleDB.iconMode = value
+            moduleDB.showClassIcon = value ~= "none"
+            if isEnabled then UpdateDisplay() end
+            pv()
+        end
+        local iconZoomSlider = MedaUI:CreateLabeledSlider(p, "Icon Zoom (%)", 200, 0, 50, 5)
+        iconZoomSlider:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        iconZoomSlider:SetValue(moduleDB.iconZoom or 0)
+        iconZoomSlider.OnValueChanged = function(_, value)
+            moduleDB.iconZoom = value
+            if isEnabled then UpdateDisplay() end
+            pv()
+        end
+        yOff = yOff - 55
+
+        local hdr2 = MedaUI:CreateSectionHeader(p, "Colors")
+        hdr2:SetPoint("TOPLEFT", LEFT_X, yOff)
+        yOff = yOff - 45
+
+        local nameColorDD = MedaUI:CreateLabeledDropdown(p, "Name Color", 200, {
+            { value = "class", label = "Class Color" },
+            { value = "custom", label = "Custom" },
+        })
+        nameColorDD:SetPoint("TOPLEFT", LEFT_X, yOff)
+        nameColorDD:SetSelected(moduleDB.nameColorMode or "class")
+        local manaColorPicker = MedaUI:CreateLabeledColorPicker(p, "Mana Color")
+        manaColorPicker:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        local mc = moduleDB.manaColor or {0.7, 0.85, 1.0}
+        manaColorPicker:SetColor(mc[1], mc[2], mc[3])
+        manaColorPicker.OnColorChanged = function(_, r, g, b)
+            moduleDB.manaColor = {r, g, b}
+            if isEnabled then UpdateDisplay() end
+            pv()
+        end
+        yOff = yOff - 55
+
+        local customNamePicker = MedaUI:CreateLabeledColorPicker(p, "Custom Name Color")
+        customNamePicker:SetPoint("TOPLEFT", LEFT_X, yOff)
+        local cnc = moduleDB.customNameColor or {1, 1, 1}
+        customNamePicker:SetColor(cnc[1], cnc[2], cnc[3])
+        customNamePicker.OnColorChanged = function(_, r, g, b)
+            moduleDB.customNameColor = {r, g, b}
+            if isEnabled then UpdateDisplay() end
+            pv()
+        end
+        if (moduleDB.nameColorMode or "class") ~= "custom" then
+            customNamePicker:SetAlpha(0.4)
+        end
+        nameColorDD.OnValueChanged = function(_, value)
+            moduleDB.nameColorMode = value
+            customNamePicker:SetAlpha(value == "custom" and 1 or 0.4)
+            if isEnabled then UpdateDisplay() end
+            pv()
+        end
+        local staleColorPicker = MedaUI:CreateLabeledColorPicker(p, "Stale Mana Color")
+        staleColorPicker:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        local sc = moduleDB.staleColor or {0.5, 0.6, 0.7}
+        staleColorPicker:SetColor(sc[1], sc[2], sc[3])
+        staleColorPicker.OnColorChanged = function(_, r, g, b)
+            moduleDB.staleColor = {r, g, b}
+            if isEnabled then UpdateDisplay() end
+            pv()
+        end
+        yOff = yOff - 40
+
+        local hdr3 = MedaUI:CreateSectionHeader(p, "Frame")
+        hdr3:SetPoint("TOPLEFT", LEFT_X, yOff)
+        yOff = yOff - 45
+
+        local bgAlphaSlider = MedaUI:CreateLabeledSlider(p, "Background Opacity", 200, 0, 100, 5)
+        bgAlphaSlider:SetPoint("TOPLEFT", LEFT_X, yOff)
+        bgAlphaSlider:SetValue((moduleDB.backgroundOpacity or 0.8) * 100)
+        bgAlphaSlider.OnValueChanged = function(_, value)
+            moduleDB.backgroundOpacity = value / 100
+            if isEnabled then ApplyFrameStyle() end
+            pv()
+        end
+        local showBorderCB = MedaUI:CreateCheckbox(p, "Show Border")
+        showBorderCB:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        showBorderCB:SetChecked(moduleDB.showBorder ~= false)
+        showBorderCB.OnValueChanged = function(_, checked)
+            moduleDB.showBorder = checked
+            if isEnabled then ApplyFrameStyle() end
+            pv()
+        end
+    end
+
+    -- ===== Drinking Alert Tab =====
+    do
+        local p = tabs["alert"]
+        local yOff = 0
+
+        local hdr = MedaUI:CreateSectionHeader(p, "Drinking Alert")
+        hdr:SetPoint("TOPLEFT", LEFT_X, yOff)
+        yOff = yOff - 45
+
+        local alertEnCB = MedaUI:CreateCheckbox(p, "Enable Drinking Alert")
+        alertEnCB:SetPoint("TOPLEFT", LEFT_X, yOff)
+        alertEnCB:SetChecked(moduleDB.alertEnabled ~= false)
+        alertEnCB.OnValueChanged = function(_, checked)
+            moduleDB.alertEnabled = checked
+            if checked then
+                EnsureAlertFrame()
+                lv()
+                alertFrame:ShowPreview("Healer Drinking (Preview)")
+            else
+                HideAlert()
+                if alertFrame then alertFrame:DismissPreview() end
+            end
+            pv()
+        end
+        yOff = yOff - 30
+
+        local alertCombatCB = MedaUI:CreateCheckbox(p, "Only Alert During Combat")
+        alertCombatCB:SetPoint("TOPLEFT", LEFT_X, yOff)
+        alertCombatCB:SetChecked(moduleDB.alertOnlyInCombat ~= false)
+        alertCombatCB.OnValueChanged = function(_, checked)
+            moduleDB.alertOnlyInCombat = checked
+        end
+        local alertLockCB = MedaUI:CreateCheckbox(p, "Lock Alert Position")
+        alertLockCB:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        alertLockCB:SetChecked(moduleDB.alertLocked)
+        alertLockCB.OnValueChanged = function(_, checked) moduleDB.alertLocked = checked end
+        yOff = yOff - 30
+
+        local alertShowBarCB = MedaUI:CreateCheckbox(p, "Show Countdown Bar")
+        alertShowBarCB:SetPoint("TOPLEFT", LEFT_X, yOff)
+        alertShowBarCB:SetChecked(moduleDB.alertShowBar ~= false)
+        alertShowBarCB.OnValueChanged = function(_, checked)
+            moduleDB.alertShowBar = checked
+            lv(); pv()
+        end
+        yOff = yOff - 35
+
+        local alertSoundDD = MedaUI:CreateLabeledDropdown(p, "Alert Sound", 200, MedaUI:GetSoundList())
+        alertSoundDD:SetPoint("TOPLEFT", LEFT_X, yOff)
+        alertSoundDD:SetSelected(moduleDB.alertSound or "none")
+        alertSoundDD.OnValueChanged = function(_, value) moduleDB.alertSound = value end
+        local soundPreviewBtn = MedaUI:CreateButton(p, "Preview", 60, 24)
+        soundPreviewBtn:SetPoint("LEFT", alertSoundDD, "RIGHT", 8, -6)
+        soundPreviewBtn:SetScript("OnClick", function()
+            local path = MedaUI:GetSoundPath(moduleDB.alertSound)
+            if path then pcall(PlaySoundFile, path, "Master") end
+        end)
+        yOff = yOff - 55
+
+        local alertDurSlider = MedaUI:CreateLabeledSlider(p, "Alert Duration (sec)", 200, 1, 15, 0.5)
+        alertDurSlider:SetPoint("TOPLEFT", LEFT_X, yOff)
+        alertDurSlider:SetValue(moduleDB.alertDuration or 3)
+        alertDurSlider.OnValueChanged = function(_, value) moduleDB.alertDuration = value end
+        local alertScaleSlider = MedaUI:CreateLabeledSlider(p, "Alert Scale", 200, 50, 200, 5)
+        alertScaleSlider:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        alertScaleSlider:SetValue((moduleDB.alertScale or 1) * 100)
+        alertScaleSlider.OnValueChanged = function(_, value)
+            moduleDB.alertScale = value / 100
+            lv()
+        end
+        yOff = yOff - 55
+
+        local alertFontPicker = MedaUI:CreateLabeledDropdown(p, "Alert Font", 200, MedaUI:GetFontList(), "font")
+        alertFontPicker:SetPoint("TOPLEFT", LEFT_X, yOff)
+        alertFontPicker:SetSelected(moduleDB.alertFont or "default")
+        alertFontPicker.OnValueChanged = function(_, value)
+            moduleDB.alertFont = value
+            wipe(fontCache)
+            lv(); pv()
+        end
+        local alertSizeSlider = MedaUI:CreateLabeledSlider(p, "Alert Text Size", 200, 8, 48, 1)
+        alertSizeSlider:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        alertSizeSlider:SetValue(moduleDB.alertTextSize or 18)
+        alertSizeSlider.OnValueChanged = function(_, value)
+            moduleDB.alertTextSize = value
+            wipe(fontCache)
+            lv(); pv()
+        end
+        yOff = yOff - 55
+
+        local alertOutlineDD = MedaUI:CreateLabeledDropdown(p, "Alert Text Outline", 200, {
+            { value = "none", label = "None" },
+            { value = "outline", label = "Outline" },
+            { value = "thick", label = "Thick Outline" },
+        })
+        alertOutlineDD:SetPoint("TOPLEFT", LEFT_X, yOff)
+        alertOutlineDD:SetSelected(moduleDB.alertTextOutline or "outline")
+        alertOutlineDD.OnValueChanged = function(_, value)
+            moduleDB.alertTextOutline = value
+            wipe(fontCache)
+            lv(); pv()
+        end
+        local alertTextPicker = MedaUI:CreateLabeledColorPicker(p, "Alert Text Color")
+        alertTextPicker:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        local atc = moduleDB.alertTextColor or {0.33, 0.87, 1.0}
+        alertTextPicker:SetColor(atc[1], atc[2], atc[3])
+        alertTextPicker.OnColorChanged = function(_, r, g, b)
+            moduleDB.alertTextColor = {r, g, b}
+            lv(); pv()
+        end
+        yOff = yOff - 55
+
+        local alertBarPicker = MedaUI:CreateLabeledColorPicker(p, "Alert Bar Color")
+        alertBarPicker:SetPoint("TOPLEFT", LEFT_X, yOff)
+        local abc = moduleDB.alertBarColor or {0.2, 0.58, 1.0}
+        alertBarPicker:SetColor(abc[1], abc[2], abc[3])
+        alertBarPicker.OnColorChanged = function(_, r, g, b)
+            moduleDB.alertBarColor = {r, g, b}
+            lv(); pv()
+        end
+        local alertBarHSlider = MedaUI:CreateLabeledSlider(p, "Alert Bar Height", 200, 2, 10, 1)
+        alertBarHSlider:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        alertBarHSlider:SetValue(moduleDB.alertBarHeight or 4)
+        alertBarHSlider.OnValueChanged = function(_, value)
+            moduleDB.alertBarHeight = value
+            lv(); pv()
+        end
+        yOff = yOff - 55
+
+        local alertBgSlider = MedaUI:CreateLabeledSlider(p, "Alert Background Opacity", 200, 0, 100, 5)
+        alertBgSlider:SetPoint("TOPLEFT", LEFT_X, yOff)
+        alertBgSlider:SetValue((moduleDB.alertBgOpacity or 0.85) * 100)
+        alertBgSlider.OnValueChanged = function(_, value)
+            moduleDB.alertBgOpacity = value / 100
+            lv(); pv()
+        end
+        yOff = yOff - 55
+
+        local alertResetBtn = MedaUI:CreateButton(p, "Reset Alert Position")
+        alertResetBtn:SetPoint("TOPLEFT", LEFT_X, yOff)
+        alertResetBtn:SetScript("OnClick", function()
+            moduleDB.alertPoint = nil
+            if alertFrame then
+                alertFrame:RestorePosition(nil)
+                if alertFrame:IsShown() then
+                    alertFrame:ShowPreview("Healer Drinking (Preview)")
+                end
+            end
+        end)
+    end
+
+    MedaAuras:SetContentHeight(500)
+
     local sentinel = CreateFrame("Frame", nil, parent)
     sentinel:SetSize(1, 1)
     sentinel:SetPoint("TOPLEFT")
@@ -1622,7 +1594,10 @@ local MODULE_DEFAULTS = {
 MedaAuras:RegisterModule({
     name = MODULE_NAME,
     title = "Group Mana Tracker",
+    version = MODULE_VERSION,
+    stability = MODULE_STABILITY,
     description = "Displays healer mana for your group using visual tainted-value rendering.",
+    sidebarDesc = "Shows healer mana bars for your group in dungeons and raids.",
     defaults = MODULE_DEFAULTS,
     OnInitialize = OnInitialize,
     OnEnable = OnEnable,

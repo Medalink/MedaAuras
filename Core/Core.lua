@@ -109,6 +109,12 @@ end
 local modules = {}
 local moduleOrder = {}
 
+local STABILITY_COLORS = {
+    experimental = { 1.0, 0.6, 0.0 },
+    beta         = { 1.0, 0.85, 0.0 },
+    stable       = { 0.3, 0.85, 0.3 },
+}
+
 function MedaAuras:RegisterModule(config)
     if not config or not config.name then
         error("MedaAuras:RegisterModule requires a config table with a 'name' field")
@@ -222,9 +228,9 @@ local selectedModule = nil
 local sidebarButtons = {}
 local contentFrame
 
-local SIDEBAR_WIDTH = 200
-local PANEL_WIDTH = 720
-local PANEL_HEIGHT = 660
+local SIDEBAR_WIDTH = 280
+local PANEL_WIDTH = 820
+local PANEL_HEIGHT = 720
 local CONTENT_INSET = 14
 
 local scrollFrame
@@ -247,18 +253,16 @@ local function ClearContent()
     end
 end
 
-local moduleDescOffset = 0
-
 local function SetContentHeight(usedHeight)
     if scrollChild then
-        scrollChild:SetHeight(math.max(usedHeight + moduleDescOffset, scrollFrame:GetHeight()))
+        scrollChild:SetHeight(math.max(usedHeight, scrollFrame:GetHeight()))
     end
 end
 
 local function BuildGeneralConfig(parent)
     local yOff = 0
 
-    local _, _, headerContainer = MedaUI:CreateSectionHeader(parent, "General Settings")
+    local headerContainer = MedaUI:CreateSectionHeader(parent, "General Settings")
     headerContainer:SetPoint("TOPLEFT", 0, yOff)
     yOff = yOff - 40
 
@@ -302,7 +306,6 @@ local function LoadModuleConfig(modName)
     selectedModule = modName
     ClearContent()
     UpdateSidebarSelection()
-    moduleDescOffset = 0
 
     if modName == "General" then
         BuildGeneralConfig(contentFrame)
@@ -314,36 +317,8 @@ local function LoadModuleConfig(modName)
     local db = MedaAuras:GetModuleDB(modName)
     if not db then return end
 
-    local buildParent = contentFrame
-
-    if config.description and config.description ~= "" then
-        local desc = contentFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        desc:SetPoint("TOPLEFT", 4, -2)
-        desc:SetPoint("RIGHT", -4, 0)
-        desc:SetJustifyH("LEFT")
-        desc:SetWordWrap(true)
-        desc:SetText(config.description)
-        desc:SetTextColor(0.72, 0.72, 0.72)
-
-        local descHeight = desc:GetStringHeight() + 8
-
-        local sep = contentFrame:CreateTexture(nil, "ARTWORK")
-        sep:SetHeight(1)
-        sep:SetPoint("TOPLEFT", 0, -descHeight)
-        sep:SetPoint("TOPRIGHT", 0, -descHeight)
-        sep:SetColorTexture(1, 1, 1, 0.12)
-
-        descHeight = descHeight + 10
-        moduleDescOffset = descHeight
-
-        buildParent = CreateFrame("Frame", nil, contentFrame)
-        buildParent:SetPoint("TOPLEFT", 0, -descHeight)
-        buildParent:SetPoint("TOPRIGHT", 0, -descHeight)
-        buildParent:SetHeight(5000)
-    end
-
     if config.BuildConfig then
-        SafeCall(modName, config.BuildConfig, buildParent, db)
+        SafeCall(modName, config.BuildConfig, contentFrame, db)
     end
 
     -- If the module didn't set height, use a safe default
@@ -356,6 +331,11 @@ local function BuildSettingsPanel()
     if settingsPanel then return settingsPanel end
 
     settingsPanel = MedaUI:CreatePanel("MedaAurasSettingsPanel", PANEL_WIDTH, PANEL_HEIGHT, "MedaAuras Settings")
+    settingsPanel:SetResizable(true, {
+        minWidth = SIDEBAR_WIDTH + 300,
+        minHeight = 400,
+    })
+    tinsert(UISpecialFrames, "MedaAurasSettingsPanel")
 
     local content = settingsPanel:GetContent()
 
@@ -420,12 +400,14 @@ local function BuildSettingsPanel()
     end)
 
     -- Build sidebar buttons
-    local ROW_HEIGHT = 30
+    local GENERAL_ROW_HEIGHT = 30
+    local MODULE_ROW_HEIGHT = 56
     local yOff = -8
 
-    local function CreateSidebarButton(name, displayText, isModule)
+    local function CreateSidebarButton(name, displayText, isModule, modConfig)
+        local rowHeight = isModule and MODULE_ROW_HEIGHT or GENERAL_ROW_HEIGHT
         local btn = CreateFrame("Button", nil, sidebar, "BackdropTemplate")
-        btn:SetHeight(ROW_HEIGHT)
+        btn:SetHeight(rowHeight)
         btn:SetPoint("TOPLEFT", 6, yOff)
         btn:SetPoint("TOPRIGHT", -6, yOff)
         btn:SetBackdrop(MedaUI:CreateBackdrop(false))
@@ -438,23 +420,25 @@ local function BuildSettingsPanel()
         if isModule then
             local cbBox = CreateFrame("Button", nil, btn, "BackdropTemplate")
             cbBox:SetSize(16, 16)
-            cbBox:SetPoint("LEFT", 10, 0)
+            cbBox:SetPoint("TOPLEFT", 10, -8)
             cbBox:SetBackdrop(MedaUI:CreateBackdrop(true))
 
-            cbBox.check = cbBox:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-            cbBox.check:SetPoint("CENTER", 0, 1)
-            cbBox.check:SetText("")
+            cbBox.check = cbBox:CreateTexture(nil, "OVERLAY")
+            cbBox.check:SetTexture("Interface\\AddOns\\MedaUI\\Textures\\checkmark.tga")
+            cbBox.check:SetPoint("CENTER", 0, 0)
+            cbBox.check:SetSize(12, 12)
+            cbBox.check:Hide()
 
             local db = MedaAuras:GetModuleDB(name)
             if db and db.enabled then
-                cbBox.check:SetText("x")
+                cbBox.check:Show()
             end
 
             local function ApplyCBTheme()
                 local Theme = MedaUI.Theme
                 cbBox:SetBackdropColor(unpack(Theme.input))
                 cbBox:SetBackdropBorderColor(unpack(Theme.border))
-                cbBox.check:SetTextColor(unpack(Theme.gold))
+                cbBox.check:SetVertexColor(unpack(Theme.gold))
             end
             MedaUI:RegisterThemedWidget(cbBox, ApplyCBTheme)
             ApplyCBTheme()
@@ -464,12 +448,11 @@ local function BuildSettingsPanel()
                 if not mdb then return end
                 if mdb.enabled then
                     MedaAuras:DisableModule(name)
-                    cbBox.check:SetText("")
+                    cbBox.check:Hide()
                 else
                     MedaAuras:EnableModule(name)
-                    cbBox.check:SetText("x")
+                    cbBox.check:Show()
                 end
-                -- Refresh the config panel if this module is currently shown
                 if selectedModule == name then
                     LoadModuleConfig(name)
                 end
@@ -490,12 +473,48 @@ local function BuildSettingsPanel()
         end
 
         btn.label = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        btn.label:SetPoint("LEFT", labelAnchorLeft, 0)
-        btn.label:SetPoint("RIGHT", -6, 0)
         btn.label:SetJustifyH("LEFT")
         btn.label:SetWordWrap(false)
         btn.label:SetText(displayText)
-        btn.label:SetTextColor(unpack(MedaUI.Theme.text))
+
+        local stab = isModule and modConfig and modConfig.stability
+        local stabColor = stab and STABILITY_COLORS[stab]
+        if stabColor then
+            btn.label:SetTextColor(unpack(stabColor))
+        else
+            btn.label:SetTextColor(unpack(MedaUI.Theme.text))
+        end
+
+        if isModule then
+            btn.label:SetPoint("TOPLEFT", labelAnchorLeft, -7)
+
+            -- Version text (right-aligned, grey)
+            if modConfig and modConfig.version then
+                btn.versionLabel = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                btn.versionLabel:SetPoint("TOPRIGHT", -8, -8)
+                btn.versionLabel:SetTextColor(0.45, 0.45, 0.45)
+                btn.versionLabel:SetText("v" .. modConfig.version)
+
+                btn.label:SetPoint("RIGHT", btn.versionLabel, "LEFT", -6, 0)
+            else
+                btn.label:SetPoint("RIGHT", -6, 0)
+            end
+
+            -- Description text (below label, smaller, dimmer)
+            local sDesc = modConfig and modConfig.sidebarDesc
+            if sDesc and sDesc ~= "" then
+                btn.descLabel = btn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                btn.descLabel:SetPoint("TOPLEFT", labelAnchorLeft, -22)
+                btn.descLabel:SetPoint("RIGHT", -8, 0)
+                btn.descLabel:SetJustifyH("LEFT")
+                btn.descLabel:SetWordWrap(true)
+                btn.descLabel:SetText(sDesc)
+                btn.descLabel:SetTextColor(0.55, 0.55, 0.55)
+            end
+        else
+            btn.label:SetPoint("LEFT", labelAnchorLeft, 0)
+            btn.label:SetPoint("RIGHT", -6, 0)
+        end
 
         btn:SetScript("OnClick", function()
             LoadModuleConfig(name)
@@ -515,7 +534,17 @@ local function BuildSettingsPanel()
 
         MedaUI:RegisterThemedWidget(btn, function()
             local Theme = MedaUI.Theme
-            btn.label:SetTextColor(unpack(Theme.text))
+            if stabColor then
+                btn.label:SetTextColor(unpack(stabColor))
+            else
+                btn.label:SetTextColor(unpack(Theme.text))
+            end
+            if btn.versionLabel then
+                btn.versionLabel:SetTextColor(0.45, 0.45, 0.45)
+            end
+            if btn.descLabel then
+                btn.descLabel:SetTextColor(0.55, 0.55, 0.55)
+            end
             if name == selectedModule then
                 btn:SetBackdropColor(unpack(Theme.buttonHover))
                 btn:SetBackdropBorderColor(unpack(Theme.gold))
@@ -526,11 +555,11 @@ local function BuildSettingsPanel()
         end)
 
         sidebarButtons[name] = btn
-        yOff = yOff - ROW_HEIGHT
+        yOff = yOff - rowHeight
     end
 
     -- "General" always first
-    CreateSidebarButton("General", "General", false)
+    CreateSidebarButton("General", "General", false, nil)
 
     -- Separator
     local sep = sidebar:CreateTexture(nil, "ARTWORK")
@@ -543,11 +572,48 @@ local function BuildSettingsPanel()
     end)
     yOff = yOff - 12
 
-    -- Module buttons
+    -- Module buttons (alphabetical order)
+    table.sort(moduleOrder)
     for _, modName in ipairs(moduleOrder) do
         local config = modules[modName]
-        CreateSidebarButton(modName, config.title or modName, true)
+        CreateSidebarButton(modName, config.title or modName, true, config)
     end
+
+    -- Stability legend (pinned to sidebar bottom)
+    local legendSep = sidebar:CreateTexture(nil, "ARTWORK")
+    legendSep:SetHeight(1)
+    legendSep:SetPoint("BOTTOMLEFT", 10, 24)
+    legendSep:SetPoint("BOTTOMRIGHT", -10, 24)
+    legendSep:SetColorTexture(unpack(MedaUI.Theme.border))
+
+    local legendFrame = CreateFrame("Frame", nil, sidebar)
+    legendFrame:SetHeight(20)
+    legendFrame:SetPoint("BOTTOMLEFT", 8, 4)
+    legendFrame:SetPoint("BOTTOMRIGHT", -8, 4)
+
+    local legendEntries = {
+        { label = "Stable",       color = STABILITY_COLORS.stable },
+        { label = "Beta",         color = STABILITY_COLORS.beta },
+        { label = "Experimental", color = STABILITY_COLORS.experimental },
+    }
+    local lx = 0
+    for _, entry in ipairs(legendEntries) do
+        local dot = legendFrame:CreateTexture(nil, "ARTWORK")
+        dot:SetSize(6, 6)
+        dot:SetPoint("LEFT", lx, 0)
+        dot:SetColorTexture(unpack(entry.color))
+
+        local lbl = legendFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lbl:SetPoint("LEFT", lx + 9, 0)
+        lbl:SetText(entry.label)
+        lbl:SetTextColor(unpack(entry.color))
+
+        lx = lx + 9 + lbl:GetStringWidth() + 10
+    end
+
+    MedaUI:RegisterThemedWidget(legendFrame, function()
+        legendSep:SetColorTexture(unpack(MedaUI.Theme.border))
+    end)
 
     -- Default to General
     LoadModuleConfig("General")
@@ -569,6 +635,32 @@ function MedaAuras:SetContentHeight(height)
     SetContentHeight(height)
 end
 
+function MedaAuras:CreateConfigTabs(parent, tabs)
+    local tabBar = MedaUI:CreateTabBar(parent, tabs)
+    tabBar:SetPoint("TOPLEFT", 0, 0)
+    tabBar:SetPoint("RIGHT", 0, 0)
+
+    local frames = {}
+    for _, tab in ipairs(tabs) do
+        local f = CreateFrame("Frame", nil, parent)
+        f:SetPoint("TOPLEFT", 0, -36)
+        f:SetPoint("RIGHT", 0, 0)
+        f:SetHeight(5000)
+        f:Hide()
+        frames[tab.id] = f
+    end
+
+    frames[tabs[1].id]:Show()
+
+    tabBar.OnTabChanged = function(_, tabId)
+        for id, f in pairs(frames) do
+            if id == tabId then f:Show() else f:Hide() end
+        end
+    end
+
+    return tabBar, frames
+end
+
 function MedaAuras:RefreshModuleConfig()
     if selectedModule and settingsPanel and settingsPanel:IsShown() then
         LoadModuleConfig(selectedModule)
@@ -580,9 +672,9 @@ function MedaAuras:RefreshSidebarDot(modName)
     if btn and btn.cbBox then
         local db = self:GetModuleDB(modName)
         if db and db.enabled then
-            btn.cbBox.check:SetText("x")
+            btn.cbBox.check:Show()
         else
-            btn.cbBox.check:SetText("")
+            btn.cbBox.check:Hide()
         end
     end
 end

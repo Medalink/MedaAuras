@@ -6,6 +6,10 @@ local MedaUI = LibStub("MedaUI-1.0")
 -- Constants
 -- ============================================================================
 
+local MODULE_NAME      = "ManaTracker"
+local MODULE_VERSION   = "1.0"
+local MODULE_STABILITY = "stable"   -- "experimental" | "beta" | "stable"
+
 local PREFIX = "[ManaTracker]"
 local Enum_PowerType_Mana = Enum.PowerType.Mana
 local MANA_TOKEN = "MANA"
@@ -801,51 +805,10 @@ local MODULE_DEFAULTS = {
 -- ============================================================================
 
 local function BuildConfig(parent, db)
-    local yOff = 0
+    local LEFT_X, RIGHT_X = 0, 238
     local mode = db.displayMode or "bar"
     local isBar = (mode == "bar")
 
-    DestroyPreview()
-
-    -- Display Mode
-    local _, _, modeHeader = MedaUI:CreateSectionHeader(parent, "Display")
-    modeHeader:SetPoint("TOPLEFT", 0, yOff)
-    yOff = yOff - 40
-
-    local modeOptions = {
-        { value = "bar", label = "Bar" },
-        { value = "orb", label = "Orb" },
-    }
-    local modeDropdown = MedaUI:CreateDropdown(parent, 160, modeOptions)
-    modeDropdown:SetPoint("TOPLEFT", 0, yOff)
-    modeDropdown:SetSelected(mode)
-    modeDropdown.OnValueChanged = function(_, value)
-        db.displayMode = value
-        if containerFrame then
-            CreateDisplay(db)
-            OnManaEvent(db)
-        end
-        MedaAuras:ToggleSettings()
-        MedaAuras:ToggleSettings()
-    end
-
-    local modeLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    modeLabel:SetPoint("LEFT", modeDropdown, "RIGHT", 10, 0)
-    modeLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
-    modeLabel:SetText("Display Mode")
-    yOff = yOff - 40
-
-    -- Lock
-    local lockCb = MedaUI:CreateCheckbox(parent, "Lock Frame")
-    lockCb:SetPoint("TOPLEFT", 0, yOff)
-    lockCb:SetChecked(db.locked)
-    lockCb.OnValueChanged = function(_, checked)
-        db.locked = checked
-        UpdateLock(db)
-    end
-    yOff = yOff - 35
-
-    -- === Floating Side Preview ===
     DestroyPreview()
     do
         local PREVIEW_W = 280
@@ -856,11 +819,9 @@ local function BuildConfig(parent, db)
             pvBg:SetFrameStrata("HIGH")
             pvBg:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 6, 0)
             pvBg:SetSize(PREVIEW_W, PREVIEW_H)
-
             local pvInner = CreateFrame("Frame", nil, pvBg)
             pvInner:SetPoint("CENTER", 0, 0)
             pvBg.inner = pvInner
-
             previewContainer = pvBg
             pvBg:Show()
             CreatePreviewDisplay(db)
@@ -868,373 +829,284 @@ local function BuildConfig(parent, db)
         end
     end
 
-    -- === Border settings (near preview for real-time feedback) ===
-    local _, _, borderHeader = MedaUI:CreateSectionHeader(parent, "Border")
-    borderHeader:SetPoint("TOPLEFT", 0, yOff)
-    yOff = yOff - 40
+    local tabBar, tabs = MedaAuras:CreateConfigTabs(parent, {
+        { id = "display",    label = "Display" },
+        { id = "textcolors", label = "Text & Colors" },
+    })
 
-    local showBorderCb = MedaUI:CreateCheckbox(parent, "Show Border")
-    showBorderCb:SetPoint("TOPLEFT", 0, yOff)
-    showBorderCb:SetChecked(db.showBorder ~= false)
-    showBorderCb.OnValueChanged = function(_, checked)
-        db.showBorder = checked
-        OnManaEvent(db)
-    end
-    yOff = yOff - 30
+    -- ===== Display Tab =====
+    do
+        local p = tabs["display"]
+        local yOff = 0
 
-    local bc = db.borderColor or DEFAULT_BORDER_COLOR
-    local borderColorPicker = MedaUI:CreateColorPicker(parent, 24, 24, true)
-    borderColorPicker:SetPoint("TOPLEFT", 0, yOff)
-    borderColorPicker:SetColor(bc[1], bc[2], bc[3], bc[4] or 1)
-    borderColorPicker:SetScript("OnColorChanged", function(_, r, g, b, a)
-        db.borderColor = { r, g, b, a }
-        OnManaEvent(db)
-    end)
-    local borderColorLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    borderColorLabel:SetPoint("LEFT", borderColorPicker, "RIGHT", 10, 0)
-    borderColorLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
-    borderColorLabel:SetText("Border Color")
-    yOff = yOff - 35
-
-    local showOuterBorderCb = MedaUI:CreateCheckbox(parent, "Show Outer Border")
-    showOuterBorderCb:SetPoint("TOPLEFT", 0, yOff)
-    showOuterBorderCb:SetChecked(db.showOuterBorder ~= false)
-    showOuterBorderCb.OnValueChanged = function(_, checked)
-        db.showOuterBorder = checked
-        OnManaEvent(db)
-    end
-    yOff = yOff - 30
-
-    local outerBorderSizeSlider = MedaUI:CreateSlider(parent, 200, 1, 10, 1)
-    outerBorderSizeSlider:SetPoint("TOPLEFT", 0, yOff)
-    outerBorderSizeSlider:SetValue(db.outerBorderSize or 2)
-    outerBorderSizeSlider.OnValueChanged = function(_, value)
-        db.outerBorderSize = value
-        OnManaEvent(db)
-    end
-    local outerBorderSizeLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    outerBorderSizeLabel:SetPoint("LEFT", outerBorderSizeSlider, "RIGHT", 10, 0)
-    outerBorderSizeLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
-    outerBorderSizeLabel:SetText("Outer Border Size")
-    yOff = yOff - 35
-
-    local obc = db.outerBorderColor or { 0.0, 0.0, 0.0, 1.0 }
-    local outerBorderColorPicker = MedaUI:CreateColorPicker(parent, 24, 24, true)
-    outerBorderColorPicker:SetPoint("TOPLEFT", 0, yOff)
-    outerBorderColorPicker:SetColor(obc[1], obc[2], obc[3], obc[4] or 1)
-    outerBorderColorPicker:SetScript("OnColorChanged", function(_, r, g, b, a)
-        db.outerBorderColor = { r, g, b, a }
-        OnManaEvent(db)
-    end)
-    local outerBorderColorLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    outerBorderColorLabel:SetPoint("LEFT", outerBorderColorPicker, "RIGHT", 10, 0)
-    outerBorderColorLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
-    outerBorderColorLabel:SetText("Outer Border Color")
-    yOff = yOff - 35
-
-    -- === Bar-specific settings ===
-    if isBar then
-        local _, _, barHeader = MedaUI:CreateSectionHeader(parent, "Bar Settings")
-        barHeader:SetPoint("TOPLEFT", 0, yOff)
+        local hdr = MedaUI:CreateSectionHeader(p, "Display")
+        hdr:SetPoint("TOPLEFT", LEFT_X, yOff)
         yOff = yOff - 40
 
-        local widthSlider = MedaUI:CreateSlider(parent, 200, 50, 500, 1)
-        widthSlider:SetPoint("TOPLEFT", 0, yOff)
-        widthSlider:SetValue(db.width or DEFAULT_WIDTH)
-        widthSlider.OnValueChanged = function(_, value)
-            db.width = value
-            OnManaEvent(db)
-        end
-        local widthLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        widthLabel:SetPoint("LEFT", widthSlider, "RIGHT", 10, 0)
-        widthLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
-        widthLabel:SetText("Width")
-        yOff = yOff - 35
-
-        local heightSlider = MedaUI:CreateSlider(parent, 200, 8, 100, 1)
-        heightSlider:SetPoint("TOPLEFT", 0, yOff)
-        heightSlider:SetValue(db.height or DEFAULT_HEIGHT)
-        heightSlider.OnValueChanged = function(_, value)
-            db.height = value
-            OnManaEvent(db)
-        end
-        local heightLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        heightLabel:SetPoint("LEFT", heightSlider, "RIGHT", 10, 0)
-        heightLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
-        heightLabel:SetText("Height")
-        yOff = yOff - 35
-
-        local orientOptions = {
-            { value = "HORIZONTAL", label = "Horizontal" },
-            { value = "VERTICAL", label = "Vertical" },
+        local modeOptions = {
+            { value = "bar", label = "Bar" },
+            { value = "orb", label = "Orb" },
         }
-        local orientDropdown = MedaUI:CreateDropdown(parent, 160, orientOptions)
-        orientDropdown:SetPoint("TOPLEFT", 0, yOff)
-        orientDropdown:SetSelected(db.barOrientation or "HORIZONTAL")
-        orientDropdown.OnValueChanged = function(_, value)
-            db.barOrientation = value
-            OnManaEvent(db)
-        end
-        local orientLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        orientLabel:SetPoint("LEFT", orientDropdown, "RIGHT", 10, 0)
-        orientLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
-        orientLabel:SetText("Orientation")
-        yOff = yOff - 40
-
-        local barTexList = MedaUI:GetBarTextureList()
-        local barTexOptions = {}
-        for _, entry in ipairs(barTexList) do
-            barTexOptions[#barTexOptions + 1] = {
-                value = entry.id,
-                label = entry.name,
-                texture = MedaUI:GetBarTexture(entry.id),
-            }
-        end
-        if #barTexOptions > 0 then
-            local barTexLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            barTexLabel:SetPoint("TOPLEFT", 0, yOff)
-            barTexLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
-            barTexLabel:SetText("Bar Texture")
-            yOff = yOff - 18
-            local barTexDropdown = MedaUI:CreateDropdown(parent, 240, barTexOptions, "fill")
-            barTexDropdown:SetPoint("TOPLEFT", 0, yOff)
-            barTexDropdown:SetSelected(db.barTexture or "solid")
-            barTexDropdown.OnValueChanged = function(_, value)
-                db.barTexture = value
+        local modeDropdown = MedaUI:CreateLabeledDropdown(p, "Display Mode", 160, modeOptions)
+        modeDropdown:SetPoint("TOPLEFT", LEFT_X, yOff)
+        modeDropdown:SetSelected(mode)
+        modeDropdown.OnValueChanged = function(_, value)
+            db.displayMode = value
+            if containerFrame then
+                CreateDisplay(db)
                 OnManaEvent(db)
             end
-            yOff = yOff - 32
+            MedaAuras:ToggleSettings()
+            MedaAuras:ToggleSettings()
         end
-    end
+        local lockCb = MedaUI:CreateCheckbox(p, "Lock Frame")
+        lockCb:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        lockCb:SetChecked(db.locked)
+        lockCb.OnValueChanged = function(_, checked)
+            db.locked = checked
+            UpdateLock(db)
+        end
+        yOff = yOff - 55
 
-    -- === Orb-specific settings ===
-    if not isBar then
-        local _, _, orbHeader = MedaUI:CreateSectionHeader(parent, "Orb Settings")
-        orbHeader:SetPoint("TOPLEFT", 0, yOff)
+        local borderHdr = MedaUI:CreateSectionHeader(p, "Border")
+        borderHdr:SetPoint("TOPLEFT", LEFT_X, yOff)
         yOff = yOff - 40
 
-        local radiusSlider = MedaUI:CreateSlider(parent, 200, 16, 128, 1)
-        radiusSlider:SetPoint("TOPLEFT", 0, yOff)
-        radiusSlider:SetValue(db.orbRadius or (DEFAULT_ORB_SIZE / 2))
-        radiusSlider.OnValueChanged = function(_, value)
-            db.orbRadius = value
+        local showBorderCb = MedaUI:CreateCheckbox(p, "Show Border")
+        showBorderCb:SetPoint("TOPLEFT", LEFT_X, yOff)
+        showBorderCb:SetChecked(db.showBorder ~= false)
+        showBorderCb.OnValueChanged = function(_, checked)
+            db.showBorder = checked
             OnManaEvent(db)
         end
-        local radiusLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        radiusLabel:SetPoint("LEFT", radiusSlider, "RIGHT", 10, 0)
-        radiusLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
-        radiusLabel:SetText("Radius")
+        local showOuterBorderCb = MedaUI:CreateCheckbox(p, "Show Outer Border")
+        showOuterBorderCb:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        showOuterBorderCb:SetChecked(db.showOuterBorder ~= false)
+        showOuterBorderCb.OnValueChanged = function(_, checked)
+            db.showOuterBorder = checked
+            OnManaEvent(db)
+        end
+        yOff = yOff - 30
+
+        local bc = db.borderColor or DEFAULT_BORDER_COLOR
+        local borderColorPicker = MedaUI:CreateLabeledColorPicker(p, "Border Color", nil, true)
+        borderColorPicker:SetPoint("TOPLEFT", LEFT_X, yOff)
+        borderColorPicker:SetColor(bc[1], bc[2], bc[3], bc[4] or 1)
+        borderColorPicker.OnColorChanged = function(_, r, g, b, a)
+            db.borderColor = { r, g, b, a }
+            OnManaEvent(db)
+        end
+        local outerBorderSizeSlider = MedaUI:CreateLabeledSlider(p, "Outer Border Size", 200, 1, 10, 1)
+        outerBorderSizeSlider:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        outerBorderSizeSlider:SetValue(db.outerBorderSize or 2)
+        outerBorderSizeSlider.OnValueChanged = function(_, value)
+            db.outerBorderSize = value
+            OnManaEvent(db)
+        end
+        yOff = yOff - 55
+
+        local obc = db.outerBorderColor or { 0.0, 0.0, 0.0, 1.0 }
+        local outerBorderColorPicker = MedaUI:CreateLabeledColorPicker(p, "Outer Border Color", nil, true)
+        outerBorderColorPicker:SetPoint("TOPLEFT", LEFT_X, yOff)
+        outerBorderColorPicker:SetColor(obc[1], obc[2], obc[3], obc[4] or 1)
+        outerBorderColorPicker.OnColorChanged = function(_, r, g, b, a)
+            db.outerBorderColor = { r, g, b, a }
+            OnManaEvent(db)
+        end
         yOff = yOff - 35
 
-        local orbTexList = MedaUI:GetOrbTextureList()
-        local orbTexOptions = {}
-        for _, entry in ipairs(orbTexList) do
-            local maskPath = MedaUI:GetOrbTextures(entry.id)
-            orbTexOptions[#orbTexOptions + 1] = {
-                value = entry.id,
-                label = entry.name,
-                texture = maskPath,
+        if isBar then
+            local barHdr = MedaUI:CreateSectionHeader(p, "Bar Settings")
+            barHdr:SetPoint("TOPLEFT", LEFT_X, yOff)
+            yOff = yOff - 40
+
+            local widthSlider = MedaUI:CreateLabeledSlider(p, "Width", 200, 50, 500, 1)
+            widthSlider:SetPoint("TOPLEFT", LEFT_X, yOff)
+            widthSlider:SetValue(db.width or DEFAULT_WIDTH)
+            widthSlider.OnValueChanged = function(_, value) db.width = value; OnManaEvent(db) end
+            local heightSlider = MedaUI:CreateLabeledSlider(p, "Height", 200, 8, 100, 1)
+            heightSlider:SetPoint("TOPLEFT", RIGHT_X, yOff)
+            heightSlider:SetValue(db.height or DEFAULT_HEIGHT)
+            heightSlider.OnValueChanged = function(_, value) db.height = value; OnManaEvent(db) end
+            yOff = yOff - 55
+
+            local orientOptions = {
+                { value = "HORIZONTAL", label = "Horizontal" },
+                { value = "VERTICAL", label = "Vertical" },
             }
-        end
-        if #orbTexOptions > 0 then
-            local orbTexLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            orbTexLabel:SetPoint("TOPLEFT", 0, yOff)
-            orbTexLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
-            orbTexLabel:SetText("Orb Shape")
-            yOff = yOff - 18
-            local orbTexDropdown = MedaUI:CreateDropdown(parent, 180, orbTexOptions, "preview")
-            orbTexDropdown:SetPoint("TOPLEFT", 0, yOff)
-            orbTexDropdown:SetSelected(db.orbTexture or "solid")
-            orbTexDropdown.OnValueChanged = function(_, value)
-                db.orbTexture = value
-                if display and display.mode == "orb" then
-                    CreateDisplay(db)
-                    OnManaEvent(db)
+            local orientDropdown = MedaUI:CreateLabeledDropdown(p, "Orientation", 160, orientOptions)
+            orientDropdown:SetPoint("TOPLEFT", LEFT_X, yOff)
+            orientDropdown:SetSelected(db.barOrientation or "HORIZONTAL")
+            orientDropdown.OnValueChanged = function(_, value) db.barOrientation = value; OnManaEvent(db) end
+            yOff = yOff - 55
+
+            local barTexList = MedaUI:GetBarTextureList()
+            local barTexOptions = {}
+            for _, entry in ipairs(barTexList) do
+                barTexOptions[#barTexOptions + 1] = {
+                    value = entry.id, label = entry.name,
+                    texture = MedaUI:GetBarTexture(entry.id),
+                }
+            end
+            if #barTexOptions > 0 then
+                local barTexDropdown = MedaUI:CreateLabeledDropdown(p, "Bar Texture", 240, barTexOptions, "fill")
+                barTexDropdown:SetPoint("TOPLEFT", LEFT_X, yOff)
+                barTexDropdown:SetSelected(db.barTexture or "solid")
+                barTexDropdown.OnValueChanged = function(_, value) db.barTexture = value; OnManaEvent(db) end
+            end
+        else
+            local orbHdr = MedaUI:CreateSectionHeader(p, "Orb Settings")
+            orbHdr:SetPoint("TOPLEFT", LEFT_X, yOff)
+            yOff = yOff - 40
+
+            local radiusSlider = MedaUI:CreateLabeledSlider(p, "Radius", 200, 16, 128, 1)
+            radiusSlider:SetPoint("TOPLEFT", LEFT_X, yOff)
+            radiusSlider:SetValue(db.orbRadius or (DEFAULT_ORB_SIZE / 2))
+            radiusSlider.OnValueChanged = function(_, value) db.orbRadius = value; OnManaEvent(db) end
+            yOff = yOff - 55
+
+            local orbTexList = MedaUI:GetOrbTextureList()
+            local orbTexOptions = {}
+            for _, entry in ipairs(orbTexList) do
+                local maskPath = MedaUI:GetOrbTextures(entry.id)
+                orbTexOptions[#orbTexOptions + 1] = { value = entry.id, label = entry.name, texture = maskPath }
+            end
+            if #orbTexOptions > 0 then
+                local orbTexDropdown = MedaUI:CreateLabeledDropdown(p, "Orb Shape", 180, orbTexOptions, "preview")
+                orbTexDropdown:SetPoint("TOPLEFT", LEFT_X, yOff)
+                orbTexDropdown:SetSelected(db.orbTexture or "solid")
+                orbTexDropdown.OnValueChanged = function(_, value)
+                    db.orbTexture = value
+                    if display and display.mode == "orb" then CreateDisplay(db); OnManaEvent(db) end
                 end
+                yOff = yOff - 60
             end
-            yOff = yOff - 56
-        end
 
-        local fillTexList = MedaUI:GetBarTextureList()
-        local fillTexOptions = {}
-        for _, entry in ipairs(fillTexList) do
-            fillTexOptions[#fillTexOptions + 1] = {
-                value = entry.id,
-                label = entry.name,
-                texture = MedaUI:GetBarTexture(entry.id),
-            }
-        end
-        if #fillTexOptions > 0 then
-            local fillTexLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            fillTexLabel:SetPoint("TOPLEFT", 0, yOff)
-            fillTexLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
-            fillTexLabel:SetText("Fill Texture")
-            yOff = yOff - 18
-            local fillTexDropdown = MedaUI:CreateDropdown(parent, 240, fillTexOptions, "fill")
-            fillTexDropdown:SetPoint("TOPLEFT", 0, yOff)
-            fillTexDropdown:SetSelected(db.orbFillTexture or "solid")
-            fillTexDropdown.OnValueChanged = function(_, value)
-                db.orbFillTexture = value
-                OnManaEvent(db)
+            local fillTexList = MedaUI:GetBarTextureList()
+            local fillTexOptions = {}
+            for _, entry in ipairs(fillTexList) do
+                fillTexOptions[#fillTexOptions + 1] = {
+                    value = entry.id, label = entry.name,
+                    texture = MedaUI:GetBarTexture(entry.id),
+                }
             end
-            yOff = yOff - 32
+            if #fillTexOptions > 0 then
+                local fillTexDropdown = MedaUI:CreateLabeledDropdown(p, "Fill Texture", 240, fillTexOptions, "fill")
+                fillTexDropdown:SetPoint("TOPLEFT", LEFT_X, yOff)
+                fillTexDropdown:SetSelected(db.orbFillTexture or "solid")
+                fillTexDropdown.OnValueChanged = function(_, value) db.orbFillTexture = value; OnManaEvent(db) end
+            end
         end
     end
 
-    -- === Shared settings: Colors ===
-    local _, _, colorHeader = MedaUI:CreateSectionHeader(parent, "Colors")
-    colorHeader:SetPoint("TOPLEFT", 0, yOff)
-    yOff = yOff - 40
+    -- ===== Text & Colors Tab =====
+    do
+        local p = tabs["textcolors"]
+        local yOff = 0
 
-    local mc = db.manaColor or { 0.0, 0.56, 1.0, 1.0 }
-    local manaColorPicker = MedaUI:CreateColorPicker(parent, 24, 24, true)
-    manaColorPicker:SetPoint("TOPLEFT", 0, yOff)
-    manaColorPicker:SetColor(mc[1], mc[2], mc[3], mc[4] or 1)
-    manaColorPicker:SetScript("OnColorChanged", function(_, r, g, b, a)
-        db.manaColor = { r, g, b, a }
-        colorCurveColor = nil
-        EnsureColorCurve(db.manaColor)
-        OnManaEvent(db)
-    end)
-    local manaColorLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    manaColorLabel:SetPoint("LEFT", manaColorPicker, "RIGHT", 10, 0)
-    manaColorLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
-    manaColorLabel:SetText("Mana Color")
-    yOff = yOff - 35
+        local colorHdr = MedaUI:CreateSectionHeader(p, "Colors")
+        colorHdr:SetPoint("TOPLEFT", LEFT_X, yOff)
+        yOff = yOff - 40
 
-    local bgc = db.backgroundColor or DEFAULT_BG_COLOR
-    local bgColorPicker = MedaUI:CreateColorPicker(parent, 24, 24, false)
-    bgColorPicker:SetPoint("TOPLEFT", 0, yOff)
-    bgColorPicker:SetColor(bgc[1], bgc[2], bgc[3], bgc[4] or 1)
-    bgColorPicker:SetScript("OnColorChanged", function(_, r, g, b, a)
-        db.backgroundColor = { r, g, b, a or 1 }
-        OnManaEvent(db)
-    end)
-    local bgColorLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    bgColorLabel:SetPoint("LEFT", bgColorPicker, "RIGHT", 10, 0)
-    bgColorLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
-    bgColorLabel:SetText("Background Color")
-    yOff = yOff - 35
-
-    local bgSlider = MedaUI:CreateSlider(parent, 200, 0, 100, 1)
-    bgSlider:SetPoint("TOPLEFT", 0, yOff)
-    bgSlider:SetValue((db.backgroundOpacity or 0.8) * 100)
-    bgSlider.OnValueChanged = function(_, value)
-        db.backgroundOpacity = value / 100
-        OnManaEvent(db)
-    end
-    local bgLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    bgLabel:SetPoint("LEFT", bgSlider, "RIGHT", 10, 0)
-    bgLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
-    bgLabel:SetText("Background Opacity")
-    yOff = yOff - 40
-
-    -- === Shared settings: Text ===
-    local _, _, textHeader = MedaUI:CreateSectionHeader(parent, "Text")
-    textHeader:SetPoint("TOPLEFT", 0, yOff)
-    yOff = yOff - 40
-
-    local showTextCb = MedaUI:CreateCheckbox(parent, "Show Text")
-    showTextCb:SetPoint("TOPLEFT", 0, yOff)
-    showTextCb:SetChecked(db.showText)
-    showTextCb.OnValueChanged = function(_, checked)
-        db.showText = checked
-        OnManaEvent(db)
-    end
-    yOff = yOff - 30
-
-    local showPctCb = MedaUI:CreateCheckbox(parent, "Show Percentage")
-    showPctCb:SetPoint("TOPLEFT", 0, yOff)
-    showPctCb:SetChecked(db.showPercentage)
-    showPctCb.OnValueChanged = function(_, checked)
-        db.showPercentage = checked
-        OnManaEvent(db)
-    end
-    yOff = yOff - 30
-
-    local textSizeSlider = MedaUI:CreateSlider(parent, 200, 8, 28, 1)
-    textSizeSlider:SetPoint("TOPLEFT", 0, yOff)
-    textSizeSlider:SetValue(db.textSize or 14)
-    textSizeSlider.OnValueChanged = function(_, value)
-        db.textSize = value
-        OnManaEvent(db)
-    end
-    local textSizeLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    textSizeLabel:SetPoint("LEFT", textSizeSlider, "RIGHT", 10, 0)
-    textSizeLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
-    textSizeLabel:SetText("Text Size")
-    yOff = yOff - 35
-
-    local anchorOptions = {
-        { value = "CENTER", label = "Center" },
-        { value = "TOP", label = "Top" },
-        { value = "BOTTOM", label = "Bottom" },
-        { value = "LEFT", label = "Left" },
-        { value = "RIGHT", label = "Right" },
-    }
-    local anchorDropdown = MedaUI:CreateDropdown(parent, 160, anchorOptions)
-    anchorDropdown:SetPoint("TOPLEFT", 0, yOff)
-    anchorDropdown:SetSelected(db.textAnchor or "CENTER")
-    anchorDropdown.OnValueChanged = function(_, value)
-        db.textAnchor = value
-        OnManaEvent(db)
-    end
-    local anchorLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    anchorLabel:SetPoint("LEFT", anchorDropdown, "RIGHT", 10, 0)
-    anchorLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
-    anchorLabel:SetText("Text Anchor")
-    yOff = yOff - 40
-
-    local xOffsetBox = MedaUI:CreateEditBox(parent, 60, 24)
-    xOffsetBox:SetPoint("TOPLEFT", 0, yOff)
-    xOffsetBox:SetText(tostring(db.textOffsetX or 0))
-    local function ApplyXOffset(text)
-        local val = tonumber(text)
-        if val then
-            db.textOffsetX = val
+        local mc = db.manaColor or { 0.0, 0.56, 1.0, 1.0 }
+        local manaColorPicker = MedaUI:CreateLabeledColorPicker(p, "Mana Color", nil, true)
+        manaColorPicker:SetPoint("TOPLEFT", LEFT_X, yOff)
+        manaColorPicker:SetColor(mc[1], mc[2], mc[3], mc[4] or 1)
+        manaColorPicker.OnColorChanged = function(_, r, g, b, a)
+            db.manaColor = { r, g, b, a }
+            colorCurveColor = nil
+            EnsureColorCurve(db.manaColor)
             OnManaEvent(db)
         end
-    end
-    xOffsetBox.OnEnterPressed = function(_, text) ApplyXOffset(text) end
-    xOffsetBox.OnTextChanged = function(_, text) ApplyXOffset(text) end
-    local xOffsetLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    xOffsetLabel:SetPoint("LEFT", xOffsetBox, "RIGHT", 8, 0)
-    xOffsetLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
-    xOffsetLabel:SetText("Horizontal Offset")
-
-    local yOffsetBox = MedaUI:CreateEditBox(parent, 60, 24)
-    yOffsetBox:SetPoint("TOPLEFT", 180, yOff)
-    yOffsetBox:SetText(tostring(db.textOffsetY or 0))
-    local function ApplyYOffset(text)
-        local val = tonumber(text)
-        if val then
-            db.textOffsetY = val
+        local bgc = db.backgroundColor or DEFAULT_BG_COLOR
+        local bgColorPicker = MedaUI:CreateLabeledColorPicker(p, "Background Color", nil, false)
+        bgColorPicker:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        bgColorPicker:SetColor(bgc[1], bgc[2], bgc[3], bgc[4] or 1)
+        bgColorPicker.OnColorChanged = function(_, r, g, b, a)
+            db.backgroundColor = { r, g, b, a or 1 }
             OnManaEvent(db)
         end
-    end
-    yOffsetBox.OnEnterPressed = function(_, text) ApplyYOffset(text) end
-    yOffsetBox.OnTextChanged = function(_, text) ApplyYOffset(text) end
-    local yOffsetLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    yOffsetLabel:SetPoint("LEFT", yOffsetBox, "RIGHT", 8, 0)
-    yOffsetLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
-    yOffsetLabel:SetText("Vertical Offset")
-    yOff = yOff - 35
+        yOff = yOff - 35
 
-    -- Reset
-    local resetBtn = MedaUI:CreateButton(parent, "Reset to Defaults")
-    resetBtn:SetPoint("TOPLEFT", 0, yOff)
-    resetBtn:SetScript("OnClick", function()
-        for k, v in pairs(MODULE_DEFAULTS) do
-            db[k] = MedaAuras.DeepCopy(v)
+        local bgSlider = MedaUI:CreateLabeledSlider(p, "Background Opacity", 200, 0, 100, 1)
+        bgSlider:SetPoint("TOPLEFT", LEFT_X, yOff)
+        bgSlider:SetValue((db.backgroundOpacity or 0.8) * 100)
+        bgSlider.OnValueChanged = function(_, value)
+            db.backgroundOpacity = value / 100
+            OnManaEvent(db)
         end
-        MedaAuras:ToggleSettings()
-        MedaAuras:ToggleSettings()
-    end)
-    yOff = yOff - 45
+        yOff = yOff - 55
 
-    MedaAuras:SetContentHeight(math.abs(yOff))
+        local textHdr = MedaUI:CreateSectionHeader(p, "Text")
+        textHdr:SetPoint("TOPLEFT", LEFT_X, yOff)
+        yOff = yOff - 40
 
-    -- Sentinel: when the config page is cleared, hide the floating preview
+        local showTextCb = MedaUI:CreateCheckbox(p, "Show Text")
+        showTextCb:SetPoint("TOPLEFT", LEFT_X, yOff)
+        showTextCb:SetChecked(db.showText)
+        showTextCb.OnValueChanged = function(_, checked) db.showText = checked; OnManaEvent(db) end
+        local showPctCb = MedaUI:CreateCheckbox(p, "Show Percentage")
+        showPctCb:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        showPctCb:SetChecked(db.showPercentage)
+        showPctCb.OnValueChanged = function(_, checked) db.showPercentage = checked; OnManaEvent(db) end
+        yOff = yOff - 30
+
+        local textSizeSlider = MedaUI:CreateLabeledSlider(p, "Text Size", 200, 8, 28, 1)
+        textSizeSlider:SetPoint("TOPLEFT", LEFT_X, yOff)
+        textSizeSlider:SetValue(db.textSize or 14)
+        textSizeSlider.OnValueChanged = function(_, value) db.textSize = value; OnManaEvent(db) end
+        local anchorOptions = {
+            { value = "CENTER", label = "Center" },
+            { value = "TOP", label = "Top" },
+            { value = "BOTTOM", label = "Bottom" },
+            { value = "LEFT", label = "Left" },
+            { value = "RIGHT", label = "Right" },
+        }
+        local anchorDropdown = MedaUI:CreateLabeledDropdown(p, "Text Anchor", 160, anchorOptions)
+        anchorDropdown:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        anchorDropdown:SetSelected(db.textAnchor or "CENTER")
+        anchorDropdown.OnValueChanged = function(_, value) db.textAnchor = value; OnManaEvent(db) end
+        yOff = yOff - 55
+
+        local xOffsetBox = MedaUI:CreateLabeledEditBox(p, "X Offset", 60)
+        xOffsetBox:SetPoint("TOPLEFT", LEFT_X, yOff)
+        xOffsetBox:SetText(tostring(db.textOffsetX or 0))
+        local function ApplyXOffset(text)
+            local val = tonumber(text)
+            if val then db.textOffsetX = val; OnManaEvent(db) end
+        end
+        xOffsetBox.OnEnterPressed = function(_, text) ApplyXOffset(text) end
+        local xInner = xOffsetBox:GetControl()
+        if xInner and xInner.OnTextChanged ~= nil then
+            xInner.OnTextChanged = function(_, text) ApplyXOffset(text) end
+        end
+        local yOffsetBox = MedaUI:CreateLabeledEditBox(p, "Y Offset", 60)
+        yOffsetBox:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        yOffsetBox:SetText(tostring(db.textOffsetY or 0))
+        local function ApplyYOffset(text)
+            local val = tonumber(text)
+            if val then db.textOffsetY = val; OnManaEvent(db) end
+        end
+        yOffsetBox.OnEnterPressed = function(_, text) ApplyYOffset(text) end
+        local yInner = yOffsetBox:GetControl()
+        if yInner and yInner.OnTextChanged ~= nil then
+            yInner.OnTextChanged = function(_, text) ApplyYOffset(text) end
+        end
+        yOff = yOff - 50
+
+        local resetBtn = MedaUI:CreateButton(p, "Reset to Defaults")
+        resetBtn:SetPoint("TOPLEFT", LEFT_X, yOff)
+        resetBtn:SetScript("OnClick", function()
+            for k, v in pairs(MODULE_DEFAULTS) do
+                db[k] = MedaAuras.DeepCopy(v)
+            end
+            MedaAuras:ToggleSettings()
+            MedaAuras:ToggleSettings()
+        end)
+    end
+
+    MedaAuras:SetContentHeight(500)
+
     local sentinel = CreateFrame("Frame", nil, parent)
     sentinel:SetSize(1, 1)
     sentinel:SetPoint("TOPLEFT")
@@ -1249,9 +1121,12 @@ end
 -- ============================================================================
 
 MedaAuras:RegisterModule({
-    name = "ManaTracker",
+    name = MODULE_NAME,
     title = "Mana Tracker",
+    version = MODULE_VERSION,
+    stability = MODULE_STABILITY,
     description = "Displays your mana regardless of form or combat state.",
+    sidebarDesc = "Displays your mana regardless of current form or combat state.",
     defaults = MODULE_DEFAULTS,
     OnInitialize = OnInitialize,
     OnEnable = OnEnable,

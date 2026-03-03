@@ -6,7 +6,9 @@ local MedaUI = LibStub("MedaUI-1.0")
 -- Constants
 -- ============================================================================
 
-local MODULE_NAME = "ShutIt"
+local MODULE_NAME      = "ShutIt"
+local MODULE_VERSION   = "1.0"
+local MODULE_STABILITY = "beta"   -- "experimental" | "beta" | "stable"
 local PREFIX = "|cffff6666Shut It:|r"
 
 local MONSTER_EVENTS = {
@@ -1488,7 +1490,7 @@ local function BuildConfig(parent, moduleDB)
     db = moduleDB
     local yOff = 0
 
-    local _, _, hdr = MedaUI:CreateSectionHeader(parent, "Shut It")
+    local hdr = MedaUI:CreateSectionHeader(parent, "Shut It")
     hdr:SetPoint("TOPLEFT", 0, yOff)
     yOff = yOff - 45
 
@@ -1513,7 +1515,7 @@ local function BuildConfig(parent, moduleDB)
     yOff = yOff - 40
 
     -- Silenced NPCs summary
-    local _, _, hdr2 = MedaUI:CreateSectionHeader(parent, "Silenced NPCs")
+    local hdr2 = MedaUI:CreateSectionHeader(parent, "Silenced NPCs")
     hdr2:SetPoint("TOPLEFT", 0, yOff)
     yOff = yOff - 30
 
@@ -1658,10 +1660,13 @@ local slashCommands = {
 MedaAuras:RegisterModule({
     name          = MODULE_NAME,
     title         = "Shut It",
+    version       = MODULE_VERSION,
+    stability     = MODULE_STABILITY,
     description   = "Silence annoying NPCs. Target an NPC and click the minimap button to "
                  .. "instantly mute their chat, talking heads, and voice lines. Supports live "
                  .. "capture during delves and dungeons, manual NPC lookup by name or ID, "
                  .. "and muting specific Sound FileIDs and SoundKit IDs.",
+    sidebarDesc   = "Silence annoying NPCs by muting their chat, talking heads, and voice lines.",
     defaults      = MODULE_DEFAULTS,
     OnInitialize  = OnInitialize,
     OnEnable      = OnEnable,

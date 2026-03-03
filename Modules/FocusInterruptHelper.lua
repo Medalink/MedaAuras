@@ -3,6 +3,14 @@ local _, ns = ...
 local MedaUI = LibStub("MedaUI-1.0")
 
 -- ============================================================================
+-- Module Info
+-- ============================================================================
+
+local MODULE_NAME      = "FocusInterruptHelper"
+local MODULE_VERSION   = "1.1"
+local MODULE_STABILITY = "stable"   -- "experimental" | "beta" | "stable"
+
+-- ============================================================================
 -- Interrupt Spell Database
 -- ============================================================================
 
@@ -1045,60 +1053,48 @@ local MODULE_DEFAULTS = {
 -- ============================================================================
 
 local function BuildConfig(parent, db)
+    local LEFT_X, RIGHT_X = 0, 238
     local yOff = 0
     local UpdatePreviews
 
-    -- Section header
-    local _, _, headerContainer = MedaUI:CreateSectionHeader(parent, "Focus Interrupt Helper")
-    headerContainer:SetPoint("TOPLEFT", 0, yOff)
+    local headerContainer = MedaUI:CreateSectionHeader(parent, "Focus Interrupt Helper")
+    headerContainer:SetPoint("TOPLEFT", LEFT_X, yOff)
     yOff = yOff - 45
 
-    -- Enable/Disable
     local enableCB = MedaUI:CreateCheckbox(parent, "Enable Module")
-    enableCB:SetPoint("TOPLEFT", 0, yOff)
+    enableCB:SetPoint("TOPLEFT", LEFT_X, yOff)
     enableCB:SetChecked(db.enabled)
     enableCB.OnValueChanged = function(_, checked)
-        if checked then
-            MedaAuras:EnableModule("FocusInterruptHelper")
-        else
-            MedaAuras:DisableModule("FocusInterruptHelper")
-        end
+        if checked then MedaAuras:EnableModule("FocusInterruptHelper")
+        else MedaAuras:DisableModule("FocusInterruptHelper") end
         MedaAuras:RefreshSidebarDot("FocusInterruptHelper")
     end
     yOff = yOff - 35
 
-    -- Focus-only toggle
-    local focusCB = MedaUI:CreateCheckbox(parent, "Focus target only (hide when no focus)")
-    focusCB:SetPoint("TOPLEFT", 0, yOff)
+    local focusCB = MedaUI:CreateCheckbox(parent, "Focus target only")
+    focusCB:SetPoint("TOPLEFT", LEFT_X, yOff)
     focusCB:SetChecked(db.focusOnly)
-    focusCB.OnValueChanged = function(_, checked)
-        db.focusOnly = checked
-    end
-    yOff = yOff - 35
-
-    -- Display mode dropdown
-    local modeDropdown = MedaUI:CreateLabeledDropdown(parent, "Display Mode", 220, {
+    focusCB.OnValueChanged = function(_, checked) db.focusOnly = checked end
+    local modeDropdown = MedaUI:CreateLabeledDropdown(parent, "Display Mode", 200, {
         { value = "icon",    label = "Standalone Icon" },
         { value = "overlay", label = "Action Bar Overlay" },
-        { value = "hook",   label = "Auto-Detect (CD Hook)" },
+        { value = "hook",    label = "Auto-Detect (CD Hook)" },
     })
-    modeDropdown:SetPoint("TOPLEFT", 0, yOff)
+    modeDropdown:SetPoint("TOPLEFT", RIGHT_X, yOff)
     modeDropdown:SetSelected(db.displayMode)
-    yOff = yOff - 60
+    yOff = yOff - 55
 
-    -- Container frames for mode-specific settings
     local iconSettings = CreateFrame("Frame", nil, parent)
-    iconSettings:SetPoint("TOPLEFT", 0, yOff)
-    iconSettings:SetSize(320, 70)
+    iconSettings:SetPoint("TOPLEFT", LEFT_X, yOff)
+    iconSettings:SetSize(470, 55)
 
     local overlaySettings = CreateFrame("Frame", nil, parent)
-    overlaySettings:SetPoint("TOPLEFT", 0, yOff)
-    overlaySettings:SetSize(360, 70)
+    overlaySettings:SetPoint("TOPLEFT", LEFT_X, yOff)
+    overlaySettings:SetSize(470, 55)
 
-    -- Hook mode description (below the slider, only shown in hook mode)
     local hookDesc = overlaySettings:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    hookDesc:SetPoint("TOPLEFT", 0, -55)
-    hookDesc:SetWidth(340)
+    hookDesc:SetPoint("TOPLEFT", RIGHT_X, 0)
+    hookDesc:SetWidth(220)
     hookDesc:SetTextColor(unpack(MedaUI.Theme.textDim))
     hookDesc:SetText("Auto-Detect hooks action button updates to find your interrupt button automatically.")
     hookDesc:SetJustifyH("LEFT")
@@ -1115,88 +1111,64 @@ local function BuildConfig(parent, db)
         end
     end
 
-    -- Icon mode settings
     local lockCB = MedaUI:CreateCheckbox(iconSettings, "Lock Position")
-    lockCB:SetPoint("TOPLEFT", 0, 0)
+    lockCB:SetPoint("TOPLEFT", LEFT_X, 0)
     lockCB:SetChecked(db.locked)
-    lockCB.OnValueChanged = function(_, checked)
-        db.locked = checked
-    end
+    lockCB.OnValueChanged = function(_, checked) db.locked = checked end
 
     local sizeSlider = MedaUI:CreateLabeledSlider(iconSettings, "Icon Size", 200, 24, 96, 4)
-    sizeSlider:SetPoint("TOPLEFT", 0, -30)
+    sizeSlider:SetPoint("TOPLEFT", RIGHT_X, 0)
     sizeSlider:SetValue(db.iconSize)
-    sizeSlider.OnValueChanged = function(_, value)
-        db.iconSize = value
-        UpdateIconSize(db)
-    end
+    sizeSlider.OnValueChanged = function(_, value) db.iconSize = value; UpdateIconSize(db) end
 
-    -- Overlay mode settings
-    local alphaSlider = MedaUI:CreateLabeledSlider(overlaySettings, "Overlay Opacity", 180, 0.1, 0.8, 0.05)
-    alphaSlider:SetPoint("TOPLEFT", 0, 0)
+    local alphaSlider = MedaUI:CreateLabeledSlider(overlaySettings, "Overlay Opacity", 200, 0.1, 0.8, 0.05)
+    alphaSlider:SetPoint("TOPLEFT", LEFT_X, 0)
     alphaSlider:SetValue(db.overlayAlpha)
-    alphaSlider.OnValueChanged = function(_, value)
-        db.overlayAlpha = value
-    end
+    alphaSlider.OnValueChanged = function(_, value) db.overlayAlpha = value end
 
     UpdateModeVisibility()
-
     modeDropdown.OnValueChanged = function(_, value)
         SwitchDisplayMode(db, value)
         UpdateModeVisibility()
     end
 
-    -- Spacer for mode-specific settings
-    yOff = yOff - 80
+    yOff = yOff - 60
 
-    -- Common settings header
-    local _, _, commonHeader = MedaUI:CreateSectionHeader(parent, "Cooldown & Colors")
-    commonHeader:SetPoint("TOPLEFT", 0, yOff)
+    local commonHeader = MedaUI:CreateSectionHeader(parent, "Cooldown & Colors")
+    commonHeader:SetPoint("TOPLEFT", LEFT_X, yOff)
     yOff = yOff - 45
 
-    -- Auto-detect cooldown checkbox
     local detectedCD = nil
     if activeSpellID then
         for _, entry in ipairs(INTERRUPTS) do
-            if entry.id == activeSpellID then
-                detectedCD = entry.baseCD
-                break
-            end
+            if entry.id == activeSpellID then detectedCD = entry.baseCD; break end
         end
     end
 
     local autoCD = MedaUI:CreateCheckbox(parent, "Auto-detect cooldown")
-    autoCD:SetPoint("TOPLEFT", 0, yOff)
+    autoCD:SetPoint("TOPLEFT", LEFT_X, yOff)
     autoCD:SetChecked(not db.cooldownManual)
-
-    local autoCDHint = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    autoCDHint:SetPoint("LEFT", autoCD, "RIGHT", 120, 0)
-    autoCDHint:SetTextColor(unpack(MedaUI.Theme.textDim))
-    if detectedCD then
-        autoCDHint:SetText(format("(detected: %ds)", detectedCD))
-    end
-    yOff = yOff - 30
-
-    -- Cooldown duration slider
-    local cdSlider = MedaUI:CreateLabeledSlider(parent, "Cooldown Duration (sec)", 220, 5, 120, 1)
-    cdSlider:SetPoint("TOPLEFT", 0, yOff)
+    local cdSlider = MedaUI:CreateLabeledSlider(parent, "Cooldown Duration (sec)", 200, 5, 120, 1)
+    cdSlider:SetPoint("TOPLEFT", RIGHT_X, yOff)
     cdSlider:SetValue(db.cooldownDuration or detectedCD or 15)
+    local autoCDHint = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    autoCDHint:SetPoint("TOPLEFT", autoCD, "BOTTOMLEFT", 22, -4)
+    autoCDHint:SetTextColor(unpack(MedaUI.Theme.textDim))
+    if detectedCD then autoCDHint:SetText(format("(detected: %ds)", detectedCD)) end
+    yOff = yOff - 68
 
     local function UpdateCDSliderState()
         if not db.cooldownManual then
             if detectedCD then
                 db.cooldownDuration = detectedCD
                 cdSlider:SetValue(detectedCD)
-                if activeSpellID then
-                    ns.Services.CooldownTimer:SetDuration(activeSpellID, detectedCD)
-                end
+                if activeSpellID then ns.Services.CooldownTimer:SetDuration(activeSpellID, detectedCD) end
             end
             cdSlider:SetAlpha(0.5)
         else
             cdSlider:SetAlpha(1)
         end
     end
-
     UpdateCDSliderState()
 
     cdSlider.OnValueChanged = function(_, value)
@@ -1204,26 +1176,19 @@ local function BuildConfig(parent, db)
         db.cooldownManual = true
         autoCD:SetChecked(false)
         cdSlider:SetAlpha(1)
-        if activeSpellID then
-            ns.Services.CooldownTimer:SetDuration(activeSpellID, value)
-        end
+        if activeSpellID then ns.Services.CooldownTimer:SetDuration(activeSpellID, value) end
     end
-
     autoCD.OnValueChanged = function(_, checked)
         db.cooldownManual = not checked
         UpdateCDSliderState()
     end
 
-    yOff = yOff - 60
-
-    -- Custom icon spell ID
     local iconIDInput = MedaUI:CreateLabeledEditBox(parent, "Icon Spell ID (cosmetic only)", 180)
-    iconIDInput:SetPoint("TOPLEFT", 0, yOff)
+    iconIDInput:SetPoint("TOPLEFT", LEFT_X, yOff)
     iconIDInput:SetText(db.iconSpellID and tostring(db.iconSpellID) or "")
     iconIDInput:GetControl():SetPlaceholder("Auto-detect")
     iconIDInput.editBox = iconIDInput:GetControl()
     iconIDInput.editBox.editBox:SetNumeric(false)
-
     local iconIDHint = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     iconIDHint:SetPoint("TOPLEFT", iconIDInput, "TOPRIGHT", 10, -18)
     iconIDHint:SetTextColor(unpack(MedaUI.Theme.textDim))
@@ -1236,58 +1201,35 @@ local function BuildConfig(parent, db)
             iconIDHint:SetText("(using detected spell)")
         else
             local tex = C_Spell.GetSpellTexture(id)
-            if tex then
-                db.iconSpellID = id
-                iconIDHint:SetText("")
-            else
-                iconIDHint:SetText("|cffff4444Invalid spell ID|r")
-                return
-            end
+            if tex then db.iconSpellID = id; iconIDHint:SetText("")
+            else iconIDHint:SetText("|cffff4444Invalid spell ID|r"); return end
         end
-
         local newTex = ResolveIconTexture(db)
-        if iconFrame and iconFrame.icon then
-            iconFrame.icon:SetTexture(newTex)
-        end
+        if iconFrame and iconFrame.icon then iconFrame.icon:SetTexture(newTex) end
         if UpdatePreviews then UpdatePreviews() end
     end
-
-    iconIDInput.OnEnterPressed = function(_, text)
-        ApplyIconSpellID(text)
-    end
-
+    iconIDInput.OnEnterPressed = function(_, text) ApplyIconSpellID(text) end
     yOff = yOff - 58
 
-    -- Color pickers
     local readyColor = MedaUI:CreateLabeledColorPicker(parent, "In Range + Ready")
-    readyColor:SetPoint("TOPLEFT", 0, yOff)
+    readyColor:SetPoint("TOPLEFT", LEFT_X, yOff)
     readyColor:SetColor(db.colorReady.r, db.colorReady.g, db.colorReady.b)
     readyColor.OnColorChanged = function(_, r, g, b)
-        db.colorReady.r = r
-        db.colorReady.g = g
-        db.colorReady.b = b
+        db.colorReady = { r = r, g = g, b = b }
         if UpdatePreviews then UpdatePreviews() end
     end
-    yOff = yOff - 38
-
     local oorColor = MedaUI:CreateLabeledColorPicker(parent, "Out of Range")
-    oorColor:SetPoint("TOPLEFT", 0, yOff)
+    oorColor:SetPoint("TOPLEFT", LEFT_X + 160, yOff)
     oorColor:SetColor(db.colorOOR.r, db.colorOOR.g, db.colorOOR.b)
     oorColor.OnColorChanged = function(_, r, g, b)
-        db.colorOOR.r = r
-        db.colorOOR.g = g
-        db.colorOOR.b = b
+        db.colorOOR = { r = r, g = g, b = b }
         if UpdatePreviews then UpdatePreviews() end
     end
-    yOff = yOff - 38
-
     local oncdColor = MedaUI:CreateLabeledColorPicker(parent, "In Range + On CD")
-    oncdColor:SetPoint("TOPLEFT", 0, yOff)
+    oncdColor:SetPoint("TOPLEFT", LEFT_X + 320, yOff)
     oncdColor:SetColor(db.colorOnCD.r, db.colorOnCD.g, db.colorOnCD.b)
     oncdColor.OnColorChanged = function(_, r, g, b)
-        db.colorOnCD.r = r
-        db.colorOnCD.g = g
-        db.colorOnCD.b = b
+        db.colorOnCD = { r = r, g = g, b = b }
         if UpdatePreviews then UpdatePreviews() end
     end
     yOff = yOff - 48
@@ -1295,11 +1237,9 @@ local function BuildConfig(parent, db)
     -- ================================================================
     -- Floating Side Preview (all 4 states)
     -- ================================================================
-
     local PREVIEW_SIZE = 46
     local PREVIEW_GAP = 12
     local previewIcons = {}
-
     local spellTex = ResolveIconTexture(db)
 
     local previewStates = {
@@ -1359,7 +1299,6 @@ local function BuildConfig(parent, db)
 
                 previewIcons[i] = { frame = f, info = info }
             end
-
             pvContainer:Show()
         end
     end
@@ -1369,9 +1308,7 @@ local function BuildConfig(parent, db)
         for _, entry in ipairs(previewIcons) do
             local f = entry.frame
             local info = entry.info
-
             f.icon:SetTexture(tex)
-
             if info.key == "hidden" then
                 f:SetBackdropBorderColor(unpack(MedaUI.Theme.textDim))
                 f.colorOverlay:SetColorTexture(0, 0, 0, 0)
@@ -1388,25 +1325,20 @@ local function BuildConfig(parent, db)
             end
         end
     end
-
     UpdatePreviews()
 
-    -- Detected spell info
     if activeSpellName and activeSpellID then
         local infoLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        infoLabel:SetPoint("TOPLEFT", 0, yOff)
+        infoLabel:SetPoint("TOPLEFT", LEFT_X, yOff)
         infoLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
         infoLabel:SetText(format("Detected: %s (ID %d)", activeSpellName, activeSpellID))
         yOff = yOff - 30
     end
 
-    -- Reset button
     local resetBtn = MedaUI:CreateButton(parent, "Reset to Defaults")
-    resetBtn:SetPoint("TOPLEFT", 0, yOff)
+    resetBtn:SetPoint("TOPLEFT", LEFT_X, yOff)
     resetBtn:SetScript("OnClick", function()
-        for k, v in pairs(MODULE_DEFAULTS) do
-            db[k] = MedaAuras.DeepCopy(v)
-        end
+        for k, v in pairs(MODULE_DEFAULTS) do db[k] = MedaAuras.DeepCopy(v) end
         MedaAuras:ToggleSettings()
         MedaAuras:ToggleSettings()
     end)
@@ -1414,7 +1346,6 @@ local function BuildConfig(parent, db)
 
     MedaAuras:SetContentHeight(math.abs(yOff))
 
-    -- Sentinel: when the config page is cleared, hide the floating preview
     local sentinel = CreateFrame("Frame", nil, parent)
     sentinel:SetSize(1, 1)
     sentinel:SetPoint("TOPLEFT")
@@ -1433,9 +1364,12 @@ end
 -- ============================================================================
 
 MedaAuras:RegisterModule({
-    name = "FocusInterruptHelper",
+    name = MODULE_NAME,
     title = "Focus Interrupt Helper",
+    version = MODULE_VERSION,
+    stability = MODULE_STABILITY,
     description = "Highlights your interrupt spell based on range and cooldown status of focus/target.",
+    sidebarDesc = "Highlights your interrupt spell based on focus target interruptability.",
     defaults = MODULE_DEFAULTS,
     OnInitialize = OnInitialize,
     OnEnable = OnEnable,
