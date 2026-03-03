@@ -43,14 +43,30 @@
 
 - 🛡️ **Group coverage panel** — live dispel and utility audit for your dungeon party, auto-triggered on instance entry
 - 💊 **Dispel tracking** — shows which debuff types your group can remove (curse, poison, disease, magic) with severity-coded rows
-- ⚔️ **Utility tracking** — monitors Bloodlust and Battle Res coverage with gap warnings
-- 📊 **Build recommendations** — surfaces top M+ talent builds from Archon, Wowhead, and Icy Veins with export strings, popularity, key level, and DPS
-- 🔀 **Source filtering** — enable or disable recommendation sources (Wowhead, Icy Veins, Archon) individually; at least one must stay active
+- ⚔️ **Utility tracking** — monitors Bloodlust, Battle Res, Purge/Spellsteal, Enrage removal (Soothe), and Group Stealth (Shroud)
+- 🏰 **Midnight dungeons** — full data for all 8 new Midnight dungeons + 4 returning Season 1 M+ dungeons, with per-dungeon hazard notes and dispel priorities
+- 🔮 **Dungeon-specific rules** — smart severity escalation (e.g., missing Curse dispel is critical in Windrunner Spire, missing Purge is critical in Magister's Terrace)
+- 🔍 **Name-based fallback** — gracefully handles provisional instance IDs via `GetInstanceInfo()` name matching; use `/reminders instanceinfo` to verify IDs in-game
+- 🕳️ **Delve support** — auto-detects delves with context-aware recommendations via `C_PartyInfo.IsDelveInProgress()`
+- 📊 **Tabbed interface** — Group Comp tab for live audit, Talents tab for context-aware build recommendations
+- 🎯 **Talent recommendations** — surfaces top M+ talent and hero talent builds with export strings, popularity, key level, and DPS
+- 📋 **Copy-to-clipboard** — one-click copy for talent export strings
+- 🔀 **Source-agnostic filtering** — data sources (Archon, Wowhead, Icy Veins, and any future providers) are defined in the data layer; the addon discovers them automatically. Enable/disable individually in settings
 - 🎯 **Personal talent reminders** — spec-specific suggestions when you're missing key talents for your content
 - 🔔 **Notification banners** — configurable severity-gated alerts with adjustable duration when entering dungeons with coverage gaps
-- 🗺️ **Context override** — test your group composition against any dungeon from the dropdown without zoning in
+- 🗺️ **Context override** — test your group composition against any dungeon or delve from the dropdown without zoning in
 - 📌 **Minimap button** — one-click toggle for the coverage panel
 - 🎨 **Theme controls** — panel width, background toggle, and opacity slider
+
+### Shut It
+
+- 🔇 **One-click NPC silencing** — target an NPC and click the minimap button to instantly mute their chat messages and talking head dialog; no confirmation step, takes effect immediately
+- 🎯 **Live capture** — runs in the background during delves, dungeons, and open world; logs every message the NPC tries to say while suppressing it in real-time
+- 📋 **NPC Explorer** — browse and manage all silenced NPCs in a list/detail panel; search by name or NPC ID to add entries manually without needing to target the NPC in-game
+- 🔊 **Sound FileID & SoundKit ID muting** — enter specific sound IDs (from wowhead or wow.tools) per NPC to mute their voice lines via `MuteSoundFile`
+- 🗣️ **Talking head suppression** — automatically hides the talking head frame and kills the voice-over audio for silenced NPCs
+- 📤 **Export / Import** — share your silenced NPC list with friends via a copyable string; per-NPC or export-all, with a paste-to-import popup
+- ⌨️ **Slash commands** — `/mwa shutit` (open explorer), `scan` (silence target), `stop` (stop capture), `list` (print all), `export`, `import`
 
 ### Gone Fishin'
 

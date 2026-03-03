@@ -86,7 +86,7 @@ D.capabilities.dispel_poison = {
             specID    = 65,
             spellID   = 4987,
             spellName = "Cleanse",
-            note      = "Holy only. Also removes magic and disease. 8 sec CD.",
+            note      = "Holy only. Also removes magic and disease. 8 sec CD. [Wowhead: Dispel Venomous Spit with Cleanse on cooldown and be ready to spot heal people with multiple stacks.]",
         },
         {
             class     = "MONK",
@@ -150,7 +150,7 @@ D.capabilities.dispel_disease = {
             specID    = 65,
             spellID   = 4987,
             spellName = "Cleanse",
-            note      = "Holy only. Also removes magic and poison. 8 sec CD.",
+            note      = "Holy only. Also removes magic and poison. 8 sec CD. [Wowhead: Dispel Venomous Spit with Cleanse on cooldown and be ready to spot heal people with multiple stacks.]",
         },
         {
             class     = "MONK",
@@ -235,7 +235,7 @@ D.capabilities.dispel_magic = {
             specID    = 65,
             spellID   = 4987,
             spellName = "Cleanse",
-            note      = "Holy only. Also removes poison and disease. 8 sec CD.",
+            note      = "Holy only. Also removes poison and disease. 8 sec CD. [Wowhead: Dispel Venomous Spit with Cleanse on cooldown and be ready to spot heal people with multiple stacks.]",
         },
         {
             class     = "MONK",

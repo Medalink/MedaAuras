@@ -247,9 +247,11 @@ local function ClearContent()
     end
 end
 
+local moduleDescOffset = 0
+
 local function SetContentHeight(usedHeight)
     if scrollChild then
-        scrollChild:SetHeight(math.max(usedHeight, scrollFrame:GetHeight()))
+        scrollChild:SetHeight(math.max(usedHeight + moduleDescOffset, scrollFrame:GetHeight()))
     end
 end
 
@@ -300,6 +302,7 @@ local function LoadModuleConfig(modName)
     selectedModule = modName
     ClearContent()
     UpdateSidebarSelection()
+    moduleDescOffset = 0
 
     if modName == "General" then
         BuildGeneralConfig(contentFrame)
@@ -311,8 +314,36 @@ local function LoadModuleConfig(modName)
     local db = MedaAuras:GetModuleDB(modName)
     if not db then return end
 
+    local buildParent = contentFrame
+
+    if config.description and config.description ~= "" then
+        local desc = contentFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        desc:SetPoint("TOPLEFT", 4, -2)
+        desc:SetPoint("RIGHT", -4, 0)
+        desc:SetJustifyH("LEFT")
+        desc:SetWordWrap(true)
+        desc:SetText(config.description)
+        desc:SetTextColor(0.72, 0.72, 0.72)
+
+        local descHeight = desc:GetStringHeight() + 8
+
+        local sep = contentFrame:CreateTexture(nil, "ARTWORK")
+        sep:SetHeight(1)
+        sep:SetPoint("TOPLEFT", 0, -descHeight)
+        sep:SetPoint("TOPRIGHT", 0, -descHeight)
+        sep:SetColorTexture(1, 1, 1, 0.12)
+
+        descHeight = descHeight + 10
+        moduleDescOffset = descHeight
+
+        buildParent = CreateFrame("Frame", nil, contentFrame)
+        buildParent:SetPoint("TOPLEFT", 0, -descHeight)
+        buildParent:SetPoint("TOPRIGHT", 0, -descHeight)
+        buildParent:SetHeight(5000)
+    end
+
     if config.BuildConfig then
-        SafeCall(modName, config.BuildConfig, contentFrame, db)
+        SafeCall(modName, config.BuildConfig, buildParent, db)
     end
 
     -- If the module didn't set height, use a safe default

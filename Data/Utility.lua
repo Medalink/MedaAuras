@@ -136,3 +136,197 @@ D.capabilities.battle_res = {
     personalReminder = nil,
 }
 
+D.capabilities.offensive_dispel = {
+    label       = "Offensive Dispel (Purge)",
+    description = "Ability to remove beneficial magic effects from enemies. Critical for stripping shields, buffs, and enrages from dangerous mobs.",
+    icon        = 136075,
+    color       = { 0.9, 0.3, 0.9 },
+    tags        = { "utility", "offensive" },
+
+    providers = {
+        {
+            class     = "SHAMAN",
+            specID    = nil,
+            spellID   = 370,
+            spellName = "Purge",
+            note      = "Removes 1 beneficial magic effect from an enemy.",
+        },
+        {
+            class     = "MAGE",
+            specID    = nil,
+            spellID   = 30449,
+            spellName = "Spellsteal",
+            note      = "Steals a beneficial magic effect. Can be powerful with the right buffs.",
+        },
+        {
+            class     = "PRIEST",
+            specID    = nil,
+            spellID   = 528,
+            spellName = "Dispel Magic",
+            note      = "Can be cast on enemies to remove 1 beneficial effect.",
+        },
+        {
+            class     = "DEMONHUNTER",
+            specID    = nil,
+            spellID   = 278326,
+            spellName = "Consume Magic",
+            note      = "Removes 1 beneficial magic effect and generates Fury.",
+        },
+        {
+            class     = "HUNTER",
+            specID    = nil,
+            spellID   = 19801,
+            spellName = "Tranquilizing Shot",
+            note      = "Removes 1 Enrage and 1 Magic effect from an enemy. [Wowhead: Use Tranquilizing Shot to remove Restorative Algae from Disturbed Kelp .]",
+        },
+        {
+            class     = "WARLOCK",
+            specID    = nil,
+            spellID   = 19505,
+            spellName = "Devour Magic",
+            note      = "Felhunter pet ability. Removes 1 beneficial magic effect.",
+        },
+        {
+            class     = "EVOKER",
+            specID    = 1467,
+            spellID   = 372048,
+            spellName = "Oppressing Roar",
+            note      = "Devastation only. Removes 1 Enrage effect in AoE. [Wowhead: Cauterizing Flame (Bleed dispels). Spatial Paradox (Healer movement). Time Spiral (Group movement). Oppressing Roar with Overawe (Useful if there is a need for CC and the removal of Enrage effects). Z]",
+        },
+    },
+
+    conditions = {
+        none = {
+            severity    = "warning",
+            banner      = "No offensive dispel (Purge) in group!",
+            panelStatus = "NONE",
+            detail      = "Nobody can remove enemy buffs or shields. Some dungeon mechanics require purging.",
+            suggestion  = "Bring a Shaman, Mage, Priest, DH, Hunter, or Warlock.",
+        },
+        single = {
+            severity    = nil,
+            banner      = nil,
+            panelStatus = nil,
+            detail      = "One offensive dispel available.",
+            suggestion  = nil,
+        },
+        adequate = {
+            severity    = nil,
+            banner      = nil,
+            panelStatus = nil,
+            detail      = "Offensive dispel well covered.",
+            suggestion  = nil,
+        },
+    },
+
+    thresholds = { none = 0, single = 1, adequate = 2 },
+
+    personalReminder = nil,
+}
+
+D.capabilities.soothe = {
+    label       = "Enrage Removal (Soothe)",
+    description = "Ability to remove Enrage effects from enemies. Important when mobs gain significant damage buffs from enraging.",
+    icon        = 132163,
+    color       = { 0.4, 0.8, 0.4 },
+    tags        = { "utility", "offensive" },
+
+    providers = {
+        {
+            class     = "DRUID",
+            specID    = nil,
+            spellID   = 2908,
+            spellName = "Soothe",
+            note      = "Removes all Enrage effects from an enemy. 10 sec CD.",
+        },
+        {
+            class     = "HUNTER",
+            specID    = nil,
+            spellID   = 19801,
+            spellName = "Tranquilizing Shot",
+            note      = "Removes 1 Enrage and 1 Magic effect. 10 sec CD. [Wowhead: Use Tranquilizing Shot to remove Restorative Algae from Disturbed Kelp .]",
+        },
+        {
+            class     = "ROGUE",
+            specID    = nil,
+            spellID   = 5765,
+            spellName = "Shiv",
+            note      = "Applies concentrated poison which can remove Enrage when using specific poisons. [Wowhead: If your groups need an enrage dispell: Iron Stomach → Shiv . In dungeons with long downtime between packs: Exhilarating Execution → Shrouded in Darkness . Can be combined with Stillshroud .]",
+        },
+    },
+
+    conditions = {
+        none = {
+            severity    = "info",
+            banner      = nil,
+            panelStatus = "NONE",
+            detail      = "No Enrage removal available. Enraged mobs will need to be kited or burned.",
+            suggestion  = "A Druid (Soothe) or Hunter (Tranq Shot) can remove Enrage.",
+        },
+        single = {
+            severity    = nil,
+            banner      = nil,
+            panelStatus = nil,
+            detail      = "One soothe available.",
+            suggestion  = nil,
+        },
+        adequate = {
+            severity    = nil,
+            banner      = nil,
+            panelStatus = nil,
+            detail      = "Enrage removal well covered.",
+            suggestion  = nil,
+        },
+    },
+
+    thresholds = { none = 0, single = 1, adequate = 1 },
+
+    personalReminder = nil,
+}
+
+D.capabilities.shroud = {
+    label       = "Group Stealth (Shroud)",
+    description = "Ability to stealth the entire party, allowing the group to skip trash packs. A powerful routing tool in M+.",
+    icon        = 635350,
+    color       = { 0.5, 0.5, 0.7 },
+    tags        = { "utility", "routing" },
+
+    providers = {
+        {
+            class     = "ROGUE",
+            specID    = nil,
+            spellID   = 114018,
+            spellName = "Shroud of Concealment",
+            note      = "Stealths all party members within 20 yards for 15 sec. 6 min CD.",
+        },
+    },
+
+    conditions = {
+        none = {
+            severity    = "info",
+            banner      = nil,
+            panelStatus = "None",
+            detail      = "No group stealth available. May need to pull extra packs or use other skips.",
+            suggestion  = "A Rogue provides Shroud of Concealment for group skips.",
+        },
+        single = {
+            severity    = nil,
+            banner      = nil,
+            panelStatus = nil,
+            detail      = "Shroud available for one skip per key.",
+            suggestion  = nil,
+        },
+        adequate = {
+            severity    = nil,
+            banner      = nil,
+            panelStatus = nil,
+            detail      = "Group stealth covered.",
+            suggestion  = nil,
+        },
+    },
+
+    thresholds = { none = 0, single = 1, adequate = 1 },
+
+    personalReminder = nil,
+}
+

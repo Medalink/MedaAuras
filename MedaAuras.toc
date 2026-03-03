@@ -37,3 +37,4 @@ Modules\GroupManaTracker.lua
 Modules\ManaTracker.lua
 Modules\Reminders.lua
 Modules\GoneFishin.lua
+Modules\ShutIt.lua

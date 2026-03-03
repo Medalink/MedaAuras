@@ -16,3 +16,10 @@ D.groupCompDisplay[#D.groupCompDisplay + 1] = {
     capabilities = { "bloodlust", "battle_res" },
 }
 
+D.groupCompDisplay[#D.groupCompDisplay + 1] = {
+    id           = "offensive_utility",
+    label        = "Offensive Utility",
+    description  = "Offensive dispels, enrage removal, and group stealth.",
+    capabilities = { "offensive_dispel", "soothe", "shroud" },
+}
+
