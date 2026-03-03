@@ -63,7 +63,8 @@
 - 🔇 **One-click NPC silencing** — target an NPC and click the minimap button to instantly mute their chat messages and talking head dialog; no confirmation step, takes effect immediately
 - 🎯 **Live capture** — runs in the background during delves, dungeons, and open world; logs every message the NPC tries to say while suppressing it in real-time
 - 📋 **NPC Explorer** — browse and manage all silenced NPCs in a list/detail panel; search by name or NPC ID to add entries manually without needing to target the NPC in-game
-- 🔊 **Sound FileID & SoundKit ID muting** — enter specific sound IDs (from wowhead or wow.tools) per NPC to mute their voice lines via `MuteSoundFile`
+- 🔊 **Automatic voice-over muting** — embeds a database of creature voice-over FileDataIDs built from the community listfile; when you silence an NPC, matching voice files are looked up and muted instantly via `MuteSoundFile` with no manual ID entry needed
+- 🔍 **Manual sound ID support** — add individual Sound FileIDs or SoundKit IDs per NPC for anything the auto-lookup misses, with per-entry play and remove buttons; wago.tools URL auto-generated for manual lookup
 - 🗣️ **Talking head suppression** — automatically hides the talking head frame and kills the voice-over audio for silenced NPCs
 - 📤 **Export / Import** — share your silenced NPC list with friends via a copyable string; per-NPC or export-all, with a paste-to-import popup
 - ⌨️ **Slash commands** — `/mwa shutit` (open explorer), `scan` (silence target), `stop` (stop capture), `list` (print all), `export`, `import`

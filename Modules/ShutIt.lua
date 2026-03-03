@@ -22,8 +22,6 @@ local EXPLORER_HEIGHT = 500
 local SIDEBAR_WIDTH = 150
 local DETAIL_INSET = 10
 local ROW_HEIGHT = 22
-local MAX_DETECTED_VISIBLE = 8
-
 -- ============================================================================
 -- State
 -- ============================================================================
@@ -75,6 +73,16 @@ local function GetTargetNPCInfo()
     return name, npcID
 end
 
+local function NPCNameToCreatureKey(name)
+    if not name then return nil end
+    return name:lower():gsub(" ", "_"):gsub("'", "")
+end
+
+local function LookupCreatureVO(name)
+    local key = NPCNameToCreatureKey(name)
+    return key and MedaAuras_CreatureVO and MedaAuras_CreatureVO[key]
+end
+
 local function RebuildNameLookup()
     wipe(silencedNameLookup)
     if not db or not db.silencedNPCs then return end
@@ -97,15 +105,22 @@ local function GetEntryByName(name)
     return nil, nil
 end
 
+local function SafeToString(val)
+    if val == nil then return "" end
+    local ok, str = pcall(tostring, val)
+    return ok and str or ""
+end
+
 local function AddDetectedMessage(npcID, event, text)
     local entry = db.silencedNPCs[npcID]
     if not entry then return end
+    local safeText = SafeToString(text)
     for _, msg in ipairs(entry.detectedMessages) do
-        if msg.event == event and msg.text == text then return end
+        if msg.event == event and msg.text == safeText then return end
     end
     entry.detectedMessages[#entry.detectedMessages + 1] = {
         event = event,
-        text = text,
+        text = safeText,
     }
 end
 
@@ -144,7 +159,19 @@ local function Base64Decode(data)
     end))
 end
 
+local function EscapeMsgText(text)
+    return text:gsub("\\", "\\\\"):gsub("|", "\\p"):gsub(";", "\\s")
+end
+
+local function UnescapeMsgText(text)
+    return text:gsub("\\s", ";"):gsub("\\p", "|"):gsub("\\\\", "\\")
+end
+
 local function SerializeEntry(entry)
+    local msgParts = {}
+    for _, msg in ipairs(entry.detectedMessages or {}) do
+        msgParts[#msgParts + 1] = (msg.event or "") .. ";" .. EscapeMsgText(msg.text or "")
+    end
     local parts = {
         entry.npcID or "",
         entry.name or "",
@@ -152,6 +179,7 @@ local function SerializeEntry(entry)
         entry.silenceTalkingHead and "1" or "0",
         table.concat(entry.mutedSoundFileIDs or {}, ","),
         table.concat(entry.mutedSoundKitIDs or {}, ","),
+        table.concat(msgParts, "|"),
     }
     return table.concat(parts, "\t")
 end
@@ -182,6 +210,18 @@ local function DeserializeEntries(raw)
                     kitIDs[#kitIDs + 1] = tonumber(id)
                 end
             end
+            local messages = {}
+            if parts[7] and parts[7] ~= "" then
+                for chunk in parts[7]:gmatch("[^|]+") do
+                    local ev, txt = chunk:match("^([^;]*);(.*)")
+                    if ev then
+                        messages[#messages + 1] = {
+                            event = ev,
+                            text = UnescapeMsgText(txt),
+                        }
+                    end
+                end
+            end
             entries[#entries + 1] = {
                 npcID = parts[1],
                 name = parts[2],
@@ -189,7 +229,7 @@ local function DeserializeEntries(raw)
                 silenceTalkingHead = parts[4] == "1",
                 mutedSoundFileIDs = fileIDs,
                 mutedSoundKitIDs = kitIDs,
-                detectedMessages = {},
+                detectedMessages = messages,
                 dateAdded = time(),
             }
         end
@@ -276,9 +316,7 @@ local function ChatFilter(_, _, msg, sender, ...)
         local entry = db.silencedNPCs[npcID]
         if entry and entry.silenceChat then
             blockedCount = blockedCount + 1
-            if indicatorFrame and indicatorFrame:IsShown() then
-                indicatorFrame.countText:SetText(blockedCount .. " blocked")
-            end
+            UpdateIndicatorCount()
             return true
         end
     end
@@ -335,21 +373,29 @@ end
 -- Live Capture
 -- ============================================================================
 
+local function UpdateIndicatorCount()
+    if indicatorFrame and indicatorFrame:IsShown() then
+        indicatorFrame.countText:SetText(blockedCount .. " blocked")
+    end
+end
+
 local function StartLiveCapture(npcName, npcID)
-    activeCaptureNPCName = npcName
+    local safeName = SafeToString(npcName)
+    activeCaptureNPCName = safeName
     activeCaptureNPCID = npcID
     blockedCount = 0
+
     if indicatorFrame then
-        indicatorFrame.nameText:SetText("Silencing: " .. npcName)
+        indicatorFrame.nameText:SetText("Silencing: " .. safeName)
         indicatorFrame.countText:SetText("0 blocked")
         indicatorFrame:Show()
     end
-    Log(format("Live capture started for %s (ID: %s)", npcName, npcID))
+    Log(format("Live capture started for %s (ID: %s)", safeName, tostring(npcID)))
 end
 
 local function StopLiveCapture()
     if not activeCaptureNPCName then return end
-    Log(format("Live capture stopped for %s", activeCaptureNPCName))
+    Log(format("Live capture stopped for %s", SafeToString(activeCaptureNPCName)))
     activeCaptureNPCName = nil
     activeCaptureNPCID = nil
     blockedCount = 0
@@ -359,21 +405,39 @@ local function StopLiveCapture()
 end
 
 local function SilenceNPC(npcName, npcID)
-    if not db then return end
-    if db.silencedNPCs[npcID] then return end
+    if not db then return false end
+    local safeName = SafeToString(npcName)
+    if db.silencedNPCs[npcID] then return false end
+
+    local voIDs = LookupCreatureVO(safeName)
+    local fileIDs = {}
+    if voIDs then
+        for i, id in ipairs(voIDs) do
+            fileIDs[i] = id
+        end
+    end
+
     db.silencedNPCs[npcID] = {
-        name = npcName,
+        name = safeName,
         npcID = npcID,
         silenceChat = true,
         silenceTalkingHead = true,
-        mutedSoundFileIDs = {},
+        mutedSoundFileIDs = fileIDs,
         mutedSoundKitIDs = {},
         detectedMessages = {},
         dateAdded = time(),
     }
     RebuildNameLookup()
     ApplyMutesForEntry(db.silencedNPCs[npcID])
-    print(format("%s %s has been silenced.", PREFIX, npcName))
+    MedaAuras:RefreshModuleConfig()
+
+    if voIDs then
+        print(format("%s %s silenced with %d voice files.", PREFIX, safeName, #voIDs))
+        return true
+    else
+        print(format("%s %s has been silenced.", PREFIX, safeName))
+        return false
+    end
 end
 
 local function UnsilenceNPC(npcID)
@@ -386,6 +450,7 @@ local function UnsilenceNPC(npcID)
     end
     db.silencedNPCs[npcID] = nil
     RebuildNameLookup()
+    MedaAuras:RefreshModuleConfig()
     print(format("%s %s has been unsilenced.", PREFIX, npcName or npcID))
 end
 
@@ -402,8 +467,10 @@ local function OnEvent(self, event, ...)
         local msg = ...
         local guid = select(12, ...)
         local npcID = ParseNPCID(guid)
-        if activeCaptureNPCID and npcID and npcID == activeCaptureNPCID then
+        if npcID and activeCaptureNPCID and npcID == activeCaptureNPCID then
             AddDetectedMessage(activeCaptureNPCID, event, msg)
+            blockedCount = blockedCount + 1
+            UpdateIndicatorCount()
         end
 
     elseif event == "GOSSIP_SHOW" then
@@ -416,13 +483,19 @@ local function OnEvent(self, event, ...)
 
     elseif event == "TALKINGHEAD_REQUESTED" then
         C_Timer.After(0.05, function()
-            if not TalkingHeadFrame then return end
+            if not TalkingHeadFrame or not activeCaptureNPCID then return end
             local nameInfo = TalkingHeadFrame.NameFrame and TalkingHeadFrame.NameFrame.Name
             local npcName = nameInfo and nameInfo:GetText()
-            if npcName and activeCaptureNPCName and npcName == activeCaptureNPCName then
-                local textInfo = TalkingHeadFrame.TextFrame and TalkingHeadFrame.TextFrame.Text
-                local text = textInfo and textInfo:GetText() or ""
-                AddDetectedMessage(activeCaptureNPCID, "TALKINGHEAD_REQUESTED", text)
+            if npcName then
+                local entry = db and db.silencedNPCs[activeCaptureNPCID]
+                local safeName = entry and entry.name or SafeToString(activeCaptureNPCName)
+                if npcName == safeName then
+                    local textInfo = TalkingHeadFrame.TextFrame and TalkingHeadFrame.TextFrame.Text
+                    local text = textInfo and textInfo:GetText() or ""
+                    AddDetectedMessage(activeCaptureNPCID, "TALKINGHEAD_REQUESTED", text)
+                    blockedCount = blockedCount + 1
+                    UpdateIndicatorCount()
+                end
             end
         end)
     end
@@ -626,14 +699,52 @@ local function RefreshSidebar()
     sidebarContent:SetHeight(math.max(math.abs(yOff), 1))
 end
 
-local function CreateIDListSection(parent, title, ids, onAdd, onRemove, startY)
+local function CreateIDListSection(parent, title, ids, onAdd, onRemove, onPlay, onClearAll, startY)
     local yOff = startY
 
     local header = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     header:SetPoint("TOPLEFT", 0, yOff)
-    header:SetText(title)
+    header:SetText(title .. " (" .. #ids .. ")")
     header:SetTextColor(unpack(MedaUI.Theme.gold))
-    yOff = yOff - 18
+
+    if #ids > 0 and onClearAll then
+        local clearBtn = MedaUI:CreateButton(parent, "Clear All")
+        clearBtn:SetSize(60, 16)
+        clearBtn:SetPoint("LEFT", header, "RIGHT", 8, 0)
+        clearBtn:SetScript("OnClick", function() onClearAll() end)
+    end
+    yOff = yOff - 20
+
+    local function ParseAndAddIDs(input)
+        if not input or input == "" then return end
+        local added = 0
+        for idStr in input:gmatch("[%d]+") do
+            local val = tonumber(idStr)
+            if val and val > 0 then
+                onAdd(val)
+                added = added + 1
+            end
+        end
+        return added
+    end
+
+    local addBox = MedaUI:CreateEditBox(parent, 220, 20)
+    addBox:SetPoint("TOPLEFT", 0, yOff)
+
+    local addBtn = MedaUI:CreateButton(parent, "Add")
+    addBtn:SetSize(50, 20)
+    addBtn:SetPoint("LEFT", addBox, "RIGHT", 6, 0)
+    addBtn:SetScript("OnClick", function()
+        if ParseAndAddIDs(addBox:GetText()) then
+            addBox:SetText("")
+        end
+    end)
+    addBox.OnEnterPressed = function(_, text)
+        if ParseAndAddIDs(text) then
+            addBox:SetText("")
+        end
+    end
+    yOff = yOff - 26
 
     local rows = {}
     for i, id in ipairs(ids) do
@@ -648,42 +759,49 @@ local function CreateIDListSection(parent, title, ids, onAdd, onRemove, startY)
         idText:SetTextColor(unpack(MedaUI.Theme.text))
 
         local removeBtn = CreateFrame("Button", nil, row)
-        removeBtn:SetSize(14, 14)
+        removeBtn:SetSize(16, 16)
         removeBtn:SetPoint("RIGHT", -2, 0)
         removeBtn:SetNormalFontObject("GameFontNormalSmall")
-        removeBtn:SetText("x")
-        removeBtn:GetFontString():SetTextColor(0.8, 0.3, 0.3)
-        removeBtn:SetScript("OnClick", function()
-            onRemove(i)
+        removeBtn:SetText("|cffcc4444x|r")
+        removeBtn:SetHighlightFontObject("GameFontNormalSmall")
+        removeBtn:SetScript("OnEnter", function(self)
+            self:SetText("|cffff5555x|r")
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText("Remove this ID")
+            GameTooltip:Show()
+        end)
+        removeBtn:SetScript("OnLeave", function(self)
+            self:SetText("|cffcc4444x|r")
+            GameTooltip:Hide()
+        end)
+        removeBtn:SetScript("OnClick", function() onRemove(i) end)
+
+        local playBtn = CreateFrame("Button", nil, row)
+        playBtn:SetSize(16, 16)
+        playBtn:SetPoint("RIGHT", removeBtn, "LEFT", -2, 0)
+        playBtn:SetNormalFontObject("GameFontNormalSmall")
+        playBtn:SetText("|cff44dd44>|r")
+        playBtn:SetHighlightFontObject("GameFontNormalSmall")
+        playBtn:SetScript("OnEnter", function(self)
+            self:SetText("|cff66ff66>|r")
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText("Play sound " .. tostring(id))
+            GameTooltip:Show()
+        end)
+        playBtn:SetScript("OnLeave", function(self)
+            self:SetText("|cff44dd44>|r")
+            GameTooltip:Hide()
+        end)
+        playBtn:SetScript("OnClick", function()
+            if onPlay then onPlay(id) end
         end)
 
         rows[i] = row
         yOff = yOff - 18
     end
 
-    local addBox = MedaUI:CreateEditBox(parent, 100, 20)
-    addBox:SetPoint("TOPLEFT", 0, yOff)
-
-    local addBtn = MedaUI:CreateButton(parent, "Add")
-    addBtn:SetSize(50, 20)
-    addBtn:SetPoint("LEFT", addBox, "RIGHT", 6, 0)
-    addBtn:SetScript("OnClick", function()
-        local val = tonumber(addBox:GetText())
-        if val and val > 0 then
-            onAdd(val)
-            addBox:SetText("")
-        end
-    end)
-    addBox.OnEnterPressed = function(_, text)
-        local val = tonumber(text)
-        if val and val > 0 then
-            onAdd(val)
-            addBox:SetText("")
-        end
-    end
-
-    yOff = yOff - 28
-    return yOff, rows, addBox, addBtn, header
+    yOff = yOff - 6
+    return yOff
 end
 
 local function ClearDetail()
@@ -765,80 +883,118 @@ RefreshDetail = function()
     end
     yOff = yOff - 30
 
-    -- Sound FileIDs
-    local function RefreshAfterSoundChange()
-        RemoveMutesForEntry(entry)
-        ApplyMutesForEntry(entry)
-        RefreshDetail()
+    -- Voice database status + manual lookup
+    local voIDs = LookupCreatureVO(entry.name)
+    local numMuted = #(entry.mutedSoundFileIDs or {})
+
+    if numMuted > 0 and voIDs then
+        local statusLabel = detailArea:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        statusLabel:SetPoint("TOPLEFT", 0, yOff)
+        statusLabel:SetText(format("%d voice files auto-muted from database", numMuted))
+        statusLabel:SetTextColor(0.3, 0.85, 0.3)
+        yOff = yOff - 14
+    elseif numMuted > 0 then
+        local statusLabel = detailArea:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        statusLabel:SetPoint("TOPLEFT", 0, yOff)
+        statusLabel:SetText(format("%d sound file(s) muted", numMuted))
+        statusLabel:SetTextColor(0.3, 0.85, 0.3)
+        yOff = yOff - 14
     end
 
-    yOff = CreateIDListSection(detailArea, "Sound FileIDs", entry.mutedSoundFileIDs or {},
-        function(val)
+    if voIDs and numMuted == 0 then
+        local lookupBtn = MedaUI:CreateButton(detailArea, "Lookup Voice Files")
+        lookupBtn:SetSize(140, 20)
+        lookupBtn:SetPoint("TOPLEFT", 0, yOff)
+        lookupBtn:SetScript("OnClick", function()
+            local ids = LookupCreatureVO(entry.name)
+            if not ids then return end
+            local existing = {}
+            for _, id in ipairs(entry.mutedSoundFileIDs or {}) do
+                existing[id] = true
+            end
             entry.mutedSoundFileIDs = entry.mutedSoundFileIDs or {}
-            entry.mutedSoundFileIDs[#entry.mutedSoundFileIDs + 1] = val
-            RefreshAfterSoundChange()
-        end,
-        function(idx)
-            if entry.mutedSoundFileIDs then
-                local removed = table.remove(entry.mutedSoundFileIDs, idx)
-                if removed and activeMutes[removed] then
-                    UnmuteSoundFile(removed)
-                    activeMutes[removed] = nil
+            local added = 0
+            for _, id in ipairs(ids) do
+                if not existing[id] then
+                    entry.mutedSoundFileIDs[#entry.mutedSoundFileIDs + 1] = id
+                    added = added + 1
                 end
             end
+            if added > 0 then
+                RemoveMutesForEntry(entry)
+                ApplyMutesForEntry(entry)
+                print(format("%s Added %d voice files for %s.", PREFIX, added, entry.name or "?"))
+            end
             RefreshDetail()
-        end,
-        yOff
-    )
+        end)
+        yOff = yOff - 24
+    end
 
-    -- SoundKit IDs
-    yOff = CreateIDListSection(detailArea, "SoundKit IDs", entry.mutedSoundKitIDs or {},
-        function(val)
-            entry.mutedSoundKitIDs = entry.mutedSoundKitIDs or {}
-            entry.mutedSoundKitIDs[#entry.mutedSoundKitIDs + 1] = val
-            RefreshAfterSoundChange()
-        end,
-        function(idx)
-            if entry.mutedSoundKitIDs then
-                local removed = table.remove(entry.mutedSoundKitIDs, idx)
-                if removed and activeMutes[removed] then
-                    UnmuteSoundFile(removed)
-                    activeMutes[removed] = nil
-                end
-            end
-            RefreshDetail()
-        end,
-        yOff
-    )
+    local npcNameClean = (entry.name or ""):gsub("[^%w%s]", ""):gsub("%s+", "+")
+    local wagoURL = "https://wago.tools/files?search=" .. npcNameClean .. "+vo"
+
+    local urlLabel = detailArea:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    urlLabel:SetPoint("TOPLEFT", 0, yOff)
+    urlLabel:SetText("Manual lookup at wago.tools — copy URL:")
+    urlLabel:SetTextColor(unpack(Theme.textDim))
+    yOff = yOff - 14
+
+    local urlBox = CreateFrame("EditBox", nil, detailArea, "InputBoxTemplate")
+    urlBox:SetSize(detailArea:GetWidth() or 300, 18)
+    urlBox:SetPoint("TOPLEFT", 0, yOff)
+    urlBox:SetAutoFocus(false)
+    urlBox:SetFontObject("GameFontNormalSmall")
+    urlBox:SetText(wagoURL)
+    urlBox:SetCursorPosition(0)
+    urlBox:SetScript("OnEditFocusGained", function(self) self:HighlightText() end)
+    urlBox:SetScript("OnEditFocusLost", function(self) self:HighlightText(0, 0) end)
+    urlBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    urlBox:SetScript("OnTextChanged", function(self)
+        self:SetText(wagoURL)
+        self:HighlightText()
+    end)
+    yOff = yOff - 24
 
     -- Detected Messages
+    local msgs = entry.detectedMessages or {}
     local msgHeader = detailArea:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     msgHeader:SetPoint("TOPLEFT", 0, yOff)
-    msgHeader:SetText("Detected Messages (" .. #(entry.detectedMessages or {}) .. ")")
+    msgHeader:SetText("Detected Messages (" .. #msgs .. ")")
     msgHeader:SetTextColor(unpack(Theme.gold))
     yOff = yOff - 18
 
-    local msgs = entry.detectedMessages or {}
-    local showCount = math.min(#msgs, MAX_DETECTED_VISIBLE)
-    for i = 1, showCount do
-        local m = msgs[i]
-        local msgRow = detailArea:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        msgRow:SetPoint("TOPLEFT", 4, yOff)
-        msgRow:SetPoint("TOPRIGHT", -4, yOff)
-        msgRow:SetJustifyH("LEFT")
-        msgRow:SetWordWrap(true)
+    local msgTextWidth = (detailArea:GetWidth() or (EXPLORER_WIDTH - SIDEBAR_WIDTH - DETAIL_INSET * 2 - 22)) - 24
+
+    for i, m in ipairs(msgs) do
+        local row = CreateFrame("Frame", nil, detailArea)
+        row:SetPoint("TOPLEFT", 0, yOff)
+        row:SetPoint("TOPRIGHT", 0, yOff)
+
+        local msgText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        msgText:SetPoint("TOPLEFT", 4, 0)
+        msgText:SetPoint("TOPRIGHT", -20, 0)
+        msgText:SetJustifyH("LEFT")
+        msgText:SetWordWrap(true)
+        msgText:SetWidth(msgTextWidth)
         local short = m.event:gsub("CHAT_MSG_MONSTER_", ""):gsub("TALKINGHEAD_REQUESTED", "TALKHEAD")
-        msgRow:SetText("|cff888888[" .. short .. "]|r " .. (m.text or ""))
-        msgRow:SetTextColor(unpack(Theme.text))
-        local textHeight = msgRow:GetStringHeight() or 14
-        yOff = yOff - math.max(textHeight + 2, 16)
-    end
-    if #msgs > showCount then
-        local moreLabel = detailArea:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        moreLabel:SetPoint("TOPLEFT", 4, yOff)
-        moreLabel:SetText(format("... and %d more", #msgs - showCount))
-        moreLabel:SetTextColor(unpack(Theme.textDim))
-        yOff = yOff - 16
+        msgText:SetText("|cff888888[" .. short .. "]|r " .. (m.text or ""))
+        msgText:SetTextColor(unpack(Theme.text))
+        local textHeight = math.max(msgText:GetStringHeight() or 14, 16)
+        row:SetHeight(textHeight + 2)
+
+        local removeBtn = CreateFrame("Button", nil, row)
+        removeBtn:SetSize(14, 14)
+        removeBtn:SetPoint("TOPRIGHT", -2, 0)
+        removeBtn:SetNormalFontObject("GameFontNormalSmall")
+        removeBtn:SetText("x")
+        removeBtn:GetFontString():SetTextColor(0.8, 0.3, 0.3)
+        removeBtn:SetScript("OnClick", function()
+            table.remove(msgs, i)
+            entry.detectedMessages = msgs
+            RefreshDetail()
+        end)
+
+        yOff = yOff - (textHeight + 2)
     end
     yOff = yOff - 10
 
@@ -862,6 +1018,66 @@ RefreshDetail = function()
         RefreshDetail()
     end)
     yOff = yOff - 40
+
+    -- Sound FileIDs (below main content so large lists don't push everything down)
+    local function RefreshAfterSoundChange()
+        RemoveMutesForEntry(entry)
+        ApplyMutesForEntry(entry)
+        RefreshDetail()
+    end
+
+    yOff = CreateIDListSection(detailArea, "Sound FileIDs", entry.mutedSoundFileIDs or {},
+        function(val)
+            entry.mutedSoundFileIDs = entry.mutedSoundFileIDs or {}
+            entry.mutedSoundFileIDs[#entry.mutedSoundFileIDs + 1] = val
+            RefreshAfterSoundChange()
+        end,
+        function(idx)
+            if entry.mutedSoundFileIDs then
+                local removed = table.remove(entry.mutedSoundFileIDs, idx)
+                if removed and activeMutes[removed] then
+                    UnmuteSoundFile(removed)
+                    activeMutes[removed] = nil
+                end
+            end
+            RefreshDetail()
+        end,
+        function(id) PlaySoundFile(id) end,
+        function()
+            RemoveMutesForEntry(entry)
+            entry.mutedSoundFileIDs = {}
+            ApplyMutesForEntry(entry)
+            RefreshDetail()
+        end,
+        yOff
+    )
+
+    -- SoundKit IDs
+    yOff = CreateIDListSection(detailArea, "SoundKit IDs", entry.mutedSoundKitIDs or {},
+        function(val)
+            entry.mutedSoundKitIDs = entry.mutedSoundKitIDs or {}
+            entry.mutedSoundKitIDs[#entry.mutedSoundKitIDs + 1] = val
+            RefreshAfterSoundChange()
+        end,
+        function(idx)
+            if entry.mutedSoundKitIDs then
+                local removed = table.remove(entry.mutedSoundKitIDs, idx)
+                if removed and activeMutes[removed] then
+                    UnmuteSoundFile(removed)
+                    activeMutes[removed] = nil
+                end
+            end
+            RefreshDetail()
+        end,
+        function(id) PlaySound(id) end,
+        function()
+            RemoveMutesForEntry(entry)
+            entry.mutedSoundKitIDs = {}
+            ApplyMutesForEntry(entry)
+            RefreshDetail()
+        end,
+        yOff
+    )
 
     detailArea:SetHeight(math.max(math.abs(yOff), 1))
 end
@@ -896,21 +1112,70 @@ ShowExportImportPopup = function(mode, text)
         exportImportFrame.title = exportImportFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         exportImportFrame.title:SetPoint("TOP", 0, -10)
 
-        local scroll = CreateFrame("ScrollFrame", nil, exportImportFrame, "UIPanelScrollFrameTemplate")
-        scroll:SetPoint("TOPLEFT", 14, -34)
-        scroll:SetPoint("BOTTOMRIGHT", -32, 44)
+        local scrollBg = CreateFrame("Frame", nil, exportImportFrame, "BackdropTemplate")
+        scrollBg:SetPoint("TOPLEFT", 12, -32)
+        scrollBg:SetPoint("BOTTOMRIGHT", -12, 42)
+        scrollBg:SetBackdrop(MedaUI:CreateBackdrop(true))
+        scrollBg:SetBackdropColor(0.05, 0.05, 0.08, 0.9)
+        scrollBg:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.5)
+
+        local scroll = CreateFrame("ScrollFrame", nil, scrollBg, "UIPanelScrollFrameTemplate")
+        scroll:SetPoint("TOPLEFT", 6, -6)
+        scroll:SetPoint("BOTTOMRIGHT", -22, 6)
 
         local editBox = CreateFrame("EditBox", nil, scroll)
         editBox:SetMultiLine(true)
         editBox:SetAutoFocus(false)
         editBox:SetFontObject("ChatFontNormal")
-        editBox:SetWidth(430)
+        editBox:SetMaxLetters(0)
+        editBox:SetWidth(math.max(scroll:GetWidth(), 400))
+        editBox:SetHeight(200)
         editBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+
+        local measureFS = editBox:CreateFontString(nil, "BACKGROUND")
+        measureFS:SetFontObject("ChatFontNormal")
+        measureFS:SetWordWrap(true)
+        measureFS:SetNonSpaceWrap(true)
+        measureFS:SetAlpha(0)
+
+        local function RecalcEditBoxHeight()
+            local w = editBox:GetWidth()
+            if w < 1 then return end
+            measureFS:SetWidth(w)
+            measureFS:SetText(editBox:GetText() or "")
+            local textH = (measureFS:GetStringHeight() or 14) + 20
+            local scrollH = scroll:GetHeight()
+            editBox:SetHeight(math.max(textH, scrollH))
+        end
+        exportImportFrame.RecalcEditBoxHeight = RecalcEditBoxHeight
+
+        editBox:SetScript("OnTextChanged", function()
+            RecalcEditBoxHeight()
+        end)
+        editBox:SetScript("OnCursorChanged", function(self, x, y, w, h)
+            local vs = scroll:GetVerticalScroll()
+            local sh = scroll:GetHeight()
+            local cy = math.abs(y)
+            if cy < vs then
+                scroll:SetVerticalScroll(cy)
+            elseif cy + h > vs + sh then
+                scroll:SetVerticalScroll(cy + h - sh)
+            end
+        end)
         scroll:SetScrollChild(editBox)
         exportImportFrame.editBox = editBox
 
         scroll:SetScript("OnSizeChanged", function(self)
             editBox:SetWidth(self:GetWidth())
+            RecalcEditBoxHeight()
+        end)
+
+        scrollBg:SetScript("OnMouseDown", function()
+            editBox:SetFocus()
+        end)
+        scroll:EnableMouse(true)
+        scroll:SetScript("OnMouseDown", function()
+            editBox:SetFocus()
         end)
 
         local closeBtn = MedaUI:CreateButton(exportImportFrame, "Close")
@@ -927,12 +1192,21 @@ ShowExportImportPopup = function(mode, text)
     local frame = exportImportFrame
     local editBox = frame.editBox
 
+    local function RaiseAboveExplorer()
+        if explorerPanel then
+            local level = explorerPanel:GetFrameLevel()
+            frame:SetFrameLevel(level + 50)
+        end
+    end
+
     if mode == "export" then
         frame.title:SetText("Export - Copy this string")
         frame.title:SetTextColor(1, 0.82, 0)
         editBox:SetText(text or "")
         frame.importBtn:Hide()
         frame:Show()
+        RaiseAboveExplorer()
+        C_Timer.After(0, function() frame.RecalcEditBoxHeight() end)
         editBox:SetFocus()
         editBox:HighlightText()
     else
@@ -962,8 +1236,10 @@ ShowExportImportPopup = function(mode, text)
                 RefreshSidebar()
                 RefreshDetail()
             end
+            MedaAuras:RefreshModuleConfig()
         end)
         frame:Show()
+        RaiseAboveExplorer()
         editBox:SetFocus()
     end
 end
@@ -1031,6 +1307,7 @@ local function CreateExplorerPanel()
         selectedNPCID = newID
         RefreshSidebar()
         RefreshDetail()
+        MedaAuras:RefreshModuleConfig()
         print(format("%s Added new NPC entry: %s", PREFIX, newName))
     end
 
@@ -1111,11 +1388,12 @@ local function OnMinimapClick()
     local npcName, npcID = GetTargetNPCInfo()
 
     if npcName and npcID then
-        if db.silencedNPCs[npcID] then
-            CreateExplorerPanel()
-            ShowExplorerForNPC(npcID)
+        if not db.silencedNPCs[npcID] then
+            local hadVO = SilenceNPC(npcName, npcID)
+            if not hadVO then
+                StartLiveCapture(npcName, npcID)
+            end
         else
-            SilenceNPC(npcName, npcID)
             StartLiveCapture(npcName, npcID)
         end
         return
@@ -1318,9 +1596,13 @@ local slashCommands = {
             return
         end
         if not db.silencedNPCs[npcID] then
-            SilenceNPC(npcName, npcID)
+            local hadVO = SilenceNPC(npcName, npcID)
+            if not hadVO then
+                StartLiveCapture(npcName, npcID)
+            end
+        else
+            StartLiveCapture(npcName, npcID)
         end
-        StartLiveCapture(npcName, npcID)
     end,
     ["stop"] = function(moduleDB)
         db = moduleDB

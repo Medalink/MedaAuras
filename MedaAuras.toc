@@ -23,6 +23,7 @@ Data\Rules.lua
 Data\GroupCompDisplay.lua
 Data\Recommendations.lua
 Data\GoneFishinFish.lua
+Data\CreatureVO.lua
 
 # Shared Services (load before modules)
 Services\SpellCastTracker.lua

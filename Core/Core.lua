@@ -569,6 +569,12 @@ function MedaAuras:SetContentHeight(height)
     SetContentHeight(height)
 end
 
+function MedaAuras:RefreshModuleConfig()
+    if selectedModule and settingsPanel and settingsPanel:IsShown() then
+        LoadModuleConfig(selectedModule)
+    end
+end
+
 function MedaAuras:RefreshSidebarDot(modName)
     local btn = sidebarButtons[modName]
     if btn and btn.cbBox then
