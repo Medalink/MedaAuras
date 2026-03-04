@@ -2504,6 +2504,95 @@ local function BuildConfig(parent, moduleDB)
     end
 
     MedaAuras:SetContentHeight(500)
+
+    -- ================================================================
+    -- Floating Side Preview (mock HUD panels)
+    -- ================================================================
+    do
+        local anchor = MedaAurasSettingsPanel or _G["MedaAurasSettingsPanel"]
+        if not anchor then return end
+
+        local PV_PAD = 12
+        local PV_W = 220
+        local LINE_H = 15
+        local dim = { 0.55, 0.55, 0.55 }
+        local gold = { 1, 0.82, 0 }
+        local green = { 0.53, 0.80, 0.53 }
+        local blue = { 0.4, 0.78, 1 }
+
+        local pvContainer = CreateFrame("Frame", nil, anchor, "BackdropTemplate")
+        pvContainer:SetFrameStrata("HIGH")
+        pvContainer:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 6, 0)
+        pvContainer:SetBackdrop(MedaUI:CreateBackdrop(true))
+
+        local function ApplyPVTheme()
+            pvContainer:SetBackdropColor(unpack(MedaUI.Theme.backgroundDark))
+            pvContainer:SetBackdropBorderColor(unpack(MedaUI.Theme.border))
+        end
+        MedaUI:RegisterThemedWidget(pvContainer, ApplyPVTheme)
+        ApplyPVTheme()
+
+        local yOff = -PV_PAD
+
+        local function AddLine(text, color, font)
+            local fs = pvContainer:CreateFontString(nil, "OVERLAY", font or "GameFontNormalSmall")
+            fs:SetPoint("TOPLEFT", PV_PAD, yOff)
+            fs:SetPoint("RIGHT", -PV_PAD, 0)
+            fs:SetJustifyH("LEFT")
+            fs:SetText(text)
+            if color then fs:SetTextColor(color[1], color[2], color[3]) end
+            yOff = yOff - LINE_H
+            return fs
+        end
+
+        local function AddGap(h) yOff = yOff - (h or 6) end
+
+        -- Left panel mock
+        AddLine("Zone Stats", gold, "GameFontNormal")
+        AddGap(2)
+        AddLine("Zone: Silvermoon Harbor", dim)
+        AddLine("Area: The Moonwell", dim)
+        AddLine("Session: 24 caught / 31 casts", dim)
+        AddLine("Catch Rate: 77%", dim)
+        AddLine("Time: 12m 34s", dim)
+        AddLine("Fish/hr: 116.8", dim)
+        AddLine("Streak: 8", green)
+        AddGap(10)
+
+        -- Right panel mock
+        AddLine("Zone Fish", gold, "GameFontNormal")
+        AddGap(2)
+        local mockFish = {
+            { name = "Lunker Salmon",       q = 3, count = 7 },
+            { name = "Moonpearl Trout",     q = 2, count = 12 },
+            { name = "Midnight Anglerfish", q = 4, count = 2 },
+            { name = "Duskwater Eel",       q = 1, count = 5 },
+        }
+        local QUALITY_COLORS = {
+            [1] = { 0.62, 0.62, 0.62 },
+            [2] = { 0.12, 1.00, 0.00 },
+            [3] = { 0.00, 0.44, 0.87 },
+            [4] = { 0.64, 0.21, 0.93 },
+        }
+        for _, fish in ipairs(mockFish) do
+            local c = QUALITY_COLORS[fish.q] or dim
+            AddLine(format("  %s  x%d", fish.name, fish.count), c)
+        end
+        AddLine("  [+] Junk (3)", dim)
+        AddLine("  [+] Missing (2)", dim)
+        AddGap(10)
+
+        -- Bottom panel mock
+        AddLine("Info", gold, "GameFontNormal")
+        AddGap(2)
+        AddLine("Favorite: The Moonwell", blue)
+        AddLine("Best Spot: Sunsail Anchorage (41)", dim)
+        AddLine("Tip: Use Moonpearl Lure for rare fish", dim)
+        AddGap(PV_PAD)
+
+        pvContainer:SetSize(PV_W, math.abs(yOff))
+        pvContainer:Show()
+    end
 end
 
 -- ============================================================================

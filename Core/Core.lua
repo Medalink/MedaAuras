@@ -503,12 +503,34 @@ local function BuildSettingsPanel()
             if name ~= selectedModule then
                 self:SetBackdropColor(unpack(MedaUI.Theme.buttonHover))
             end
+
+            if isModule and modConfig and modConfig.slashCommands then
+                local cmds = {}
+                for cmd in pairs(modConfig.slashCommands) do
+                    if cmd ~= "" then
+                        cmds[#cmds + 1] = cmd
+                    end
+                end
+                if #cmds > 0 then
+                    table.sort(cmds)
+                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT", 4, 0)
+                    GameTooltip:AddLine(displayText, 1, 0.82, 0)
+                    GameTooltip:AddLine(" ")
+                    GameTooltip:AddLine("Slash Commands:", 0.65, 0.65, 0.65)
+                    local slug = name:lower()
+                    for _, cmd in ipairs(cmds) do
+                        GameTooltip:AddLine(format("  /mwa %s %s", slug, cmd), 0.4, 0.78, 1)
+                    end
+                    GameTooltip:Show()
+                end
+            end
         end)
 
         btn:SetScript("OnLeave", function(self)
             if name ~= selectedModule then
                 self:SetBackdropColor(0, 0, 0, 0)
             end
+            GameTooltip:Hide()
         end)
 
         MedaUI:RegisterThemedWidget(btn, function()
