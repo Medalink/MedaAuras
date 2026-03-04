@@ -1,13 +1,14 @@
 local _, ns = ...
 
 local MedaUI = LibStub("MedaUI-1.0")
+local Pixel = MedaUI.Pixel
 
 -- ============================================================================
 -- Constants
 -- ============================================================================
 
 local MODULE_NAME      = "ShutIt"
-local MODULE_VERSION   = "1.0"
+local MODULE_VERSION   = "1.1"
 local MODULE_STABILITY = "beta"   -- "experimental" | "beta" | "stable"
 local PREFIX = "|cffff6666Shut It:|r"
 
@@ -1121,62 +1122,39 @@ ShowExportImportPopup = function(mode, text)
         scrollBg:SetBackdropColor(0.05, 0.05, 0.08, 0.9)
         scrollBg:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.5)
 
-        local scroll = CreateFrame("ScrollFrame", nil, scrollBg, "UIPanelScrollFrameTemplate")
-        scroll:SetPoint("TOPLEFT", 6, -6)
-        scroll:SetPoint("BOTTOMRIGHT", -22, 6)
+        local scrollParent = MedaUI:CreateScrollFrame(scrollBg)
+        Pixel.SetPoint(scrollParent, "TOPLEFT", 6, -6)
+        Pixel.SetPoint(scrollParent, "BOTTOMRIGHT", -6, 6)
+        scrollParent:SetScrollStep(40)
 
-        local editBox = CreateFrame("EditBox", nil, scroll)
+        local editBox = CreateFrame("EditBox", nil, scrollParent.scrollContent)
         editBox:SetMultiLine(true)
         editBox:SetAutoFocus(false)
         editBox:SetFontObject("ChatFontNormal")
         editBox:SetMaxLetters(0)
-        editBox:SetWidth(math.max(scroll:GetWidth(), 400))
+        editBox:SetPoint("TOPLEFT")
+        editBox:SetPoint("TOPRIGHT")
         editBox:SetHeight(200)
         editBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-
-        local measureFS = editBox:CreateFontString(nil, "BACKGROUND")
-        measureFS:SetFontObject("ChatFontNormal")
-        measureFS:SetWordWrap(true)
-        measureFS:SetNonSpaceWrap(true)
-        measureFS:SetAlpha(0)
 
         local function RecalcEditBoxHeight()
             local w = editBox:GetWidth()
             if w < 1 then return end
-            measureFS:SetWidth(w)
-            measureFS:SetText(editBox:GetText() or "")
-            local textH = (measureFS:GetStringHeight() or 14) + 20
-            local scrollH = scroll:GetHeight()
-            editBox:SetHeight(math.max(textH, scrollH))
+            local textH = editBox:GetHeight()
+            scrollParent:SetContentHeight(textH, true, true)
         end
         exportImportFrame.RecalcEditBoxHeight = RecalcEditBoxHeight
 
-        editBox:SetScript("OnTextChanged", function()
+        editBox:HookScript("OnTextChanged", function()
             RecalcEditBoxHeight()
         end)
-        editBox:SetScript("OnCursorChanged", function(self, x, y, w, h)
-            local vs = scroll:GetVerticalScroll()
-            local sh = scroll:GetHeight()
-            local cy = math.abs(y)
-            if cy < vs then
-                scroll:SetVerticalScroll(cy)
-            elseif cy + h > vs + sh then
-                scroll:SetVerticalScroll(cy + h - sh)
-            end
-        end)
-        scroll:SetScrollChild(editBox)
         exportImportFrame.editBox = editBox
-
-        scroll:SetScript("OnSizeChanged", function(self)
-            editBox:SetWidth(self:GetWidth())
-            RecalcEditBoxHeight()
-        end)
 
         scrollBg:SetScript("OnMouseDown", function()
             editBox:SetFocus()
         end)
-        scroll:EnableMouse(true)
-        scroll:SetScript("OnMouseDown", function()
+        scrollParent.scrollFrame:EnableMouse(true)
+        scrollParent.scrollFrame:SetScript("OnMouseDown", function()
             editBox:SetFocus()
         end)
 
@@ -1331,24 +1309,22 @@ local function CreateExplorerPanel()
     MedaUI:RegisterThemedWidget(sidebarFrame, ApplySidebarTheme)
     ApplySidebarTheme()
 
-    sidebarScroll = CreateFrame("ScrollFrame", nil, sidebarFrame, "UIPanelScrollFrameTemplate")
-    sidebarScroll:SetPoint("TOPLEFT", 4, -4)
-    sidebarScroll:SetPoint("BOTTOMRIGHT", -22, 4)
+    sidebarScroll = MedaUI:CreateScrollFrame(sidebarFrame)
+    Pixel.SetPoint(sidebarScroll, "TOPLEFT", 4, -4)
+    Pixel.SetPoint(sidebarScroll, "BOTTOMRIGHT", -4, 4)
+    sidebarScroll:SetScrollStep(30)
 
-    sidebarContent = CreateFrame("Frame", nil, sidebarScroll)
-    sidebarContent:SetWidth(SIDEBAR_WIDTH - 26)
-    sidebarContent:SetHeight(1)
-    sidebarScroll:SetScrollChild(sidebarContent)
+    sidebarContent = sidebarScroll.scrollContent
+    Pixel.SetHeight(sidebarContent, 1)
 
-    -- Detail area (right)
-    local detailScroll = CreateFrame("ScrollFrame", nil, content, "UIPanelScrollFrameTemplate")
-    detailScroll:SetPoint("TOPLEFT", sidebarFrame, "TOPRIGHT", DETAIL_INSET, 0)
-    detailScroll:SetPoint("BOTTOMRIGHT", -DETAIL_INSET - 18, 0)
+    -- Detail area (right, AF custom scrollbar)
+    local detailScrollParent = MedaUI:CreateScrollFrame(content)
+    Pixel.SetPoint(detailScrollParent, "TOPLEFT", sidebarFrame, "TOPRIGHT", DETAIL_INSET, 0)
+    Pixel.SetPoint(detailScrollParent, "BOTTOMRIGHT", -DETAIL_INSET, 0)
+    detailScrollParent:SetScrollStep(30)
 
-    local detailContent = CreateFrame("Frame", nil, detailScroll)
-    detailContent:SetWidth(EXPLORER_WIDTH - SIDEBAR_WIDTH - DETAIL_INSET * 2 - 22)
-    detailContent:SetHeight(1)
-    detailScroll:SetScrollChild(detailContent)
+    local detailContent = detailScrollParent.scrollContent
+    Pixel.SetHeight(detailContent, 1)
 
     explorerPanel.detailContent = detailContent
 

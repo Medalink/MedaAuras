@@ -15,7 +15,7 @@ D.capabilities.dispel_curse = {
             specID    = nil,
             spellID   = 475,
             spellName = "Remove Curse",
-            note      = "No cooldown. Can rapidly cleanse overlapping curses.",
+            note      = "No cooldown. Can rapidly cleanse overlapping curses. [IV: Removes curses from friendly targets. Curses have a purple debuff\nicon border.]",
         },
         {
             class     = "DRUID",
@@ -93,7 +93,7 @@ D.capabilities.dispel_poison = {
             specID    = 270,
             spellID   = 115450,
             spellName = "Detox",
-            note      = "Mistweaver only. Also removes magic. 8 sec CD.",
+            note      = "Mistweaver only. Also removes magic. 8 sec CD. [IV: Mistweaver's Magic dispel. We should always be augmented by our talentImproved Detox, causing it to also remove Poisons and Diseases.]",
         },
         {
             class     = "EVOKER",
@@ -157,7 +157,7 @@ D.capabilities.dispel_disease = {
             specID    = 270,
             spellID   = 115450,
             spellName = "Detox",
-            note      = "Mistweaver Detox also removes magic. 8 sec CD.",
+            note      = "Mistweaver Detox also removes magic. 8 sec CD. [IV: Mistweaver's Magic dispel. We should always be augmented by our talentImproved Detox, causing it to also remove Poisons and Diseases.]",
         },
         {
             class     = "PRIEST",
@@ -242,7 +242,7 @@ D.capabilities.dispel_magic = {
             specID    = 270,
             spellID   = 115450,
             spellName = "Detox",
-            note      = "Mistweaver only. Also removes poison. 8 sec CD.",
+            note      = "Mistweaver only. Also removes poison. 8 sec CD. [IV: Mistweaver's Magic dispel. We should always be augmented by our talentImproved Detox, causing it to also remove Poisons and Diseases.]",
         },
         {
             class     = "DRUID",

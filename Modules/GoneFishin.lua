@@ -1,13 +1,14 @@
 local _, ns = ...
 
 local MedaUI = LibStub("MedaUI-1.0")
+local Pixel = MedaUI.Pixel
 
 -- ============================================================================
 -- Constants
 -- ============================================================================
 
 local MODULE_NAME      = "GoneFishin"
-local MODULE_VERSION   = "1.3"
+local MODULE_VERSION   = "1.4"
 local MODULE_STABILITY = "stable"   -- "experimental" | "beta" | "stable"
 local FISHING_SPELL_NAMES = {
     ["Fishing"] = true,
@@ -423,13 +424,18 @@ local function RecordCatch(itemID, name, icon, quality)
     local now = time()
     db.totalCaught = db.totalCaught + 1
     sessionCaught = sessionCaught + 1
-    currentStreak = currentStreak + 1
-    if currentStreak > db.longestStreak then
-        db.longestStreak = currentStreak
-    end
 
     local info = CacheItemInfo(itemID)
     local category, isMidnight = ClassifyItem(itemID, info)
+
+    if category == "junk" then
+        currentStreak = 0
+    else
+        currentStreak = currentStreak + 1
+        if currentStreak > db.longestStreak then
+            db.longestStreak = currentStreak
+        end
+    end
 
     local entry = db.fishLog[itemID]
     if not entry then
@@ -708,28 +714,12 @@ local function CreateHUD()
     MakePanelDraggable(rightPanel, "rightPanelPos")
 
     local scrollHeight = CHECKLIST_MAX_VISIBLE * CHECKLIST_ROW_HEIGHT
-    checklistScroll = CreateFrame("ScrollFrame", nil, rightPanel, "UIPanelScrollFrameTemplate")
-    checklistScroll:SetPoint("TOPLEFT", rightPanel, "TOPLEFT", 0, 0)
-    checklistScroll:SetSize(280, scrollHeight)
+    checklistScroll = MedaUI:CreateScrollFrame(rightPanel, nil, 280, scrollHeight)
+    Pixel.SetPoint(checklistScroll, "TOPLEFT", rightPanel, "TOPLEFT", 0, 0)
+    checklistScroll:SetScrollStep(CHECKLIST_ROW_HEIGHT * 2)
 
-    local scrollBar = checklistScroll.ScrollBar or _G[checklistScroll:GetName() and (checklistScroll:GetName() .. "ScrollBar")]
-    if scrollBar then
-        scrollBar:SetAlpha(0)
-        scrollBar:EnableMouse(false)
-    end
-
-    checklistContent = CreateFrame("Frame", nil, checklistScroll)
-    checklistContent:SetSize(280, 1)
-    checklistScroll:SetScrollChild(checklistContent)
-
-    checklistScroll:EnableMouseWheel(true)
-    checklistScroll:SetScript("OnMouseWheel", function(self, delta)
-        local cur = self:GetVerticalScroll()
-        local maxScroll = self:GetVerticalScrollRange()
-        local step = CHECKLIST_ROW_HEIGHT * 2
-        local newVal = math.max(0, math.min(cur - delta * step, maxScroll))
-        self:SetVerticalScroll(newVal)
-    end)
+    checklistContent = checklistScroll.scrollContent
+    Pixel.SetHeight(checklistContent, 1)
 
     -- Collapsible section headers (outside scroll area, in rightPanel)
     junkHeaderBtn = CreateFrame("Button", nil, rightPanel)
@@ -1107,7 +1097,7 @@ local function UpdateHUDContent()
         checklistContent:SetHeight(math.max(caughtHeight, 1))
 
         local scrollVisibleH = math.min(CHECKLIST_MAX_VISIBLE, #caught) * CHECKLIST_ROW_HEIGHT
-        checklistScroll:SetHeight(math.max(scrollVisibleH, 1))
+        Pixel.SetHeight(checklistScroll, math.max(scrollVisibleH, 1))
 
         -- Expand sections below the scroll area
         local belowY = -scrollVisibleH
@@ -2652,17 +2642,21 @@ local function ShowExportWindow()
     local closeBtn = CreateFrame("Button", nil, exportFrame, "UIPanelCloseButton")
     closeBtn:SetPoint("TOPRIGHT", -2, -2)
 
-    local scrollFrame = CreateFrame("ScrollFrame", nil, exportFrame, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetPoint("TOPLEFT", 12, -36)
-    scrollFrame:SetPoint("BOTTOMRIGHT", -32, 40)
+    local scrollParent = MedaUI:CreateScrollFrame(exportFrame)
+    Pixel.SetPoint(scrollParent, "TOPLEFT", 12, -36)
+    Pixel.SetPoint(scrollParent, "BOTTOMRIGHT", -12, 40)
+    scrollParent:SetScrollStep(40)
 
-    local editBox = CreateFrame("EditBox", nil, scrollFrame)
+    local editBox = CreateFrame("EditBox", nil, scrollParent.scrollContent)
     editBox:SetMultiLine(true)
     editBox:SetAutoFocus(false)
     editBox:SetFontObject(GameFontHighlightSmall)
-    editBox:SetWidth(scrollFrame:GetWidth() or 540)
+    editBox:SetPoint("TOPLEFT")
+    editBox:SetPoint("TOPRIGHT")
     editBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    scrollFrame:SetScrollChild(editBox)
+    editBox:HookScript("OnTextChanged", function(self)
+        scrollParent:SetContentHeight(self:GetHeight(), true, true)
+    end)
     exportFrame.editBox = editBox
 
     local hint = exportFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")

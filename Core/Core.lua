@@ -1,6 +1,7 @@
 local ADDON_NAME, ns = ...
 
 local MedaUI = LibStub("MedaUI-1.0")
+local Pixel = MedaUI.Pixel
 
 MedaAuras = {}
 MedaAuras.ns = ns
@@ -233,6 +234,7 @@ local PANEL_WIDTH = 820
 local PANEL_HEIGHT = 720
 local CONTENT_INSET = 14
 
+local scrollParent
 local scrollFrame
 local scrollChild
 
@@ -248,13 +250,13 @@ local function ClearContent()
             region:Hide()
         end
     end
-    if scrollFrame then
-        scrollFrame:SetVerticalScroll(0)
+    if scrollParent then
+        scrollParent:ResetScroll()
     end
 end
 
 local function SetContentHeight(usedHeight)
-    if scrollChild then
+    if scrollChild and scrollFrame then
         scrollChild:SetHeight(math.max(usedHeight, scrollFrame:GetHeight()))
     end
 end
@@ -364,40 +366,17 @@ local function BuildSettingsPanel()
         divider:SetColorTexture(unpack(MedaUI.Theme.border))
     end)
 
-    -- Scrollable content area (right side)
-    scrollFrame = CreateFrame("ScrollFrame", nil, content, "UIPanelScrollFrameTemplate")
-    scrollFrame:SetPoint("TOPLEFT", sidebar, "TOPRIGHT", CONTENT_INSET + 1, -CONTENT_INSET)
-    scrollFrame:SetPoint("BOTTOMRIGHT", -CONTENT_INSET - 18, CONTENT_INSET)
+    -- Scrollable content area (right side, AF custom scrollbar)
+    scrollParent = MedaUI:CreateScrollFrame(content)
+    Pixel.SetPoint(scrollParent, "TOPLEFT", sidebar, "TOPRIGHT", CONTENT_INSET + 1, -CONTENT_INSET)
+    Pixel.SetPoint(scrollParent, "BOTTOMRIGHT", -CONTENT_INSET, CONTENT_INSET)
+    scrollParent:SetScrollStep(30)
 
-    local scrollBar = scrollFrame.ScrollBar
-    if scrollBar then
-        scrollBar:SetPoint("TOPLEFT", scrollFrame, "TOPRIGHT", 4, -16)
-        scrollBar:SetPoint("BOTTOMLEFT", scrollFrame, "BOTTOMRIGHT", 4, 16)
-    end
-
-    local contentWidth = PANEL_WIDTH - SIDEBAR_WIDTH - CONTENT_INSET * 3 - 20
-
-    scrollChild = CreateFrame("Frame", nil, scrollFrame)
-    scrollChild:SetWidth(contentWidth)
-    scrollChild:SetHeight(1)
-    scrollFrame:SetScrollChild(scrollChild)
+    scrollFrame = scrollParent.scrollFrame
+    scrollChild = scrollParent.scrollContent
+    Pixel.SetHeight(scrollChild, 1)
 
     contentFrame = scrollChild
-
-    scrollFrame:SetScript("OnSizeChanged", function(self)
-        scrollChild:SetWidth(self:GetWidth())
-    end)
-
-    scrollFrame:EnableMouseWheel(true)
-    scrollFrame:SetScript("OnMouseWheel", function(self, delta)
-        local current = self:GetVerticalScroll()
-        local maxScroll = scrollChild:GetHeight() - self:GetHeight()
-        if maxScroll < 0 then maxScroll = 0 end
-        local new = current - (delta * 30)
-        if new < 0 then new = 0 end
-        if new > maxScroll then new = maxScroll end
-        self:SetVerticalScroll(new)
-    end)
 
     -- Build sidebar buttons
     local GENERAL_ROW_HEIGHT = 30

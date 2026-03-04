@@ -2,12 +2,14 @@
 ## Title: MedaAuras
 ## Notes: Modular aura and indicator toolkit
 ## Author: Medalink
-## Version: 1.0.0
+## Version: @project-version@
 ## SavedVariables: MedaAurasDB
-## Dependencies: AbstractFramework
 ## OptionalDeps: MedaDebug
 ## X-Curse-Project-ID: 1472556
 ## X-Wago-ID: mKODAEGx
+
+# Bindings
+Bindings.xml
 
 # Libraries
 Libs\MedaUI\MedaUI.xml
@@ -40,3 +42,4 @@ Modules\ManaTracker.lua
 Modules\Reminders.lua
 Modules\GoneFishin.lua
 Modules\ShutIt.lua
+Modules\LazyCast.lua

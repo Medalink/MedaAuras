@@ -69,6 +69,14 @@
 - 📤 **Export / Import** — share your silenced NPC list with friends via a copyable string; per-NPC or export-all, with a paste-to-import popup
 - ⌨️ **Slash commands** — `/mwa shutit` (open explorer), `scan` (silence target), `stop` (stop capture), `list` (print all), `export`, `import`
 
+### Lazy Cast
+
+- 🎯 **Role-based auto-targeting** — cast spells on tank, healer, DPS, pet, or self without changing your current target
+- 🔢 **Two configurable slots** — each slot pairs a spell with a target role; auto-creates a macro you drag to your action bar
+- 🐾 **Pet support** — targets your own pet first, then scans group/raid for other players' pets (hunters, warlocks, etc.)
+- 🛡️ **Dead-target fallback** — automatically skips dead group members and picks the next alive player in that role
+- 💚 **Self-cast fallback** — optional per-slot toggle for healers who want the spell to land on themselves when no role target is available (off by default to prevent accidental self-casts)
+
 ### Gone Fishin'
 
 - 🎣 **Three-panel HUD** — left (zone & session stats), right (zone fish checklist), and bottom (favorites, best spot, lure tips) panels appear while fishing; each panel can be dragged independently and remembers its position

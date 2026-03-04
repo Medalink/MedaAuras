@@ -22,7 +22,7 @@ D.capabilities.bloodlust = {
             specID    = nil,
             spellID   = 80353,
             spellName = "Time Warp",
-            note      = "Baseline Mage ability.",
+            note      = "Baseline Mage ability. [IV: StandardHeroismeffect. Raid-wide 30% Haste cooldown.]",
         },
         {
             class     = "HUNTER",
@@ -156,7 +156,7 @@ D.capabilities.offensive_dispel = {
             specID    = nil,
             spellID   = 30449,
             spellName = "Spellsteal",
-            note      = "Steals a beneficial magic effect. Can be powerful with the right buffs.",
+            note      = "Steals a beneficial magic effect. Can be powerful with the right buffs. [IV: Dispels enemy magic and usually grants it to yourself for up to 2\nminutes. Offensive dispels are somewhat rare, and usually, if a target's\nability can be Spellstolen; it will be glowing on the target]",
         },
         {
             class     = "PRIEST",
@@ -249,7 +249,7 @@ D.capabilities.soothe = {
         {
             class     = "ROGUE",
             specID    = nil,
-            spellID   = 5765,
+            spellID   = 5938,
             spellName = "Shiv",
             note      = "Applies concentrated poison which can remove Enrage when using specific poisons. [Wowhead: If your groups need an enrage dispell: Iron Stomach → Shiv . In dungeons with long downtime between packs: Exhilarating Execution → Shrouded in Darkness . Can be combined with Stillshroud .]",
         },

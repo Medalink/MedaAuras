@@ -7,7 +7,7 @@ local MedaUI = LibStub("MedaUI-1.0")
 -- ============================================================================
 
 local MODULE_NAME      = "Reminders"
-local MODULE_VERSION   = "1.0"
+local MODULE_VERSION   = "1.1"
 local MODULE_STABILITY = "beta"   -- "experimental" | "beta" | "stable"
 local MIN_DATA_VERSION = 1
 local MAX_DATA_VERSION = 10
@@ -19,6 +19,7 @@ local SEVERITY_COLORS = {
     info     = { 0.4, 0.7, 1.0 },
 }
 local COVERED_COLOR = { 0.3, 0.85, 0.3 }
+local CHROME_HEIGHT = 88
 
 local CLASS_COLORS = RAID_CLASS_COLORS
 
@@ -53,8 +54,9 @@ local copyPopup = nil
 local prepRows = {}
 local prepHeaders = {}
 local currentAffixes = nil
-local soloMode = false
-local soloCheckbox = nil
+local playerRows = {}
+local playerHeaders = {}
+local playerToolkit = nil
 
 -- ============================================================================
 -- Logging
@@ -187,6 +189,17 @@ local function ResolveDungeonByName(name)
     return nil
 end
 
+local DIFFICULTY_TIERS = {
+    [1] = "normal", [38] = "normal",
+    [2] = "heroic", [23] = "heroic",
+    [8] = "mythicplus",
+}
+local TIER_RANK = { normal = 1, heroic = 2, mythicplus = 3 }
+
+local function MapDifficultyTier(diffID)
+    return DIFFICULTY_TIERS[diffID] or "normal"
+end
+
 local function GetCurrentContext()
     local inInstance, instanceType = IsInInstance()
     local ctx = {
@@ -203,22 +216,23 @@ local function GetCurrentContext()
         ctx.instanceType = "delve"
     end
 
-    if inInstance then
-        local name, _, _, _, _, _, _, id = GetInstanceInfo()
-        ctx.instanceID = id
-        ctx.instanceName = name
+    if inInstance or ctx.isDelve then
+        local name, _, diffID, diffName, _, _, _, id = GetInstanceInfo()
+        if name then
+            ctx.instanceID = id
+            ctx.instanceName = name
+            ctx.difficultyID = diffID
+            ctx.difficultyTier = MapDifficultyTier(diffID)
 
-        -- Name-based fallback: if the API-reported instanceID doesn't match
-        -- any known dungeon, try to resolve by name instead. This handles
-        -- provisional/incorrect instance IDs gracefully.
-        local data = GetData()
-        if data and data.contexts and data.contexts.dungeons then
-            if not data.contexts.dungeons[id] then
-                local resolvedID = ResolveDungeonByName(name)
-                if resolvedID then
-                    LogDebug(format("Instance ID %s not in data; resolved '%s' to ID %d by name",
-                        tostring(id), name, resolvedID))
-                    ctx.instanceID = resolvedID
+            local data = GetData()
+            if data and data.contexts and data.contexts.dungeons then
+                if not data.contexts.dungeons[id] then
+                    local resolvedID = ResolveDungeonByName(name)
+                    if resolvedID then
+                        LogDebug(format("Instance ID %s not in data; resolved '%s' to ID %d by name",
+                            tostring(id), name, resolvedID))
+                        ctx.instanceID = resolvedID
+                    end
                 end
             end
         end
@@ -481,7 +495,7 @@ local function BuildContextDropdownItems()
 
     -- Instance type overrides
     if data.contexts.instanceTypes then
-        items[#items + 1] = { value = "_hdr_types", label = "|cff888888--- Instance Types ---|r" }
+        items[#items + 1] = { value = "_hdr_types", label = "|cff888888--- Instance Types ---|r", disabled = true }
         local sorted = {}
         for key, info in pairs(data.contexts.instanceTypes) do
             sorted[#sorted + 1] = { key = key, label = info.label }
@@ -507,13 +521,13 @@ local function BuildContextDropdownItems()
         table.sort(otherDungeons, function(a, b) return a.name < b.name end)
 
         if #s1Pool > 0 then
-            items[#items + 1] = { value = "_hdr_s1mplus", label = "|cff888888--- Season 1 M+ Pool ---|r" }
+            items[#items + 1] = { value = "_hdr_s1mplus", label = "|cff888888--- Season 1 M+ Pool ---|r", disabled = true }
             for _, entry in ipairs(s1Pool) do
                 items[#items + 1] = { value = "dungeon:" .. entry.id, label = "    " .. entry.name }
             end
         end
         if #otherDungeons > 0 then
-            items[#items + 1] = { value = "_hdr_other", label = "|cff888888--- Other Midnight Dungeons ---|r" }
+            items[#items + 1] = { value = "_hdr_other", label = "|cff888888--- Other Midnight Dungeons ---|r", disabled = true }
             for _, entry in ipairs(otherDungeons) do
                 items[#items + 1] = { value = "dungeon:" .. entry.id, label = "    " .. entry.name }
             end
@@ -522,7 +536,7 @@ local function BuildContextDropdownItems()
 
     -- Delves
     if data.contexts.delves and #data.contexts.delves > 0 then
-        items[#items + 1] = { value = "_hdr_delves", label = "|cff888888--- Delves ---|r" }
+        items[#items + 1] = { value = "_hdr_delves", label = "|cff888888--- Delves ---|r", disabled = true }
         for i, delve in ipairs(data.contexts.delves) do
             items[#items + 1] = { value = "delve:" .. i, label = "    " .. delve.name }
         end
@@ -557,11 +571,12 @@ local function ParseContextSelection(value)
             name = data.contexts.dungeons[dungeonID].name
         end
         return {
-            inInstance   = true,
-            instanceType = "party",
-            instanceID   = dungeonID,
-            instanceName = name,
-            isDelve      = false,
+            inInstance    = true,
+            instanceType  = "party",
+            instanceID    = dungeonID,
+            instanceName  = name,
+            isDelve       = false,
+            difficultyTier = "mythicplus",
         }
     end
 
@@ -592,12 +607,14 @@ local function GetContextHeader(data, ctx)
             return dungeon.name, dungeon.header, dungeon.notes
         end
     end
-    if ctx.isDelve and ctx.instanceName and data.contexts and data.contexts.delves then
+    if ctx.instanceName and data.contexts and data.contexts.delves then
         for _, delve in ipairs(data.contexts.delves) do
             if delve.name == ctx.instanceName then
                 return delve.name, nil, delve.notes and { delve.notes } or nil
             end
         end
+    end
+    if ctx.instanceName then
         return ctx.instanceName, nil, nil
     end
     if ctx.instanceType and data.contexts and data.contexts.instanceTypes then
@@ -635,6 +652,231 @@ local function FilterNoteBySource(note)
         end
     end
     return filtered:match("^%s*(.-)%s*$") or ""
+end
+
+-- ============================================================================
+-- Player Toolkit Evaluation ("You" tab)
+-- ============================================================================
+
+local function BuildFallbackDangers(dungeonCtx)
+    local dangers = {}
+    if dungeonCtx.dispelPriority then
+        for _, capID in ipairs(dungeonCtx.dispelPriority) do
+            dangers[#dangers + 1] = {
+                capability = capID,
+                severity   = "warning",
+                mechanic   = capID:gsub("_", " "),
+                source     = "Various",
+                tip        = "Dispel required in this dungeon.",
+            }
+        end
+    end
+    if dungeonCtx.interruptPriority then
+        for _, kick in ipairs(dungeonCtx.interruptPriority) do
+            dangers[#dangers + 1] = {
+                type     = "interrupt",
+                severity = kick.danger or "medium",
+                mechanic = kick.spell,
+                source   = kick.mob,
+                tip      = format("Interrupt %s from %s.", kick.spell, kick.mob),
+            }
+        end
+    end
+    return dangers
+end
+
+local function ResolveInstanceContext(data, ctx)
+    if not data or not ctx then return nil end
+
+    -- Try dungeon by instanceID first (most reliable)
+    if ctx.instanceID and data.contexts and data.contexts.dungeons then
+        local dungeon = data.contexts.dungeons[ctx.instanceID]
+        if dungeon then return dungeon end
+    end
+
+    -- Try delve by name
+    if ctx.instanceName and data.contexts and data.contexts.delves then
+        for _, delve in ipairs(data.contexts.delves) do
+            if delve.name == ctx.instanceName then return delve end
+        end
+    end
+
+    -- Try dungeon by name (fallback when instanceID doesn't match)
+    if ctx.instanceName and data.contexts and data.contexts.dungeons then
+        for _, dungeon in pairs(data.contexts.dungeons) do
+            if dungeon.name == ctx.instanceName then return dungeon end
+        end
+    end
+
+    -- Generic instance type fallback
+    if ctx.instanceType and data.contexts and data.contexts.instanceTypes then
+        local it = data.contexts.instanceTypes[ctx.instanceType]
+        if it then return { name = it.label } end
+    end
+
+    return nil
+end
+
+local function EvaluatePlayerToolkit(data, ctx)
+    if not data or not ctx then return nil end
+
+    local _, playerClass = UnitClass("player")
+    local specIdx = GetSpecialization()
+    local tierRank = TIER_RANK[ctx.difficultyTier or "normal"] or 1
+
+    local dungeonCtx = ResolveInstanceContext(data, ctx)
+
+    if not dungeonCtx then return nil end
+
+    local dangers = dungeonCtx.dangers
+    if not dangers or #dangers == 0 then
+        dangers = BuildFallbackDangers(dungeonCtx)
+    end
+
+    -- Inject affix dangers
+    local affixData = data.contexts and data.contexts.affixes
+    if currentAffixes and affixData then
+        for _, affixID in ipairs(currentAffixes) do
+            local affix = affixData[affixID]
+            if affix and affix.dangers then
+                for _, ad in ipairs(affix.dangers) do
+                    dangers[#dangers + 1] = {
+                        type     = ad.type or "awareness",
+                        severity = ad.severity or "warning",
+                        mechanic = ad.mechanic,
+                        source   = ad.source or affix.name,
+                        tip      = ad.tip or "",
+                        affix    = true,
+                    }
+                end
+            end
+        end
+    end
+
+    -- Apply affix boosts: upgrade severity for capabilities referenced by active affix boosts
+    local boosted = {}
+    if currentAffixes and affixData then
+        for _, affixID in ipairs(currentAffixes) do
+            local affix = affixData[affixID]
+            if affix and affix.boosts then
+                for _, cap in ipairs(affix.boosts) do
+                    boosted[cap] = true
+                end
+            end
+        end
+    end
+
+    local SEVERITY_UPGRADE = { info = "warning", warning = "critical" }
+    if next(boosted) then
+        for _, d in ipairs(dangers) do
+            if d.capability and boosted[d.capability] then
+                d.severity = SEVERITY_UPGRADE[d.severity] or d.severity
+                d.boosted = true
+            end
+        end
+    end
+
+    -- Filter by difficulty tier
+    local filtered = {}
+    for _, d in ipairs(dangers) do
+        local dRank = TIER_RANK[d.difficulty or "normal"] or 1
+        if dRank <= tierRank then
+            filtered[#filtered + 1] = d
+        end
+    end
+
+    -- Determine player response for capability-based dangers
+    local capabilities = data.capabilities or {}
+    for _, d in ipairs(filtered) do
+        if d.capability then
+            local cap = capabilities[d.capability]
+            if cap and cap.providers then
+                local have, canTalent = false, false
+                for _, prov in ipairs(cap.providers) do
+                    if prov.class == playerClass then
+                        if IsPlayerSpell and IsPlayerSpell(prov.spellID) then
+                            have = true
+                            break
+                        elseif prov.talentSpellID and IsPlayerSpell and not IsPlayerSpell(prov.spellID) then
+                            canTalent = true
+                        end
+                    end
+                end
+                if have then
+                    d.response = "have"
+                elseif canTalent then
+                    d.response = "canTalent"
+                else
+                    d.response = "unavailable"
+                end
+            end
+        end
+    end
+
+    -- Sort: critical first, then warning, then info
+    table.sort(filtered, function(a, b)
+        local pa = SEVERITY_PRIORITY[a.severity] or 0
+        local pb = SEVERITY_PRIORITY[b.severity] or 0
+        if pa ~= pb then return pa > pb end
+        return (a.mechanic or "") < (b.mechanic or "")
+    end)
+
+    -- Filter talent tips by player class
+    local tips = {}
+    if dungeonCtx.talentTips then
+        for _, tt in ipairs(dungeonCtx.talentTips) do
+            if tt.class == playerClass then
+                local known = false
+                if tt.spell and tt.spell ~= "" and IsPlayerSpell then
+                    local info = C_Spell.GetSpellInfo(tt.spell)
+                    if info and info.spellID then
+                        known = IsPlayerSpell(info.spellID)
+                    end
+                end
+                tips[#tips + 1] = { spell = tt.spell, tip = tt.tip, known = known }
+            end
+        end
+    end
+
+    -- Filter lust timings by active affixes
+    local lusts = {}
+    if dungeonCtx.lustTimings then
+        for _, lt in ipairs(dungeonCtx.lustTimings) do
+            local show = true
+            if lt.affix then
+                show = false
+                if currentAffixes and affixData then
+                    for _, aID in ipairs(currentAffixes) do
+                        local a = affixData[aID]
+                        if a and a.name and a.name:lower():find(lt.affix:lower(), 1, true) then
+                            show = true
+                            break
+                        end
+                    end
+                end
+            end
+            if show then
+                lusts[#lusts + 1] = lt
+            end
+        end
+    end
+
+    local notes = dungeonCtx.notes
+    if type(notes) == "string" and notes ~= "" then
+        notes = { notes }
+    elseif type(notes) ~= "table" then
+        notes = nil
+    end
+
+    return {
+        dangers   = filtered,
+        tips      = tips,
+        lusts     = lusts,
+        header    = dungeonCtx.header or dungeonCtx.name or "Unknown Instance",
+        notes     = notes,
+        tier      = ctx.difficultyTier or "normal",
+        className = playerClass,
+    }
 end
 
 local function FormatProviderText(matches)
@@ -678,12 +920,279 @@ local function ClearTabFrame(frame, preserve)
     end
 end
 
-local function RenderPanel(results)
-    if not coveragePanel then return end
-    if #results == 0 and not soloMode then
-        coveragePanel:Hide()
+-- ============================================================================
+-- UI: Player ("You") Tab
+-- ============================================================================
+
+local function ReleasePlayerRows()
+    for _, row in ipairs(playerRows) do
+        row:Hide()
+        row:SetParent(nil)
+    end
+    wipe(playerRows)
+end
+
+local function ReleasePlayerHeaders()
+    for _, hdr in ipairs(playerHeaders) do
+        hdr:Hide()
+    end
+    wipe(playerHeaders)
+end
+
+local function RenderPlayerTab(content)
+    if not content then return end
+
+    ReleasePlayerRows()
+    ReleasePlayerHeaders()
+
+    local kids = { content:GetChildren() }
+    for _, child in ipairs(kids) do child:Hide(); child:SetParent(nil) end
+    for _, region in ipairs({ content:GetRegions() }) do region:Hide() end
+
+    if not playerToolkit then
+        local emptyFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        emptyFS:SetPoint("TOPLEFT", 8, -8)
+        emptyFS:SetPoint("RIGHT", content, "RIGHT", -8, 0)
+        emptyFS:SetJustifyH("LEFT")
+        emptyFS:SetWordWrap(true)
+        emptyFS:SetTextColor(0.5, 0.5, 0.5)
+        emptyFS:SetText("Enter an instance or select one from the dropdown above to see your personal coaching report.")
+        if coveragePanel then coveragePanel:SetContentHeight(CHROME_HEIGHT + 60) end
         return
     end
+
+    local tk = playerToolkit
+    local Theme = MedaUI.Theme
+    local yOff = -4
+
+    -- Instance briefing
+    local briefHdr = MedaUI:CreateSectionHeader(content, "Instance Briefing", content:GetWidth() - 8)
+    briefHdr:SetPoint("TOPLEFT", 4, yOff)
+    playerHeaders[#playerHeaders + 1] = briefHdr
+    yOff = yOff - 32
+
+    local headerFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    headerFS:SetPoint("TOPLEFT", 8, yOff)
+    headerFS:SetPoint("RIGHT", content, "RIGHT", -8, 0)
+    headerFS:SetJustifyH("LEFT")
+    headerFS:SetWordWrap(true)
+    headerFS:SetText(tk.header)
+    yOff = yOff - headerFS:GetStringHeight() - 4
+
+    local tierLabel = (tk.tier == "mythicplus" and "|cffff8800Mythic+|r") or
+                      (tk.tier == "heroic" and "|cff00ccffHeroic|r") or
+                      "|cff888888Normal|r"
+    local tierFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    tierFS:SetPoint("TOPLEFT", 8, yOff)
+    tierFS:SetTextColor(0.6, 0.6, 0.6)
+    tierFS:SetText("Difficulty: " .. tierLabel)
+    yOff = yOff - 16
+
+    if tk.notes then
+        for _, note in ipairs(tk.notes) do
+            local noteFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            noteFS:SetPoint("TOPLEFT", 12, yOff)
+            noteFS:SetPoint("RIGHT", content, "RIGHT", -8, 0)
+            noteFS:SetJustifyH("LEFT")
+            noteFS:SetWordWrap(true)
+            noteFS:SetTextColor(0.7, 0.7, 0.7)
+            noteFS:SetText("- " .. note)
+            yOff = yOff - noteFS:GetStringHeight() - 2
+        end
+    end
+    yOff = yOff - 8
+
+    -- Key Dangers
+    if #tk.dangers > 0 then
+        local dangerHdr = MedaUI:CreateSectionHeader(content, "Key Dangers", content:GetWidth() - 8)
+        dangerHdr:SetPoint("TOPLEFT", 4, yOff)
+        playerHeaders[#playerHeaders + 1] = dangerHdr
+        yOff = yOff - 32
+
+        local DANGER_ACCENT = {
+            critical = { 0.9, 0.2, 0.2 },
+            high     = { 0.9, 0.4, 0.2 },
+            warning  = { 1.0, 0.7, 0.2 },
+            medium   = { 1.0, 0.7, 0.2 },
+            info     = { 0.4, 0.7, 1.0 },
+            low      = { 0.6, 0.6, 0.6 },
+        }
+        local RESPONSE_TEXT = {
+            have        = { label = "You have this",  color = { 0.3, 0.85, 0.3 } },
+            canTalent   = { label = "Talent available", color = { 1.0, 0.7, 0.2 } },
+            unavailable = { label = "Not available",  color = { 0.5, 0.5, 0.5 } },
+        }
+
+        local DANGER_ICONS = {
+            interrupt = 132938,  -- Kick icon
+            awareness = 132323,  -- Awareness eye icon
+            dispel_magic  = 135894,
+            dispel_curse  = 135952,
+            dispel_poison = 136068,
+            dispel_disease = 135935,
+            offensive_dispel = 135739,
+            soothe = 132163,
+        }
+        local DANGER_ICON_DEFAULT = 136116
+
+        for _, d in ipairs(tk.dangers) do
+            local accent = DANGER_ACCENT[d.severity] or DANGER_ACCENT.info
+            local isInterrupt = d.type == "interrupt"
+            local isAwareness = d.type == "awareness"
+
+            local row = MedaUI:CreateStatusRow(content, { iconSize = 32, showNote = true })
+            playerRows[#playerRows + 1] = row
+
+            row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, yOff)
+            row:SetPoint("RIGHT", content, "RIGHT", 0, 0)
+
+            local icon = DANGER_ICONS[d.type] or DANGER_ICONS[d.capability] or DANGER_ICON_DEFAULT
+            row:SetIcon(icon)
+            row:SetLabel(d.mechanic or "Unknown")
+            row:SetAccentColor(accent[1], accent[2], accent[3])
+
+            local srcColored = ""
+            if d.source and d.source ~= "" then
+                srcColored = "|cffddaa44" .. d.source .. "|r"
+                if d.encounter and d.encounter ~= "" then
+                    local encLower = d.encounter:lower()
+                    if not d.source:lower():find(encLower, 1, true) then
+                        srcColored = srcColored .. " |cff888888(" .. d.encounter .. ")|r"
+                    end
+                end
+            end
+
+            if d.response and RESPONSE_TEXT[d.response] then
+                local rt = RESPONSE_TEXT[d.response]
+                row:SetStatus(rt.label, rt.color[1], rt.color[2], rt.color[3])
+                row:SetHighlight(d.response == "canTalent")
+            elseif isInterrupt then
+                row:SetStatus("Interrupt", 0.4, 0.7, 1.0)
+                row:SetHighlight(d.severity == "high" or d.severity == "critical")
+            elseif isAwareness then
+                row:SetStatus("Watch Out", 0.7, 0.5, 0.9)
+                row:SetHighlight(d.severity == "critical")
+            else
+                row:SetStatus(d.severity or "", accent[1], accent[2], accent[3])
+                row:SetHighlight(d.severity == "critical")
+            end
+
+            local noteText = ""
+            if srcColored ~= "" then
+                noteText = srcColored .. "  "
+            end
+            noteText = noteText .. (d.tip or "")
+            if d.boosted then
+                noteText = noteText .. "  |cffff4400(boosted by affix)|r"
+            end
+            row:SetNote(noteText)
+
+            row:SetTooltipFunc(function(_, tip)
+                tip:AddLine(d.mechanic or "Unknown", 1, 0.82, 0)
+                if d.source then tip:AddLine("Source: " .. d.source, 0.87, 0.67, 0.27) end
+                if d.encounter and d.encounter ~= "" then tip:AddLine("Encounter: " .. d.encounter, 0.6, 0.6, 0.6) end
+                tip:AddLine(" ")
+                if d.tip then tip:AddLine(d.tip, 1, 1, 1, true) end
+                if d.response and RESPONSE_TEXT[d.response] then
+                    tip:AddLine(" ")
+                    local rt = RESPONSE_TEXT[d.response]
+                    tip:AddLine(rt.label, rt.color[1], rt.color[2], rt.color[3])
+                end
+            end)
+
+            yOff = yOff - row:GetHeight() - 6
+        end
+        yOff = yOff - 8
+    end
+
+    -- Lust Timings
+    if tk.lusts and #tk.lusts > 0 then
+        local lustHdr = MedaUI:CreateSectionHeader(content, "Bloodlust Timings", content:GetWidth() - 8)
+        lustHdr:SetPoint("TOPLEFT", 4, yOff)
+        playerHeaders[#playerHeaders + 1] = lustHdr
+        yOff = yOff - 32
+
+        local lustNum = 0
+        for _, lt in ipairs(tk.lusts) do
+            lustNum = lustNum + 1
+            local pct = lt.pct or 0
+            local pctColor
+            if pct >= 80 then
+                pctColor = "44dd44"
+            elseif pct >= 40 then
+                pctColor = "dddd44"
+            elseif pct > 0 then
+                pctColor = "dd8844"
+            else
+                pctColor = "888888"
+            end
+
+            local isOutlier = pct > 0 and pct < 40
+
+            local line
+            if isOutlier then
+                line = format("|cff%s\226\151\134 ALT|r  ", pctColor)
+            else
+                line = format("|cff%s#%d|r  ", pctColor, lustNum)
+            end
+
+            line = line .. format("|cffffcc00%s|r", lt.timing or "?")
+
+            if pct > 0 then
+                line = line .. format("  |cff%s(%d%%)|r", pctColor, pct)
+            end
+
+            local lustFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            lustFS:SetPoint("TOPLEFT", 8, yOff)
+            lustFS:SetPoint("RIGHT", content, "RIGHT", -8, 0)
+            lustFS:SetJustifyH("LEFT")
+            lustFS:SetWordWrap(true)
+            lustFS:SetText(line)
+            yOff = yOff - lustFS:GetStringHeight() - 2
+
+            if lt.note then
+                local noteFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                noteFS:SetPoint("TOPLEFT", 24, yOff)
+                noteFS:SetPoint("RIGHT", content, "RIGHT", -8, 0)
+                noteFS:SetJustifyH("LEFT")
+                noteFS:SetWordWrap(true)
+                noteFS:SetText("|cffaaaaaa" .. lt.note .. "|r")
+                yOff = yOff - noteFS:GetStringHeight() - 4
+            end
+        end
+        yOff = yOff - 8
+    end
+
+    -- Talent Tips
+    if #tk.tips > 0 then
+        local tipHdr = MedaUI:CreateSectionHeader(content, "Talent Tips", content:GetWidth() - 8)
+        tipHdr:SetPoint("TOPLEFT", 4, yOff)
+        playerHeaders[#playerHeaders + 1] = tipHdr
+        yOff = yOff - 32
+
+        for _, tt in ipairs(tk.tips) do
+            local icon = tt.known and "|cff4ddb4d+|r " or "|cffffcc00?|r "
+            local tipFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            tipFS:SetPoint("TOPLEFT", 8, yOff)
+            tipFS:SetPoint("RIGHT", content, "RIGHT", -8, 0)
+            tipFS:SetJustifyH("LEFT")
+            tipFS:SetWordWrap(true)
+            tipFS:SetText(icon .. tt.tip)
+            yOff = yOff - tipFS:GetStringHeight() - 4
+        end
+        yOff = yOff - 8
+    end
+
+
+    if coveragePanel then coveragePanel:SetContentHeight(CHROME_HEIGHT + math.abs(yOff) + 8) end
+end
+
+-- ============================================================================
+-- UI: Group Comp rendering
+-- ============================================================================
+
+local function RenderPanel(results)
+    if not coveragePanel then return end
 
     local data = GetData()
     if not data then return end
@@ -691,48 +1200,17 @@ local function RenderPanel(results)
     local gcFrame = tabFrames.groupcomp
     if not gcFrame then return end
 
-    ClearTabFrame(gcFrame, { detectedLabel, contextDropdown, soloCheckbox })
+    ClearTabFrame(gcFrame)
+
+    UpdateDetectedLabel()
+
+    if #results == 0 then return end
 
     local content = gcFrame
     local yOff = -4
 
-    -- Context selector UI
-    if detectedLabel then
-        detectedLabel:SetParent(content)
-        detectedLabel:ClearAllPoints()
-        detectedLabel:SetPoint("TOPLEFT", 4, yOff)
-        detectedLabel:SetPoint("RIGHT", content, "RIGHT", -4, 0)
-        detectedLabel:Show()
-        UpdateDetectedLabel()
-        yOff = yOff - 16
-    end
-
-    if contextDropdown then
-        contextDropdown:SetParent(content)
-        contextDropdown:ClearAllPoints()
-        contextDropdown:SetPoint("TOPLEFT", 4, yOff)
-        contextDropdown:Show()
-    end
-
-    if soloCheckbox then
-        soloCheckbox:SetParent(content)
-        soloCheckbox:ClearAllPoints()
-        soloCheckbox:SetPoint("LEFT", contextDropdown, "RIGHT", 8, 0)
-        soloCheckbox:SetChecked(soloMode)
-        soloCheckbox:Show()
-    end
-
-    yOff = yOff - 38
-
-    -- Context header
-    local ctxName, ctxHeader, ctxNotes = GetContextHeader(data, lastContext)
-    if ctxName then
-        local title = ctxName
-        if soloMode then title = title .. " (Solo)" end
-        coveragePanel:SetTitle(title)
-    else
-        coveragePanel:SetTitle(soloMode and "Group Coverage (Solo)" or "Group Coverage")
-    end
+    -- Context header (title already set in RunPipeline)
+    local _, ctxHeader, ctxNotes = GetContextHeader(data, lastContext)
 
     if ctxHeader then
         local headerFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -760,16 +1238,13 @@ local function RenderPanel(results)
         yOff = yOff - 4
     end
 
-    -- Collect personal reminders regardless of solo mode
+    -- Collect personal reminders
     local personalReminders = {}
     for _, r in ipairs(results) do
         if r.personal then
             personalReminders[#personalReminders + 1] = r
         end
     end
-
-    -- Sections to skip in solo mode (group-only utility like bloodlust/brez)
-    local SOLO_SKIP_SECTIONS = { utility_coverage = true }
 
     -- Build a lookup from capabilityID -> result
     local resultMap = {}
@@ -798,7 +1273,7 @@ local function RenderPanel(results)
         totalChecks = totalChecks + 1
         if r.matchCount > 0 then coveredChecks = coveredChecks + 1 end
     end
-    if totalChecks > 0 and not soloMode then
+    if totalChecks > 0 then
         local summaryText = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         summaryText:SetPoint("TOPLEFT", 4, yOff)
         summaryText:SetPoint("RIGHT", content, "RIGHT", -4, 0)
@@ -814,159 +1289,124 @@ local function RenderPanel(results)
     end
 
     for _, section in ipairs(sections) do
-        if soloMode and SOLO_SKIP_SECTIONS[section.id] then
-            -- skip group-only sections in solo mode
-        else
-            local hasContent = false
+        local hasContent = false
+        for _, capID in ipairs(section.capabilities or {}) do
+            if resultMap[capID] then
+                hasContent = true
+                break
+            end
+        end
+
+        if hasContent then
+            local hdrContainer = MedaUI:CreateSectionHeader(content, section.label, content:GetWidth() - 8)
+            hdrContainer:SetPoint("TOPLEFT", 4, yOff)
+            sectionHeaders[#sectionHeaders + 1] = hdrContainer
+
+            if section.description then
+                hdrContainer:EnableMouse(true)
+                hdrContainer:SetScript("OnEnter", function(self)
+                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                    GameTooltip:AddLine(section.label, 1, 0.82, 0)
+                    GameTooltip:AddLine(section.description, 1, 1, 1, true)
+                    GameTooltip:Show()
+                end)
+                hdrContainer:SetScript("OnLeave", function() GameTooltip:Hide() end)
+            end
+
+            yOff = yOff - 32
+
+            local orderedCaps = {}
             for _, capID in ipairs(section.capabilities or {}) do
                 if resultMap[capID] then
-                    hasContent = true
-                    break
+                    orderedCaps[#orderedCaps + 1] = capID
                 end
             end
+            if next(priorityOrder) then
+                table.sort(orderedCaps, function(a, b)
+                    local pa = priorityOrder[a] or 999
+                    local pb = priorityOrder[b] or 999
+                    return pa < pb
+                end)
+            end
 
-            if hasContent then
-                local sectionLabel = section.label
-                if soloMode then sectionLabel = "Your " .. sectionLabel end
-                local hdrContainer = MedaUI:CreateSectionHeader(content, sectionLabel, content:GetWidth() - 8)
-                hdrContainer:SetPoint("TOPLEFT", 4, yOff)
-                sectionHeaders[#sectionHeaders + 1] = hdrContainer
+            for _, capID in ipairs(orderedCaps) do
+                local r = resultMap[capID]
+                if r then
+                    local cap = r.capability
+                    local row = AcquireRow(content)
+                    activeRows[#activeRows + 1] = row
 
-                if section.description then
-                    hdrContainer:EnableMouse(true)
-                    hdrContainer:SetScript("OnEnter", function(self)
-                        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                        GameTooltip:AddLine(section.label, 1, 0.82, 0)
-                        GameTooltip:AddLine(section.description, 1, 1, 1, true)
-                        GameTooltip:Show()
-                    end)
-                    hdrContainer:SetScript("OnLeave", function() GameTooltip:Hide() end)
-                end
+                    row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, yOff)
+                    row:SetPoint("RIGHT", content, "RIGHT", 0, 0)
 
-                yOff = yOff - 32
+                    row:SetIcon(cap.icon)
+                    row:SetLabel(cap.label or capID)
 
-                -- Sort capabilities by dungeon dispelPriority when available
-                local orderedCaps = {}
-                for _, capID in ipairs(section.capabilities or {}) do
-                    if resultMap[capID] then
-                        orderedCaps[#orderedCaps + 1] = capID
+                    local output = r.output or {}
+                    local severity = output.severity
+
+                    if severity and SEVERITY_COLORS[severity] then
+                        local sc = SEVERITY_COLORS[severity]
+                        row:SetAccentColor(sc[1], sc[2], sc[3])
+                        row:SetHighlight(severity == "critical" or severity == "warning")
+                    else
+                        row:SetAccentColor(COVERED_COLOR[1], COVERED_COLOR[2], COVERED_COLOR[3])
+                        row:SetHighlight(false)
                     end
-                end
-                if next(priorityOrder) then
-                    table.sort(orderedCaps, function(a, b)
-                        local pa = priorityOrder[a] or 999
-                        local pb = priorityOrder[b] or 999
-                        return pa < pb
-                    end)
-                end
 
-                for _, capID in ipairs(orderedCaps) do
-                    local r = resultMap[capID]
-                    if r then
-                        local cap = r.capability
-                        local row = AcquireRow(content)
-                        activeRows[#activeRows + 1] = row
+                    if r.matchCount > 0 then
+                        local provText = FormatProviderText(r.matches)
+                        row:SetStatus(provText or "Covered")
+                    elseif output.panelStatus then
+                        local sc = severity and SEVERITY_COLORS[severity] or {1, 1, 1}
+                        row:SetStatus(output.panelStatus, sc[1], sc[2], sc[3])
+                    else
+                        row:SetStatus("")
+                    end
 
-                        row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, yOff)
-                        row:SetPoint("RIGHT", content, "RIGHT", 0, 0)
+                    if r.matchCount > 0 and r.matches[1] and r.matches[1].note then
+                        row:SetNote(FilterNoteBySource(r.matches[1].note))
+                    elseif output.suggestion then
+                        row:SetNote(FilterNoteBySource(output.suggestion))
+                    elseif output.detail then
+                        row:SetNote(FilterNoteBySource(output.detail))
+                    else
+                        row:SetNote("")
+                    end
 
-                        row:SetIcon(cap.icon)
-                        row:SetLabel(cap.label or capID)
-
-                        local output = r.output or {}
-                        local severity = output.severity
-
-                        if soloMode then
-                            if r.matchCount > 0 then
-                                row:SetAccentColor(COVERED_COLOR[1], COVERED_COLOR[2], COVERED_COLOR[3])
-                                row:SetHighlight(false)
-                                local provText = FormatProviderText(r.matches)
-                                row:SetStatus(provText or "Covered")
-                                if r.matches[1] and r.matches[1].note then
-                                    row:SetNote(FilterNoteBySource(r.matches[1].note))
-                                else
-                                    row:SetNote("")
+                    row:SetTooltipFunc(function(_, tip)
+                        tip:AddLine(cap.label or capID, 1, 0.82, 0)
+                        if cap.description then
+                            tip:AddLine(cap.description, 1, 1, 1, true)
+                        end
+                        tip:AddLine(" ")
+                        if output.detail then
+                            tip:AddLine(output.detail, 1, 1, 1, true)
+                        end
+                        if r.matches and #r.matches > 0 then
+                            tip:AddLine(" ")
+                            tip:AddLine("Providers:", 0.6, 0.8, 1.0)
+                            for _, m in ipairs(r.matches) do
+                                local cc = CLASS_COLORS[m.class]
+                                local cr, cg, cb = 1, 1, 1
+                                if cc then cr, cg, cb = cc.r, cc.g, cc.b end
+                                tip:AddDoubleLine(
+                                    format("%s (%s)", m.name, m.spellName or "?"),
+                                    "",
+                                    cr, cg, cb, 1, 1, 1
+                                )
+                                if m.note and m.note ~= "" then
+                                    tip:AddLine("  " .. m.note, 0.7, 0.7, 0.7, true)
                                 end
-                            elseif r.personal then
-                                local sc = SEVERITY_COLORS.warning
-                                row:SetAccentColor(sc[1], sc[2], sc[3])
-                                row:SetHighlight(true)
-                                row:SetStatus("Talent Available", sc[1], sc[2], sc[3])
-                                row:SetNote(r.personal.detail or "You can talent into this ability.")
-                            else
-                                local sc = SEVERITY_COLORS.info
-                                row:SetAccentColor(sc[1], sc[2], sc[3])
-                                row:SetHighlight(false)
-                                row:SetStatus("N/A", 0.5, 0.5, 0.5)
-                                row:SetNote("Not available to your class. Plan defensives accordingly.")
-                            end
-                        else
-                            if severity and SEVERITY_COLORS[severity] then
-                                local sc = SEVERITY_COLORS[severity]
-                                row:SetAccentColor(sc[1], sc[2], sc[3])
-                                row:SetHighlight(severity == "critical" or severity == "warning")
-                            else
-                                row:SetAccentColor(COVERED_COLOR[1], COVERED_COLOR[2], COVERED_COLOR[3])
-                                row:SetHighlight(false)
-                            end
-
-                            if r.matchCount > 0 then
-                                local provText = FormatProviderText(r.matches)
-                                row:SetStatus(provText or "Covered")
-                            elseif output.panelStatus then
-                                local sc = severity and SEVERITY_COLORS[severity] or {1, 1, 1}
-                                row:SetStatus(output.panelStatus, sc[1], sc[2], sc[3])
-                            else
-                                row:SetStatus("")
-                            end
-
-                            -- Note: provider note for covered, suggestion for gaps (filtered by source)
-                            if r.matchCount > 0 and r.matches[1] and r.matches[1].note then
-                                row:SetNote(FilterNoteBySource(r.matches[1].note))
-                            elseif output.suggestion then
-                                row:SetNote(FilterNoteBySource(output.suggestion))
-                            elseif output.detail then
-                                row:SetNote(FilterNoteBySource(output.detail))
-                            else
-                                row:SetNote("")
                             end
                         end
+                    end)
 
-                        -- Tooltip with full detail
-                        row:SetTooltipFunc(function(_, tip)
-                            tip:AddLine(cap.label or capID, 1, 0.82, 0)
-                            if cap.description then
-                                tip:AddLine(cap.description, 1, 1, 1, true)
-                            end
-                            tip:AddLine(" ")
-                            if output.detail then
-                                tip:AddLine(output.detail, 1, 1, 1, true)
-                            end
-                            if r.matches and #r.matches > 0 then
-                                tip:AddLine(" ")
-                                tip:AddLine("Providers:", 0.6, 0.8, 1.0)
-                                for _, m in ipairs(r.matches) do
-                                    local cc = CLASS_COLORS[m.class]
-                                    local cr, cg, cb = 1, 1, 1
-                                    if cc then cr, cg, cb = cc.r, cc.g, cc.b end
-                                    tip:AddDoubleLine(
-                                        format("%s (%s)", m.name, m.spellName or "?"),
-                                        "",
-                                        cr, cg, cb, 1, 1, 1
-                                    )
-                                    if m.note and m.note ~= "" then
-                                        tip:AddLine("  " .. m.note, 0.7, 0.7, 0.7, true)
-                                    end
-                                end
-                            end
-                        end)
-
-                        yOff = yOff - row:GetHeight() - 8
-                    end
+                    yOff = yOff - row:GetHeight() - 8
                 end
-
-                yOff = yOff - 16
             end
+
+            yOff = yOff - 16
         end
     end
 
@@ -998,46 +1438,6 @@ local function RenderPanel(results)
         end
     end
 
-    -- Interrupt priorities for current dungeon
-    if lastContext.instanceID and data.contexts and data.contexts.dungeons and db and db.showInterrupts ~= false then
-        local dungeon = data.contexts.dungeons[lastContext.instanceID]
-        if dungeon and dungeon.interruptPriority and #dungeon.interruptPriority > 0 then
-            local intHdr = MedaUI:CreateSectionHeader(content, "Priority Interrupts", content:GetWidth() - 8)
-            intHdr:SetPoint("TOPLEFT", 4, yOff)
-            sectionHeaders[#sectionHeaders + 1] = intHdr
-            intHdr:EnableMouse(true)
-            intHdr:SetScript("OnEnter", function(self)
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:AddLine("Priority Interrupts", 1, 0.82, 0)
-                GameTooltip:AddLine("Spells you should prioritize kicking in this dungeon.", 1, 1, 1, true)
-                GameTooltip:Show()
-            end)
-            intHdr:SetScript("OnLeave", function() GameTooltip:Hide() end)
-            yOff = yOff - 32
-
-            local DANGER_COLORS = {
-                high   = { 0.9, 0.3, 0.3 },
-                medium = { 1.0, 0.7, 0.2 },
-                low    = { 0.6, 0.6, 0.6 },
-            }
-
-            for _, kick in ipairs(dungeon.interruptPriority) do
-                local dc = DANGER_COLORS[kick.danger] or DANGER_COLORS.medium
-                local line = format("|cff%02x%02x%02x%s|r  |cff888888(%s)|r",
-                    dc[1]*255, dc[2]*255, dc[3]*255,
-                    kick.spell, kick.mob)
-                local kickFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-                kickFS:SetPoint("TOPLEFT", 8, yOff)
-                kickFS:SetPoint("RIGHT", content, "RIGHT", -8, 0)
-                kickFS:SetJustifyH("LEFT")
-                kickFS:SetWordWrap(false)
-                kickFS:SetText(line)
-                yOff = yOff - 16
-            end
-            yOff = yOff - 8
-        end
-    end
-
     -- Personal reminders footer
     if #personalReminders > 0 and db and db.personalReminders ~= false then
         local first = personalReminders[1]
@@ -1051,12 +1451,7 @@ local function RenderPanel(results)
         coveragePanel:SetFooter("")
     end
 
-    -- 32px for tab bar + content height
-    coveragePanel:SetContentHeight(32 + math.abs(yOff) + 8)
-
-    if not dismissed then
-        coveragePanel:Show()
-    end
+    coveragePanel:SetContentHeight(CHROME_HEIGHT + math.abs(yOff) + 8)
 end
 
 -- ============================================================================
@@ -1193,7 +1588,7 @@ local function RenderTalentsTab(content)
         noSpec:SetPoint("TOPLEFT", 8, yOff)
         noSpec:SetText("Select a specialization to see talent recommendations.")
         noSpec:SetTextColor(unpack(Theme.textDim or { 0.6, 0.6, 0.6 }))
-        if coveragePanel then coveragePanel:SetContentHeight(32 + math.abs(yOff) + 30) end
+        if coveragePanel then coveragePanel:SetContentHeight(CHROME_HEIGHT + math.abs(yOff) + 30) end
         return
     end
 
@@ -1206,7 +1601,7 @@ local function RenderTalentsTab(content)
         noRec:SetPoint("TOPLEFT", 8, yOff)
         noRec:SetText("No recommendations available for your spec.")
         noRec:SetTextColor(unpack(Theme.textDim or { 0.6, 0.6, 0.6 }))
-        if coveragePanel then coveragePanel:SetContentHeight(32 + math.abs(yOff) + 30) end
+        if coveragePanel then coveragePanel:SetContentHeight(CHROME_HEIGHT + math.abs(yOff) + 30) end
         return
     end
 
@@ -1460,7 +1855,7 @@ local function RenderTalentsTab(content)
         yOff = yOff - 24
     end
 
-    if coveragePanel then coveragePanel:SetContentHeight(32 + math.abs(yOff) + 8) end
+    if coveragePanel then coveragePanel:SetContentHeight(CHROME_HEIGHT + math.abs(yOff) + 8) end
 end
 
 -- ============================================================================
@@ -1560,8 +1955,8 @@ local function RenderPrepTab(content)
         yOff = yOff - freshFS:GetStringHeight() - 6
     end
 
-    -- Affix summary at top of prep tab (skip in solo mode)
-    if currentAffixes and not soloMode then
+    -- Affix summary at top of prep tab
+    if currentAffixes then
         local affixData = data.contexts and data.contexts.affixes
         if affixData then
             local affNames = {}
@@ -1707,7 +2102,7 @@ local function RenderPrepTab(content)
         end
     end
 
-    if coveragePanel then coveragePanel:SetContentHeight(32 + math.abs(yOff) + 8) end
+    if coveragePanel then coveragePanel:SetContentHeight(CHROME_HEIGHT + math.abs(yOff) + 8) end
 end
 
 -- ============================================================================
@@ -1733,21 +2128,6 @@ local function ShowBannerIfNeeded(results)
     end
 end
 
--- ============================================================================
--- Solo mode auto-detection
--- ============================================================================
-
-local function ShouldAutoSolo()
-    local ctx = overrideContext or GetCurrentContext()
-    if not ctx.inInstance then return false end
-    return not IsInGroup() or GetNumGroupMembers() <= 1
-end
-
-local function UpdateSoloMode(auto)
-    soloMode = auto
-    if db then db.soloMode = auto end
-    if soloCheckbox then soloCheckbox:SetChecked(auto) end
-end
 
 -- ============================================================================
 -- Evaluation + render pipeline
@@ -1768,7 +2148,6 @@ local function RunPipeline(clearDismiss)
                 coveragePanel:ClearDismissed()
             end
         end
-        UpdateSoloMode(ShouldAutoSolo())
     end
 
     RefreshAffixes()
@@ -1776,8 +2155,27 @@ local function RunPipeline(clearDismiss)
     local results = Evaluate()
     lastResults = results
 
+    -- Evaluate player toolkit for the "You" tab
+    local data = GetData()
+    local ctx = overrideContext or lastContext
+    playerToolkit = EvaluatePlayerToolkit(data, ctx)
+
+    -- Update panel title from context (applies to all tabs)
+    if coveragePanel and data then
+        local ctxName = GetContextHeader(data, lastContext)
+        coveragePanel:SetTitle(ctxName or "Group Coverage")
+    end
+
     RenderPanel(results)
     ShowBannerIfNeeded(results)
+
+    -- Refresh player tab if it's currently active
+    if tabBar and tabBar:GetActiveTab() == "player" and tabFrames.player then
+        RenderPlayerTab(tabFrames.player)
+        tabRendered.player = true
+    else
+        tabRendered.player = false
+    end
 
     -- Refresh talents tab if it's currently active
     if tabBar and tabBar:GetActiveTab() == "talents" and tabFrames.talents then
@@ -1793,6 +2191,11 @@ local function RunPipeline(clearDismiss)
         tabRendered.prep = true
     else
         tabRendered.prep = false
+    end
+
+    -- Auto-show panel only when inside an instance (not in cities/open world)
+    if coveragePanel and not dismissed and lastContext and lastContext.inInstance then
+        coveragePanel:Show()
     end
 end
 
@@ -1833,8 +2236,8 @@ end
 local function CreateUI()
     -- Coverage panel
     coveragePanel = MedaUI:CreateInfoPanel("MedaAurasRemindersPanel", {
-        width       = db.panelWidth or 520,
-        height      = db.panelHeight or 620,
+        width       = db.panelWidth or 640,
+        height      = db.panelHeight or 720,
         title       = "Group Coverage",
         icon        = 134063,
         strata      = "MEDIUM",
@@ -1861,8 +2264,8 @@ local function CreateUI()
     coveragePanel:SetBackgroundOpacity(db.backgroundOpacity or 0.85)
 
     coveragePanel:SetResizable(true, {
-        minWidth  = 300,
-        minHeight = 400,
+        minWidth  = 420,
+        minHeight = 500,
     })
     coveragePanel.OnResize = function(self, w, h)
         db.panelWidth = math.floor(w)
@@ -1873,6 +2276,7 @@ local function CreateUI()
 
     -- Tab bar
     tabBar = MedaUI:CreateTabBar(content, {
+        { id = "player",    label = "You" },
         { id = "groupcomp", label = "Group Comp" },
         { id = "talents",   label = "Talents" },
         { id = "prep",      label = "Prep" },
@@ -1880,9 +2284,37 @@ local function CreateUI()
     tabBar:SetPoint("TOPLEFT", 0, 0)
     tabBar:SetPoint("TOPRIGHT", 0, 0)
 
-    for _, tabId in ipairs({ "groupcomp", "talents", "prep" }) do
+    -- Context selector (shared across all tabs, sits between tab bar and tab content)
+    local Theme = MedaUI.Theme
+    detectedLabel = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    detectedLabel:SetJustifyH("LEFT")
+    detectedLabel:SetWordWrap(false)
+    detectedLabel:SetTextColor(unpack(Theme.textDim or {0.6, 0.6, 0.6}))
+    detectedLabel:SetText("Detected: World")
+    detectedLabel:SetPoint("TOPLEFT", 4, -34)
+    detectedLabel:SetPoint("RIGHT", content, "RIGHT", -4, 0)
+
+    local ddItems = BuildContextDropdownItems()
+    contextDropdown = MedaUI:CreateDropdown(content, 280, ddItems)
+    contextDropdown:SetSelected("auto")
+    contextDropdown:SetPoint("TOPLEFT", 4, -50)
+    contextDropdown.OnValueChanged = function(_, val)
+        if val and val:match("^_hdr_") then return end
+        overrideContext = ParseContextSelection(val)
+        tabRendered.player = false
+        tabRendered.talents = false
+        tabRendered.prep = false
+        if coveragePanel and coveragePanel.scrollParent then
+            coveragePanel.scrollParent:ResetScroll()
+        end
+        RunPipeline(false)
+    end
+
+    -- Tab content frames start below tab bar + context selector area
+    local TAB_CONTENT_TOP = -CHROME_HEIGHT
+    for _, tabId in ipairs({ "player", "groupcomp", "talents", "prep" }) do
         local frame = CreateFrame("Frame", nil, content)
-        frame:SetPoint("TOPLEFT", 0, -32)
+        frame:SetPoint("TOPLEFT", 0, TAB_CONTENT_TOP)
         frame:SetPoint("BOTTOMRIGHT", 0, 0)
         frame:Hide()
         tabFrames[tabId] = frame
@@ -1897,7 +2329,10 @@ local function CreateUI()
             end
         end
 
-        if tabId == "talents" and not tabRendered.talents then
+        if tabId == "player" and not tabRendered.player then
+            RenderPlayerTab(tabFrames.player)
+            tabRendered.player = true
+        elseif tabId == "talents" and not tabRendered.talents then
             RenderTalentsTab(tabFrames.talents)
             tabRendered.talents = true
         elseif tabId == "prep" and not tabRendered.prep then
@@ -1907,38 +2342,8 @@ local function CreateUI()
     end
 
     -- Force-build the default tab
-    tabFrames.groupcomp:Show()
-    tabRendered.groupcomp = true
-
-    -- Context selector (persistent across re-renders, parented to groupcomp tab)
-    detectedLabel = tabFrames.groupcomp:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    detectedLabel:SetJustifyH("LEFT")
-    detectedLabel:SetWordWrap(false)
-    local Theme = MedaUI.Theme
-    detectedLabel:SetTextColor(unpack(Theme.textDim or {0.6, 0.6, 0.6}))
-    detectedLabel:SetText("Detected: World")
-
-    local ddItems = BuildContextDropdownItems()
-    contextDropdown = MedaUI:CreateDropdown(tabFrames.groupcomp, 280, ddItems)
-    contextDropdown:SetSelected("auto")
-    contextDropdown.OnValueChanged = function(_, val)
-        overrideContext = ParseContextSelection(val)
-        tabRendered.talents = false
-        tabRendered.prep = false
-        RunPipeline(false)
-    end
-
-    -- Solo mode checkbox (persistent across re-renders, parented to groupcomp tab)
-    soloCheckbox = MedaUI:CreateCheckbox(tabFrames.groupcomp, "Solo")
-    soloCheckbox:SetPoint("LEFT", contextDropdown, "RIGHT", 8, 0)
-    soloCheckbox:SetChecked(soloMode)
-    soloCheckbox.OnValueChanged = function(_, val)
-        soloMode = val
-        db.soloMode = val
-        tabRendered.talents = false
-        tabRendered.prep = false
-        RunPipeline(false)
-    end
+    tabFrames.player:Show()
+    tabRendered.player = true
 
     -- Notification banner
     alertBanner = MedaUI:CreateNotificationBanner("MedaAurasRemindersAlert", {
@@ -2006,7 +2411,6 @@ local function StartModule()
     end
 
     isEnabled = true
-    soloMode = db.soloMode or false
     CreateUI()
 
     if not eventFrame then
@@ -2051,9 +2455,11 @@ local function StopModule()
     ReleaseTalentHeaders()
     ReleasePrepRows()
     ReleasePrepHeaders()
+    ReleasePlayerRows()
+    ReleasePlayerHeaders()
     wipe(tabRendered)
     currentAffixes = nil
-    soloMode = false
+    playerToolkit = nil
 
     Log("Module disabled")
 end
@@ -2062,9 +2468,15 @@ local function OnInitialize(moduleDB)
     db = moduleDB
 
     if not db._sizeMigrated then
-        if (db.panelWidth or 0) <= 440 then db.panelWidth = 520 end
-        if (db.panelHeight or 0) <= 520 then db.panelHeight = 620 end
+        if (db.panelWidth or 0) <= 440 then db.panelWidth = 640 end
+        if (db.panelHeight or 0) <= 520 then db.panelHeight = 720 end
         db._sizeMigrated = true
+    end
+
+    if not db._sizeMigrated2 then
+        if (db.panelWidth or 0) <= 520 then db.panelWidth = 640 end
+        if (db.panelHeight or 0) <= 620 then db.panelHeight = 720 end
+        db._sizeMigrated2 = true
     end
 
     StartModule()
@@ -2559,10 +2971,10 @@ local function BuildConfig(parent, moduleDB)
             if coveragePanel then
                 coveragePanel:ClearAllPoints()
                 coveragePanel:SetPoint("RIGHT", UIParent, "RIGHT", -50, 0)
-                coveragePanel:SetSize(520, 620)
+                coveragePanel:SetSize(640, 720)
                 db.panelPoint = nil
-                db.panelWidth = 520
-                db.panelHeight = 620
+                db.panelWidth = 640
+                db.panelHeight = 720
             end
         end
         local resetAlertBtn = MedaUI:CreateButton(p, "Reset alert position", 160)
@@ -2646,8 +3058,8 @@ local MODULE_DEFAULTS = {
     showMinimapButton = true,
     personalReminders = true,
 
-    panelWidth = 520,
-    panelHeight = 620,
+    panelWidth = 640,
+    panelHeight = 720,
     panelPoint = nil,
     showBackground = true,
     backgroundOpacity = 0.85,
@@ -2662,8 +3074,6 @@ local MODULE_DEFAULTS = {
 
     showInterrupts = true,
     showAffixTips  = true,
-
-    soloMode = false,
 }
 
 MedaAuras:RegisterModule({
