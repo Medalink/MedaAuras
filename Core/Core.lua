@@ -403,7 +403,7 @@ local function BuildSettingsPanel()
             cbBox:SetBackdrop(MedaUI:CreateBackdrop(true))
 
             cbBox.check = cbBox:CreateTexture(nil, "OVERLAY")
-            cbBox.check:SetTexture("Interface\\AddOns\\MedaUI\\Textures\\checkmark.tga")
+            cbBox.check:SetTexture(MedaUI.mediaPath .. "Textures\\checkmark.tga")
             cbBox.check:SetPoint("CENTER", 0, 0)
             cbBox.check:SetSize(12, 12)
             cbBox.check:Hide()
