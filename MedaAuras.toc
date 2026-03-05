@@ -27,6 +27,7 @@ Data\GroupCompDisplay.lua
 Data\Recommendations.lua
 Data\GoneFishinFish.lua
 Data\CreatureVO.lua
+Data\Interrupts.lua
 
 # Shared Services (load before modules)
 Services\SpellCastTracker.lua
@@ -34,6 +35,7 @@ Services\CooldownTimer.lua
 Services\UnitPriority.lua
 Services\GroupInspector.lua
 Services\MapPinProvider.lua
+Services\PartySpellWatcher.lua
 
 # Modules
 Modules\FocusInterruptHelper.lua
@@ -43,3 +45,4 @@ Modules\Reminders.lua
 Modules\GoneFishin.lua
 Modules\ShutIt.lua
 Modules\LazyCast.lua
+Modules\Interrupted.lua

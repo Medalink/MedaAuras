@@ -12,6 +12,7 @@ local cache = {}           -- [guid] = { unit, name, class, specID, inspected, t
 local inspectQueue = {}    -- FIFO of unitIDs awaiting inspect
 local inspectBusy = false
 local callbacks = {}       -- [key] = func
+local inspectCompleteCallbacks = {} -- [key] = func(unit, name, class, specID)
 local ticker
 
 local INSPECT_INTERVAL = 1.5
@@ -62,6 +63,15 @@ local function FireCallbacks()
         local ok, err = pcall(func)
         if not ok then
             LogWarn(format("Callback '%s' error: %s", tostring(key), tostring(err)))
+        end
+    end
+end
+
+local function FireInspectComplete(unit, name, class, specID)
+    for key, func in pairs(inspectCompleteCallbacks) do
+        local ok, err = pcall(func, unit, name, class, specID)
+        if not ok then
+            LogWarn(format("InspectComplete callback '%s' error: %s", tostring(key), tostring(err)))
         end
     end
 end
@@ -153,6 +163,7 @@ local function OnInspectReady(guid)
                     entry.name, specID,
                     oldSpec and oldSpec ~= specID and format(" (changed from %d)", oldSpec) or ""))
                 FireCallbacks()
+                FireInspectComplete(entry.unit, entry.name, entry.class, specID)
             end
             break
         end
@@ -231,6 +242,15 @@ function GroupInspector:UnregisterCallback(key)
     callbacks[key] = nil
 end
 
+function GroupInspector:RegisterInspectComplete(key, func)
+    inspectCompleteCallbacks[key] = func
+    LogDebug(format("InspectComplete callback registered: %s", tostring(key)))
+end
+
+function GroupInspector:UnregisterInspectComplete(key)
+    inspectCompleteCallbacks[key] = nil
+end
+
 function GroupInspector:QueryProviders(providersList)
     if not providersList then return {} end
 
@@ -286,4 +306,19 @@ function GroupInspector:RequestRefresh()
     wipe(inspectQueue)
     inspectBusy = false
     ScanRoster()
+end
+
+function GroupInspector:RequestReinspectAll()
+    for _, entry in pairs(cache) do
+        if not UnitIsUnit(entry.unit, "player") then
+            entry.inspected = false
+        end
+    end
+    wipe(inspectQueue)
+    inspectBusy = false
+    ScanRoster()
+end
+
+function GroupInspector:GetAllCached()
+    return cache
 end

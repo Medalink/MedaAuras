@@ -11,28 +11,10 @@ local MODULE_VERSION   = "1.1"
 local MODULE_STABILITY = "stable"   -- "experimental" | "beta" | "stable"
 
 -- ============================================================================
--- Interrupt Spell Database
+-- Interrupt Spell Database (shared via Data/Interrupts.lua)
 -- ============================================================================
 
-local INTERRUPTS = {
-    { id = 351338, name = "Quell",             class = "EVOKER",       baseCD = 18 },
-    { id = 1766,   name = "Kick",              class = "ROGUE",        baseCD = 15 },
-    { id = 6552,   name = "Pummel",            class = "WARRIOR",      baseCD = 15 },
-    { id = 2139,   name = "Counterspell",      class = "MAGE",         baseCD = 24 },
-    { id = 57994,  name = "Wind Shear",        class = "SHAMAN",       baseCD = 12 },
-    { id = 106839, name = "Skull Bash",        class = "DRUID",        baseCD = 15 },
-    { id = 96231,  name = "Rebuke",            class = "PALADIN",      baseCD = 15 },
-    { id = 47528,  name = "Mind Freeze",       class = "DEATHKNIGHT",  baseCD = 15 },
-    { id = 147362, name = "Counter Shot",      class = "HUNTER",       baseCD = 24 },
-    { id = 282220, name = "Muzzle",            class = "HUNTER",       baseCD = 15 },
-    { id = 183752, name = "Disrupt",           class = "DEMONHUNTER",  baseCD = 15 },
-    { id = 116705, name = "Spear Hand Strike", class = "MONK",         baseCD = 15 },
-    { id = 15487,  name = "Silence",           class = "PRIEST",       baseCD = 45 },
-    { id = 119910,  name = "Spell Lock",            class = "WARLOCK", baseCD = 24, pet = true, altIDs = {19647, 119898, 1276467, 89766} },
-    { id = 19647,   name = "Spell Lock",            class = "WARLOCK", baseCD = 24, pet = true, altIDs = {119910, 119898, 1276467, 89766} },
-    { id = 89766,   name = "Axe Toss",              class = "WARLOCK", baseCD = 30, pet = true, altIDs = {119910, 19647, 119898, 1276467} },
-    { id = 1276467, name = "Grimoire: Fel Ravager",  class = "WARLOCK", baseCD = 24, pet = false, altIDs = {119910, 19647, 89766} },
-}
+local INTERRUPTS = ns.InterruptData.INTERRUPTS
 
 -- ============================================================================
 -- State
@@ -572,8 +554,6 @@ local function CheckButtonForSpell(btn)
         if cached == btn then return end
     end
     cachedButtons[#cachedButtons + 1] = btn
-    MedaAuras.LogDebug(format("[FIH:Hook] Detected interrupt on %s",
-        btn:GetName() or "unnamed"))
 end
 
 local function RescanAllButtonsForHook()
@@ -641,7 +621,6 @@ local function ShowHookMode(db)
         hookEventFrame:RegisterEvent("ACTIONBAR_UPDATE_COOLDOWN")
         hookEventFrame:SetScript("OnEvent", function(_, event)
             if not hookActive then return end
-            MedaAuras.LogDebug(format("[FIH:Hook] Re-scanning due to %s", event))
             RescanAllButtonsForHook()
         end)
     end
