@@ -238,7 +238,15 @@ local scrollParent
 local scrollFrame
 local scrollChild
 
+local configCleanupFrames = {}
+
 local function ClearContent()
+    for _, frame in ipairs(configCleanupFrames) do
+        frame:Hide()
+        frame:SetParent(nil)
+    end
+    wipe(configCleanupFrames)
+
     if contentFrame then
         local children = { contentFrame:GetChildren() }
         for _, child in ipairs(children) do
@@ -634,6 +642,10 @@ end
 
 function MedaAuras:SetContentHeight(height)
     SetContentHeight(height)
+end
+
+function MedaAuras:RegisterConfigCleanup(frame)
+    configCleanupFrames[#configCleanupFrames + 1] = frame
 end
 
 function MedaAuras:CreateConfigTabs(parent, tabs)

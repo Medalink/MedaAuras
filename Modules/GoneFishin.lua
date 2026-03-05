@@ -2524,6 +2524,7 @@ local function BuildConfig(parent, moduleDB)
         pvContainer:SetFrameStrata("HIGH")
         pvContainer:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 6, 0)
         pvContainer:SetBackdrop(MedaUI:CreateBackdrop(true))
+        MedaAuras:RegisterConfigCleanup(pvContainer)
 
         local function ApplyPVTheme()
             pvContainer:SetBackdropColor(unpack(MedaUI.Theme.backgroundDark))

@@ -819,6 +819,7 @@ local function BuildConfig(parent, db)
             pvBg:SetFrameStrata("HIGH")
             pvBg:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 6, 0)
             pvBg:SetSize(PREVIEW_W, PREVIEW_H)
+            MedaAuras:RegisterConfigCleanup(pvBg)
             local pvInner = CreateFrame("Frame", nil, pvBg)
             pvInner:SetPoint("CENTER", 0, 0)
             pvBg.inner = pvInner

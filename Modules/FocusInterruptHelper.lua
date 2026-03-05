@@ -1242,6 +1242,7 @@ local function BuildConfig(parent, db)
             pvContainer:SetFrameStrata("HIGH")
             pvContainer:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 6, 0)
             pvContainer:SetSize(pvW, pvH)
+            MedaAuras:RegisterConfigCleanup(pvContainer)
 
             for i, info in ipairs(previewStates) do
                 local col = (i - 1) % PREVIEW_COLS

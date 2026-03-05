@@ -979,6 +979,7 @@ local function CreateFloatingPreview()
     pvContainer:SetFrameStrata("HIGH")
     pvContainer:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 6, 0)
     pvContainer:SetSize(PREVIEW_W, 200)
+    MedaAuras:RegisterConfigCleanup(pvContainer)
 
     -- Mock mana list frame
     pvListFrame = CreateFrame("Frame", nil, pvContainer, "BackdropTemplate")
