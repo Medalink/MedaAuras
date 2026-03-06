@@ -3,6 +3,15 @@ local _, ns = ...
 local MedaUI = LibStub("MedaUI-1.0")
 local Pixel = MedaUI.Pixel
 
+local format = format
+local pairs = pairs
+local ipairs = ipairs
+local wipe = wipe
+local pcall = pcall
+local unpack = unpack
+local CreateFrame = CreateFrame
+local C_Timer = C_Timer
+
 -- ============================================================================
 -- Constants
 -- ============================================================================

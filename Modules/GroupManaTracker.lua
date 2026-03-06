@@ -2,6 +2,24 @@ local _, ns = ...
 
 local MedaUI = LibStub("MedaUI-1.0")
 
+local format = format
+local GetTime = GetTime
+local pairs = pairs
+local ipairs = ipairs
+local wipe = wipe
+local pcall = pcall
+local unpack = unpack
+local UnitPower = UnitPower
+local UnitPowerMax = UnitPowerMax
+local UnitName = UnitName
+local UnitGUID = UnitGUID
+local UnitExists = UnitExists
+local UnitIsUnit = UnitIsUnit
+local CreateFrame = CreateFrame
+local IsInGroup = IsInGroup
+local IsInRaid = IsInRaid
+local C_Timer = C_Timer
+
 -- ============================================================================
 -- Constants
 -- ============================================================================
@@ -68,6 +86,7 @@ local isEnabled = false
 
 local drinkingHealers = {}
 local prevDrinkingSet = {}
+local newDrinkingBuf = {}
 
 -- ============================================================================
 -- Helpers
@@ -581,7 +600,8 @@ local function UpdateDrinkingAlert()
         return
     end
 
-    local newDrinking = {}
+    wipe(newDrinkingBuf)
+    local newDrinking = newDrinkingBuf
     local drinkCount = 0
     local lastName
 

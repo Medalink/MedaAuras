@@ -2,6 +2,8 @@ package-as: MedaAuras
 
 externals:
   Libs/MedaUI: https://github.com/Medalink/MedaUI
+  Libs/LibSerialize: https://github.com/rossnichols/LibSerialize
+  Libs/LibDeflate: https://github.com/SafeteeWoW/LibDeflate
 
 ignore:
   - .github

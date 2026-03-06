@@ -1,5 +1,10 @@
 local _, ns = ...
 
+local GetTime = GetTime
+local pairs = pairs
+local format = format
+local C_Timer = C_Timer
+
 local CooldownTimer = {}
 ns.Services.CooldownTimer = CooldownTimer
 
@@ -115,6 +120,16 @@ function CooldownTimer:Unregister(handle)
     for _, cbs in pairs(readyCallbacks) do
         cbs[handle] = nil
     end
+end
+
+function CooldownTimer:Untrack(spellID)
+    local entry = tracked[spellID]
+    if not entry then return end
+    if entry.castHandle then
+        ns.Services.SpellCastTracker:Unregister(entry.castHandle)
+    end
+    tracked[spellID] = nil
+    readyCallbacks[spellID] = nil
 end
 
 function CooldownTimer:Reset(spellID)

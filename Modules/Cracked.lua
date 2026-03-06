@@ -13,19 +13,25 @@ local CreateFrame = CreateFrame
 local UnitName = UnitName
 local UnitGUID = UnitGUID
 local UnitExists = UnitExists
+local UnitClass = UnitClass
+local AuraUtil = AuraUtil
+local C_CooldownViewer = C_CooldownViewer
+local UnitGroupRolesAssigned = UnitGroupRolesAssigned
 local IsInGroup = IsInGroup
 local C_Spell = C_Spell
 local C_Timer = C_Timer
+local IsSpellKnown = IsSpellKnown
+local IsPlayerSpell = IsPlayerSpell
 
 if MedaAuras and MedaAuras.Log then
-    MedaAuras.Log("[Interrupted] File loaded OK")
+    MedaAuras.Log("[Cracked] File loaded OK")
 end
 
 -- ============================================================================
 -- Module Info
 -- ============================================================================
 
-local MODULE_NAME      = "Interrupted"
+local MODULE_NAME      = "Cracked"
 local MODULE_VERSION   = "0.1"
 local MODULE_STABILITY = "experimental"
 
@@ -33,39 +39,44 @@ local MODULE_STABILITY = "experimental"
 -- Shared Data
 -- ============================================================================
 
-local ID = ns.InterruptData
-local ALL_INTERRUPTS      = ID.ALL_INTERRUPTS
-local CLASS_DEFAULTS      = ID.CLASS_DEFAULTS
-local CLASS_INTERRUPT_LIST = ID.CLASS_INTERRUPT_LIST
-local SPEC_OVERRIDES      = ID.SPEC_OVERRIDES
-local SPEC_NO_INTERRUPT   = ID.SPEC_NO_INTERRUPT
-local HEALER_KEEPS_KICK   = ID.HEALER_KEEPS_KICK
-local CD_REDUCTION_TALENTS = ID.CD_REDUCTION_TALENTS
-local CD_ON_KICK_TALENTS  = ID.CD_ON_KICK_TALENTS
-local SPEC_EXTRA_KICKS    = ID.SPEC_EXTRA_KICKS
-local SPELL_ALIASES       = ID.SPELL_ALIASES
-local CLASS_COLORS        = ID.CLASS_COLORS
+local DD = ns.DefensiveData
+local ALL_DEFENSIVES     = DD.ALL_DEFENSIVES
+local CLASS_COLORS       = DD.CLASS_COLORS
+local CLASS_DEFENSIVE_IDS = DD.CLASS_DEFENSIVE_IDS
+local CATEGORY_INFO      = DD.CATEGORY_INFO
+local ENTRY_TO_ID        = DD.ENTRY_TO_ID
+local SPELL_SPEC_WHITELIST = DD.SPELL_SPEC_WHITELIST or {}
 
 local FALLBACK_WHITE = { 1, 1, 1 }
+local ACTIVE_COLOR   = { 0.2, 1.0, 0.2 }
 
 -- ============================================================================
 -- State
 -- ============================================================================
 
 local db
-local partyMembers = {}     -- [name] = { class, spellID, baseCd, cdEnd, onKickReduction, extraKicks }
-local noInterruptPlayers = {} -- [name] = true
-local myName, myClass, mySpellID, myBaseCd, myIsPetSpell
-local myKickCdEnd = 0
-local myExtraKicks = {}
+
+-- partyMembers[name] = {
+--   class = "WARRIOR",
+--   cds = {
+--     [spellID] = { baseCd=180, cdEnd=<GetTime>, activeEnd=<GetTime>, lastUse=<GetTime> }
+--   }
+-- }
+local partyMembers = {}
+local myName, myClass
+local myCds = {}  -- [spellID] = { baseCd, cdEnd, activeEnd, lastUse }
 
 local mainFrame, titleText, resizeHandle
 local bars = {}
 local updateTicker
 local isResizing = false
 local shouldShowByZone = true
-local watcherHandle, mobKickHandle
+local spellMatchHandle
+local rosterFrame
 local reinspectTicker
+local blizzardProbeCount = 0
+
+local MAX_BARS = 15
 
 local FONT_FACE = GameFontNormal and GameFontNormal:GetFont() or "Fonts\\FRIZQT__.TTF"
 local FONT_FLAGS = "OUTLINE"
@@ -75,140 +86,173 @@ local BAR_TEXTURE = "Interface\\BUTTONS\\WHITE8X8"
 -- Logging
 -- ============================================================================
 
-local function Log(msg)   MedaAuras.Log(format("[Interrupted] %s", msg)) end
-local function LogDebug(msg) MedaAuras.LogDebug(format("[Interrupted] %s", msg)) end
-local function LogWarn(msg)  MedaAuras.LogWarn(format("[Interrupted] %s", msg)) end
+local function Log(msg)      MedaAuras.Log(format("[Cracked] %s", msg)) end
+local function LogDebug(msg) MedaAuras.LogDebug(format("[Cracked] %s", msg)) end
+local function LogWarn(msg)  MedaAuras.LogWarn(format("[Cracked] %s", msg)) end
 
-local function GetSpellCooldownRemaining(spellID)
-    local cdInfo = C_Spell.GetSpellCooldown(spellID)
-    if cdInfo and cdInfo.startTime and cdInfo.duration and cdInfo.duration > 0 then
-        return (cdInfo.startTime + cdInfo.duration) - GetTime()
+-- ============================================================================
+-- Category filter helper
+-- ============================================================================
+
+local function IsCategoryEnabled(category)
+    if not db then return true end
+    if category == "external" then return db.showExternals ~= false end
+    if category == "party"    then return db.showPartyWide ~= false end
+    if category == "major"    then return db.showMajor ~= false end
+    if category == "personal" then return db.showPersonal end
+    return true
+end
+
+local function FormatCandidateIDs(ids, lookupTable)
+    if not ids or #ids == 0 then return "none" end
+
+    local parts = {}
+    for i, spellID in ipairs(ids) do
+        if i > 5 then
+            parts[#parts + 1] = format("+%d more", #ids - 5)
+            break
+        end
+        local data = lookupTable and lookupTable[spellID]
+        if data and data.name then
+            parts[#parts + 1] = format("%d:%s", spellID, data.name)
+        else
+            parts[#parts + 1] = tostring(spellID)
+        end
     end
-    return nil
+    return table.concat(parts, ", ")
+end
+
+local function GetCachedSpecID(unit)
+    if not unit or not UnitExists(unit) then return nil end
+    local info = ns.Services.GroupInspector and ns.Services.GroupInspector:GetUnitInfo(unit)
+    return info and info.specID or nil
+end
+
+local function BuildCandidateSet(cls, specID)
+    local ids = CLASS_DEFENSIVE_IDS[cls]
+    local candidateLookup = {}
+    local candidateIDs = {}
+    local classWideCount = 0
+
+    if not ids then
+        return candidateLookup, candidateIDs, classWideCount
+    end
+
+    for _, spellID in ipairs(ids) do
+        local data = ALL_DEFENSIVES[spellID]
+        if data and IsCategoryEnabled(data.category) then
+            classWideCount = classWideCount + 1
+            local allowed = true
+            local whitelist = SPELL_SPEC_WHITELIST[spellID]
+            if specID and whitelist and not whitelist[specID] then
+                allowed = false
+            end
+
+            if allowed then
+                candidateLookup[spellID] = data
+                candidateIDs[#candidateIDs + 1] = spellID
+            end
+        end
+    end
+
+    table.sort(candidateIDs)
+    return candidateLookup, candidateIDs, classWideCount
+end
+
+local function UpdateMemberDefensives(name, cls, specID, reason)
+    local candidateLookup, candidateIDs, classWideCount = BuildCandidateSet(cls, specID)
+    local oldInfo = partyMembers[name]
+    local cds = {}
+
+    for _, spellID in ipairs(candidateIDs) do
+        local data = ALL_DEFENSIVES[spellID]
+        local existing = oldInfo and oldInfo.cds and oldInfo.cds[spellID]
+        cds[spellID] = existing or {
+            baseCd = data.cd,
+            cdEnd = 0,
+            activeEnd = 0,
+            lastUse = 0,
+        }
+    end
+
+    partyMembers[name] = {
+        class = cls,
+        specID = specID,
+        cds = cds,
+        candidateLookup = candidateLookup,
+        candidateIDs = candidateIDs,
+        classWideCount = classWideCount,
+    }
+
+    Log(format("Registered %s (%s spec=%s) with %d/%d defensive candidates via %s",
+        name, cls, tostring(specID), #candidateIDs, classWideCount, tostring(reason)))
+    LogDebug(format("  CandidateIDs for %s: %s",
+        name, FormatCandidateIDs(candidateIDs, candidateLookup)))
 end
 
 -- ============================================================================
--- Find own interrupt spell
+-- Find own defensive spells
 -- ============================================================================
 
-local function FindMyInterrupt()
+local function FindMyDefensives()
     local _, cls = UnitClass("player")
     myClass = cls
     myName = UnitName("player")
 
-    LogDebug(format("FindMyInterrupt: class=%s name=%s", tostring(cls), tostring(myName)))
+    LogDebug(format("FindMyDefensives: class=%s name=%s", tostring(cls), tostring(myName)))
 
-    local specIndex = GetSpecialization()
-    local specID = specIndex and GetSpecializationInfo(specIndex)
-    LogDebug(format("  specIndex=%s specID=%s", tostring(specIndex), tostring(specID)))
+    wipe(myCds)
 
-    if specID and SPEC_NO_INTERRUPT[specID] then
-        LogDebug(format("  specID %d is in SPEC_NO_INTERRUPT, no interrupt for this spec", specID))
-        mySpellID = nil
-        myBaseCd = nil
-        myIsPetSpell = false
+    local ids = CLASS_DEFENSIVE_IDS[cls]
+    if not ids then
+        LogDebug(format("  No defensive IDs for class=%s", tostring(cls)))
         return
     end
 
-    mySpellID = nil
-    myIsPetSpell = false
-
-    if specID and SPEC_OVERRIDES[specID] then
-        local ov = SPEC_OVERRIDES[specID]
-        LogDebug(format("  Spec override found: %s (id=%d, isPet=%s)", ov.name, ov.id, tostring(ov.isPet)))
-        if ov.isPet then
-            local known = IsSpellKnown(ov.id, true) or IsSpellKnown(ov.id)
+    local count = 0
+    for _, spellID in ipairs(ids) do
+        local data = ALL_DEFENSIVES[spellID]
+        if data and IsCategoryEnabled(data.category) then
+            local known = IsSpellKnown(spellID)
             if not known then
-                local ok, r = pcall(IsPlayerSpell, ov.id)
+                local ok, r = pcall(IsPlayerSpell, spellID)
                 if ok and r then known = true end
             end
-            if not known and ov.petSpellID then
-                local ok, r = pcall(IsSpellKnown, ov.petSpellID, true)
-                if ok and r then known = true end
-            end
-            LogDebug(format("  Pet spell known=%s", tostring(known)))
+            LogDebug(format("  spellID %d (%s) known=%s cat=%s",
+                spellID, data.name, tostring(known), data.category))
             if known then
-                mySpellID = ov.id
-                myBaseCd = ov.cd
-                myIsPetSpell = true
+                myCds[spellID] = {
+                    baseCd = data.cd,
+                    cdEnd = 0,
+                    activeEnd = 0,
+                    lastUse = 0,
+                }
+                count = count + 1
             end
-        else
-            mySpellID = ov.id
-            myBaseCd = ov.cd
         end
     end
 
-    local spellList = CLASS_INTERRUPT_LIST[myClass]
-    if spellList then
-        LogDebug(format("  Checking CLASS_INTERRUPT_LIST for %s (%d spells)", tostring(myClass), #spellList))
-        for _, sid in ipairs(spellList) do
-            local known = IsSpellKnown(sid) or IsSpellKnown(sid, true)
-            if not known then
-                local ok, r = pcall(IsPlayerSpell, sid)
-                if ok and r then known = true end
-            end
-            LogDebug(format("    spellID %d known=%s", sid, tostring(known)))
-            if known and not mySpellID then
-                mySpellID = sid
-                if not myBaseCd then
-                    myBaseCd = ALL_INTERRUPTS[sid] and ALL_INTERRUPTS[sid].cd or 15
-                end
-                LogDebug(format("    -> selected as primary interrupt"))
-            end
-        end
-    else
-        LogDebug(format("  No CLASS_INTERRUPT_LIST for class=%s", tostring(myClass)))
-    end
-
-    if mySpellID then
-        local ok, ms = pcall(GetSpellBaseCooldown, mySpellID)
-        LogDebug(format("  GetSpellBaseCooldown(%d): ok=%s ms=%s", mySpellID, tostring(ok), tostring(ms)))
-        if ok and ms and ms > 1500 then
-            myBaseCd = ms / 1000
-        end
-    end
-
-    Log(format("FindMyInterrupt result: %s (ID %s, CD %ss, pet=%s)",
-        mySpellID and ALL_INTERRUPTS[mySpellID] and ALL_INTERRUPTS[mySpellID].name or "NONE",
-        tostring(mySpellID), tostring(myBaseCd), tostring(myIsPetSpell)))
+    Log(format("FindMyDefensives: found %d known defensives for %s (%s)", count, tostring(myName), tostring(cls)))
 end
 
 -- ============================================================================
--- Auto-register party members by class
+-- Auto-register party members
 -- ============================================================================
 
 local function AutoRegisterParty()
     LogDebug(format("AutoRegisterParty: inGroup=%s", tostring(IsInGroup())))
     for i = 1, 4 do
         local u = "party" .. i
-        local exists = UnitExists(u)
-        if exists then
+        if UnitExists(u) then
             local name = UnitName(u)
             local _, cls = UnitClass(u)
             local role = UnitGroupRolesAssigned(u)
-            local hasDefault = cls and CLASS_DEFAULTS[cls] ~= nil
-            LogDebug(format("  %s: name=%s class=%s role=%s hasDefault=%s already=%s noKick=%s",
+            local specID = GetCachedSpecID(u)
+            LogDebug(format("  %s: name=%s class=%s role=%s already=%s",
                 u, tostring(name), tostring(cls), tostring(role),
-                tostring(hasDefault),
-                tostring(name and partyMembers[name] ~= nil),
-                tostring(name and noInterruptPlayers[name] ~= nil)))
-            if name and cls and CLASS_DEFAULTS[cls] then
-                if not partyMembers[name] and not noInterruptPlayers[name] then
-                    if role == "HEALER" and not HEALER_KEEPS_KICK[cls] then
-                        noInterruptPlayers[name] = true
-                        LogDebug(format("    -> marked as healer (no kick): %s", name))
-                    else
-                        local kick = CLASS_DEFAULTS[cls]
-                        partyMembers[name] = {
-                            class = cls,
-                            spellID = kick.id,
-                            baseCd = kick.cd,
-                            cdEnd = 0,
-                        }
-                        Log(format("Auto-registered %s (%s) %s CD=%d",
-                            name, cls, kick.name, kick.cd))
-                    end
-                end
+                tostring(name and partyMembers[name] ~= nil)))
+            if name and cls then
+                UpdateMemberDefensives(name, cls, specID, "roster")
             end
         else
             LogDebug(format("  %s: does not exist", u))
@@ -217,8 +261,7 @@ local function AutoRegisterParty()
 
     local count = 0
     for _ in pairs(partyMembers) do count = count + 1 end
-    LogDebug(format("  Total tracked: %d party members, %d no-kick",
-        count, (function() local n=0 for _ in pairs(noInterruptPlayers) do n=n+1 end return n end)()))
+    LogDebug(format("  Total tracked: %d party members", count))
 end
 
 local function CleanPartyList()
@@ -235,213 +278,237 @@ local function CleanPartyList()
             LogDebug(format("CleanPartyList: removed %s (left group)", name))
         end
     end
-    for name in pairs(noInterruptPlayers) do
-        if not current[name] then noInterruptPlayers[name] = nil end
-    end
     if removed > 0 then
         LogDebug(format("CleanPartyList: removed %d member(s)", removed))
     end
 end
 
 -- ============================================================================
--- Talent scanning on inspect complete
+-- Handle party defensive matched via PartySpellWatcher StatusBar equality test
+--
+-- PSW's OnPartySpellMatch uses StatusBar clamping to binary-test the tainted
+-- spell ID against every key in ALL_DEFENSIVES.  On match, this callback
+-- receives fully clean (name, cleanSpellID, defData, unit) args.
 -- ============================================================================
 
-local function ScanTalentsForMember(unit, name, class, specID)
-    LogDebug(format("ScanTalentsForMember: unit=%s name=%s class=%s specID=%s",
-        tostring(unit), tostring(name), tostring(class), tostring(specID)))
-    local info = partyMembers[name]
-    if not info then
-        LogDebug(format("  -> %s not in partyMembers, skipping talent scan", tostring(name)))
+local function ProbeCandidateAuras(name, unit, debugInfo)
+    if not AuraUtil or not unit or not UnitExists(unit) or not debugInfo or not debugInfo.candidateIDs then
         return
     end
 
-    if SPEC_NO_INTERRUPT[specID] then
-        partyMembers[name] = nil
-        noInterruptPlayers[name] = true
-        LogDebug(format("%s has no interrupt (specID=%d), removed", name, specID))
-        return
-    end
-
-    local defaultKick = CLASS_DEFAULTS[class]
-    if defaultKick then
-        info.spellID = defaultKick.id
-        info.baseCd = defaultKick.cd
-    end
-    info.onKickReduction = nil
-
-    local ov = SPEC_OVERRIDES[specID]
-    if ov then
-        local apply = true
-        if ov.isPet then
-            local petUnit
-            local idx = unit:match("party(%d)")
-            if idx then petUnit = "partypet" .. idx end
-            if petUnit and not UnitExists(petUnit) then apply = false end
-        end
-        if apply then
-            info.spellID = ov.id
-            info.baseCd = ov.cd
-            LogDebug(format("Spec override for %s: %s CD=%d", name, ov.name, ov.cd))
-        end
-    end
-
-    local configID = -1
-    local ok, configInfo = pcall(C_Traits.GetConfigInfo, configID)
-    LogDebug(format("  C_Traits.GetConfigInfo(-1): ok=%s hasConfig=%s hasTrees=%s",
-        tostring(ok), tostring(configInfo ~= nil),
-        tostring(configInfo and configInfo.treeIDs and #configInfo.treeIDs or 0)))
-    if not ok or not configInfo or not configInfo.treeIDs or #configInfo.treeIDs == 0 then
-        LogDebug("  -> No trait config available, skipping talent scan")
-        return
-    end
-
-    local treeID = configInfo.treeIDs[1]
-    local ok2, nodeIDs = pcall(C_Traits.GetTreeNodes, treeID)
-    if not ok2 or not nodeIDs then return end
-
-    for _, nodeID in ipairs(nodeIDs) do
-        local ok3, nodeInfo = pcall(C_Traits.GetNodeInfo, configID, nodeID)
-        if ok3 and nodeInfo and nodeInfo.activeEntry and nodeInfo.activeRank and nodeInfo.activeRank > 0 then
-            local entryID = nodeInfo.activeEntry.entryID
-            if entryID then
-                local ok4, entryInfo = pcall(C_Traits.GetEntryInfo, configID, entryID)
-                if ok4 and entryInfo and entryInfo.definitionID then
-                    local ok5, defInfo = pcall(C_Traits.GetDefinitionInfo, entryInfo.definitionID)
-                    if ok5 and defInfo and defInfo.spellID then
-                        local talent = CD_REDUCTION_TALENTS[defInfo.spellID]
-                        if talent then
-                            local newCd
-                            if talent.pctReduction then
-                                newCd = info.baseCd * (1 - talent.pctReduction / 100)
-                                newCd = math.floor(newCd + 0.5)
-                            else
-                                newCd = info.baseCd - talent.reduction
-                            end
-                            if newCd < 1 then newCd = 1 end
-                            info.baseCd = newCd
-                            LogDebug(format("%s has %s, CD -> %ds", name, talent.name, newCd))
-                        end
-
-                        local onKick = CD_ON_KICK_TALENTS[defInfo.spellID]
-                        if onKick then
-                            info.onKickReduction = onKick.reduction
-                            LogDebug(format("%s has %s, -%ds on kick", name, onKick.name, onKick.reduction))
-                        end
-                    end
+    local function RunProbe(tag)
+        local active = {}
+        for _, spellID in ipairs(debugInfo.candidateIDs) do
+            local defData = ALL_DEFENSIVES[spellID]
+            if defData then
+                local ok, aura = pcall(AuraUtil.FindAuraByName, defData.name, unit, "HELPFUL")
+                if ok and aura then
+                    active[#active + 1] = defData.name
                 end
             end
         end
+        LogDebug(format("AuraProbe[%s] %s unit=%s candidates=%s active=%s",
+            tag, name, tostring(unit),
+            FormatCandidateIDs(debugInfo.candidateIDs, debugInfo.candidateLookup),
+            #active > 0 and table.concat(active, ", ") or "none"))
+    end
+
+    RunProbe("0.0")
+    C_Timer.After(0.2, function()
+        RunProbe("0.2")
+    end)
+end
+
+local BLIZZ_VIEWERS = {
+    "EssentialCooldownViewer",
+    "UtilityCooldownViewer",
+    "BuffIconCooldownViewer",
+    "BuffBarCooldownViewer",
+}
+
+local function ProbeBlizzardUISurfaces(reason)
+    blizzardProbeCount = blizzardProbeCount + 1
+    if blizzardProbeCount > 12 then return end
+
+    LogDebug(format("BlizzardUIProbe[%d]: reason=%s C_CooldownViewer=%s",
+        blizzardProbeCount, tostring(reason), tostring(C_CooldownViewer ~= nil)))
+
+    for _, viewerName in ipairs(BLIZZ_VIEWERS) do
+        local viewer = _G[viewerName]
+        if viewer then
+            local ok, children = pcall(function() return { viewer:GetChildren() } end)
+            local childCount = ok and #children or 0
+            LogDebug(format("  Viewer %s exists shown=%s children=%d",
+                viewerName, tostring(viewer:IsShown()), childCount))
+
+            if ok and children then
+                for idx, child in ipairs(children) do
+                    if idx > 4 then break end
+                    local cdID = child.cooldownID or (child.cooldownInfo and child.cooldownInfo.cooldownID)
+                    local spellID = child.spellID
+                    local itemID = child.itemID
+                    local info = nil
+                    if cdID and C_CooldownViewer and C_CooldownViewer.GetCooldownViewerCooldownInfo then
+                        local okInfo, rInfo = pcall(C_CooldownViewer.GetCooldownViewerCooldownInfo, cdID)
+                        if okInfo then info = rInfo end
+                    end
+                    LogDebug(format("    child[%d] name=%s shown=%s cdID=%s spellID=%s itemID=%s infoSpell=%s",
+                        idx,
+                        tostring(child.GetName and child:GetName() or nil),
+                        tostring(child.IsShown and child:IsShown() or false),
+                        tostring(cdID),
+                        tostring(spellID),
+                        tostring(itemID),
+                        tostring(info and (info.overrideSpellID or info.spellID) or nil)))
+                end
+            end
+        else
+            LogDebug(format("  Viewer %s missing", viewerName))
+        end
+    end
+
+    for i = 1, 4 do
+        local partyFrame = _G["CompactPartyFrameMember" .. i]
+        if partyFrame then
+            local okChildren, children = pcall(function() return { partyFrame:GetChildren() } end)
+            local okRegions, regions = pcall(function() return { partyFrame:GetRegions() } end)
+            LogDebug(format("  CompactPartyFrameMember%d shown=%s children=%d regions=%d",
+                i,
+                tostring(partyFrame:IsShown()),
+                okChildren and #children or -1,
+                okRegions and #regions or -1))
+        end
     end
 end
 
--- ============================================================================
--- Handle party interrupt cast detected (from PartySpellWatcher)
--- ============================================================================
+local function ResolveDefensiveCandidates(name, unit)
+    local info = partyMembers[name]
+    if info and info.candidateLookup and info.candidateIDs then
+        return {
+            lookupTable = info.candidateLookup,
+            knownIDs = info.candidateIDs,
+            label = format("%s:%s", tostring(info.class), tostring(info.specID or "nospec")),
+        }
+    end
 
-local function OnPartyInterruptDetected(name, spellID, unit)
-    local resolvedID = SPELL_ALIASES[spellID] or spellID
+    if unit and UnitExists(unit) then
+        local _, cls = UnitClass(unit)
+        local specID = GetCachedSpecID(unit)
+        if cls then
+            local lookupTable, knownIDs = BuildCandidateSet(cls, specID)
+            return {
+                lookupTable = lookupTable,
+                knownIDs = knownIDs,
+                label = format("%s:%s(ephemeral)", tostring(cls), tostring(specID or "nospec")),
+            }
+        end
+    end
+end
+
+local function OnPartyDefensiveMatch(name, cleanSpellID, defData, unit, debugInfo)
+    if not IsCategoryEnabled(defData.category) then
+        LogDebug(format("FILTERED (cat disabled): %s cast %s (ID %d, cat=%s)",
+            name, defData.name, cleanSpellID, defData.category))
+        return
+    end
+
     local now = GetTime()
 
-    Log(format("PARTY INTERRUPT CALLBACK: name=%s spellID=%s resolved=%s unit=%s",
-        tostring(name), tostring(spellID), tostring(resolvedID), tostring(unit)))
-
-    local info = partyMembers[name]
-    if info then
-        local baseCd = info.baseCd or (ALL_INTERRUPTS[resolvedID] and ALL_INTERRUPTS[resolvedID].cd) or 15
-        info.cdEnd = now + baseCd
-        info.lastKickTime = now
-        Log(format("  -> %s existing member, CD set to %ds (ends at %.1f)", name, baseCd, info.cdEnd))
-    else
-        if noInterruptPlayers[name] then
-            LogDebug(format("  -> %s is in noInterruptPlayers, ignoring", name))
-            return
-        end
-        local ok, _, cls = pcall(UnitClass, unit)
-        LogDebug(format("  -> %s not in partyMembers, UnitClass(%s): ok=%s cls=%s",
-            name, tostring(unit), tostring(ok), tostring(cls)))
-        if ok and cls and CLASS_DEFAULTS[cls] then
-            local role = UnitGroupRolesAssigned(unit)
-            if role == "HEALER" and not HEALER_KEEPS_KICK[cls] then
-                noInterruptPlayers[name] = true
-                LogDebug(format("  -> %s is healer, marked as no-kick", name))
-                return
-            end
-            local kickData = ALL_INTERRUPTS[resolvedID]
-            partyMembers[name] = {
-                class = cls,
-                spellID = resolvedID,
-                baseCd = kickData and kickData.cd or 15,
-                cdEnd = now + (kickData and kickData.cd or 15),
-                lastKickTime = now,
-            }
-            Log(format("  -> Late-registered %s (%s) from cast, CD=%d",
-                name, cls, kickData and kickData.cd or 15))
-        else
-            LogWarn(format("  -> Could not register %s: UnitClass failed or no default", name))
-        end
+    Log(format("PARTY DEFENSIVE: %s cast %s (ID %d, cat=%s, CD=%ds, dur=%ds, confidence=%s via=%s)",
+        name, defData.name, cleanSpellID, defData.category,
+        defData.cd, defData.duration,
+        tostring(debugInfo and debugInfo.confidence or "unknown"),
+        tostring(debugInfo and debugInfo.chosenBy or "unknown")))
+    if debugInfo then
+        LogDebug(format("  MatchDebug cast=%s cleanID=%s candidates=%s",
+            tostring(debugInfo.castID),
+            tostring(debugInfo.cleanID),
+            FormatCandidateIDs(debugInfo.candidateIDs, debugInfo.candidateLookup)))
     end
-end
 
--- ============================================================================
--- Handle mob interrupt correlation (from PartySpellWatcher)
--- ============================================================================
-
-local function OnMobKickConfirmed(name)
     local info = partyMembers[name]
     if not info then
-        LogDebug(format("OnMobKickConfirmed: %s not in partyMembers", tostring(name)))
-        return
+        for i = 1, 4 do
+            local u = "party" .. i
+            if UnitExists(u) and UnitName(u) == name then
+                local _, cls = UnitClass(u)
+                local specID = GetCachedSpecID(u)
+                if cls then
+                    UpdateMemberDefensives(name, cls, specID, "late-cast")
+                    info = partyMembers[name]
+                end
+                break
+            end
+        end
     end
 
-    local now = GetTime()
-    if info.lastKickTime and (now - info.lastKickTime) < 0.5 then
-        return
+    if info then
+        if not info.cds[cleanSpellID] then
+            info.cds[cleanSpellID] = {
+                baseCd = defData.cd,
+                cdEnd = 0,
+                activeEnd = 0,
+                lastUse = 0,
+            }
+            LogDebug(format("  Late-added spell %d (%s) for %s", cleanSpellID, defData.name, name))
+        end
+
+        local cd = info.cds[cleanSpellID]
+        cd.cdEnd = now + defData.cd
+        cd.activeEnd = defData.duration > 0 and (now + defData.duration) or 0
+        cd.lastUse = now
+
+        Log(format("  STATE -> ACTIVE: %s %s activeEnd=%.1f cdEnd=%.1f",
+            name, defData.name,
+            cd.activeEnd > 0 and cd.activeEnd or 0,
+            cd.cdEnd))
+    else
+        LogWarn(format("  Could not register %s from %s", name, tostring(unit)))
     end
 
-    local baseCd = info.baseCd or 15
-    local reduction = info.onKickReduction or 0
-    local cd = baseCd - reduction
-    if cd < 1 then cd = 1 end
-
-    info.cdEnd = now + cd
-    info.lastKickTime = now
-
-    Log(format("CONFIRMED KICK: %s -> CD %ds%s",
-        name, cd, reduction > 0 and format(" (base %d -%d on-kick)", baseCd, reduction) or ""))
+    ProbeCandidateAuras(name, unit, debugInfo)
+    ProbeBlizzardUISurfaces("match:" .. tostring(defData.name))
 end
 
 -- ============================================================================
--- Own kick tracking (player + pet)
+-- Own defensive tracking
 -- ============================================================================
 
 local playerCastFrame
 
-local function SetupOwnKickTracking()
+local function SetupOwnTracking()
     if playerCastFrame then
-        LogDebug("SetupOwnKickTracking: already set up")
+        LogDebug("SetupOwnTracking: already set up")
         return
     end
     playerCastFrame = CreateFrame("Frame")
-    playerCastFrame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "pet")
+    playerCastFrame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
     playerCastFrame:SetScript("OnEvent", function(_, _, unit, _, spellID)
-        if not mySpellID then return end
-        local isInterrupt = ALL_INTERRUPTS[spellID]
-        if not isInterrupt then return end
-        local cd
-        if spellID == mySpellID then
-            cd = myBaseCd or isInterrupt.cd
-        else
-            cd = isInterrupt.cd
+        local defData = ALL_DEFENSIVES[spellID]
+        if not defData then return end
+        if not IsCategoryEnabled(defData.category) then return end
+
+        local cd = myCds[spellID]
+        if not cd then
+            cd = { baseCd = defData.cd, cdEnd = 0, activeEnd = 0, lastUse = 0 }
+            myCds[spellID] = cd
         end
-        myKickCdEnd = GetTime() + cd
-        Log(format("OWN KICK: unit=%s spellID=%d (%s) CD=%ds (mySpellID=%s)",
-            tostring(unit), spellID, isInterrupt.name, cd, tostring(mySpellID)))
+
+        local now = GetTime()
+        cd.cdEnd = now + defData.cd
+        cd.activeEnd = defData.duration > 0 and (now + defData.duration) or 0
+        cd.lastUse = now
+
+        Log(format("OWN DEFENSIVE: %s (ID %d, cat=%s, CD=%ds, dur=%ds) activeEnd=%.1f cdEnd=%.1f",
+            defData.name, spellID, defData.category,
+            defData.cd, defData.duration,
+            cd.activeEnd > 0 and cd.activeEnd or 0,
+            cd.cdEnd))
     end)
-    LogDebug("SetupOwnKickTracking: registered UNIT_SPELLCAST_SUCCEEDED for player+pet")
+    LogDebug("SetupOwnTracking: registered UNIT_SPELLCAST_SUCCEEDED for player")
 end
 
-local function TeardownOwnKickTracking()
+local function TeardownOwnTracking()
     if playerCastFrame then
         playerCastFrame:UnregisterAllEvents()
         playerCastFrame = nil
@@ -466,7 +533,7 @@ local function GetBarLayout()
 end
 
 local function RebuildBars()
-    for i = 1, 6 do
+    for i = 1, MAX_BARS do
         if bars[i] then
             bars[i]:Hide()
             bars[i]:SetParent(nil)
@@ -482,7 +549,7 @@ local function RebuildBars()
         if db.showTitle then titleText:Show() else titleText:Hide() end
     end
 
-    for i = 1, 6 do
+    for i = 1, MAX_BARS do
         local yOff
         if db.growUp then
             yOff = (i - 1) * (barH + 1)
@@ -553,6 +620,60 @@ local function RebuildBars()
 end
 
 -- ============================================================================
+-- UI: Collect active/cd entries for display, sorted by priority
+-- ============================================================================
+
+local function CollectDisplayEntries()
+    local entries = {}
+    local now = GetTime()
+
+    local function AddEntries(name, cls, cds, isPlayer)
+        for spellID, cd in pairs(cds) do
+            local defData = ALL_DEFENSIVES[spellID]
+            if defData and IsCategoryEnabled(defData.category) then
+                local isActive = cd.activeEnd > now
+                local isOnCd = cd.cdEnd > now
+                if isActive or isOnCd then
+                    local catInfo = CATEGORY_INFO[defData.category]
+                    entries[#entries + 1] = {
+                        name = name,
+                        class = cls,
+                        spellID = spellID,
+                        spellName = defData.name,
+                        icon = defData.icon,
+                        category = defData.category,
+                        catPriority = catInfo and catInfo.priority or 99,
+                        isActive = isActive,
+                        activeEnd = cd.activeEnd,
+                        cdEnd = cd.cdEnd,
+                        baseCd = cd.baseCd,
+                        duration = defData.duration,
+                        isPlayer = isPlayer,
+                    }
+                end
+            end
+        end
+    end
+
+    AddEntries(myName or "You", myClass or "WARRIOR", myCds, true)
+
+    for name, info in pairs(partyMembers) do
+        AddEntries(name, info.class, info.cds, false)
+    end
+
+    table.sort(entries, function(a, b)
+        if a.isActive ~= b.isActive then return a.isActive end
+        if a.catPriority ~= b.catPriority then return a.catPriority < b.catPriority end
+        if a.isActive then
+            return a.activeEnd < b.activeEnd
+        end
+        return a.cdEnd < b.cdEnd
+    end)
+
+    return entries
+end
+
+-- ============================================================================
 -- UI: Display update
 -- ============================================================================
 
@@ -569,8 +690,8 @@ local function CheckZoneVisibility()
     else
         shouldShowByZone = db.showInOpenWorld
     end
-    LogDebug(format("CheckZoneVisibility: instanceType=%s showByZone=%s mainFrame=%s",
-        tostring(instanceType), tostring(shouldShowByZone), tostring(mainFrame ~= nil)))
+    LogDebug(format("CheckZoneVisibility: instanceType=%s showByZone=%s",
+        tostring(instanceType), tostring(shouldShowByZone)))
     if mainFrame then
         if shouldShowByZone then mainFrame:Show() else mainFrame:Hide() end
     end
@@ -583,92 +704,79 @@ local function UpdateDisplay()
 
     local _, barH, _, _, _, titleH = GetBarLayout()
     local now = GetTime()
-    local barIdx = 1
 
     if now - lastStateDump > 10 then
         lastStateDump = now
         local memberCount = 0
+        local totalTracked = 0
         for n, info in pairs(partyMembers) do
             memberCount = memberCount + 1
-            local rem = info.cdEnd > now and (info.cdEnd - now) or 0
-            LogDebug(format("  STATE: %s class=%s spell=%s cd=%.1fs",
-                n, info.class, tostring(info.spellID), rem))
-        end
-        LogDebug(format("UpdateDisplay tick: mySpell=%s myCD=%.1f members=%d visible=%s",
-            tostring(mySpellID), myKickCdEnd > now and (myKickCdEnd - now) or 0,
-            memberCount, tostring(shouldShowByZone)))
-    end
-
-    -- Player bar
-    local myData = mySpellID and ALL_INTERRUPTS[mySpellID]
-    if myData and barIdx <= 6 then
-        local bar = bars[barIdx]
-        bar:Show()
-        bar.icon:SetTexture(myData.icon)
-        local col = CLASS_COLORS[myClass] or FALLBACK_WHITE
-        bar.nameText:SetText("|cFFFFFFFF" .. (myName or "?") .. "|r")
-
-        if myKickCdEnd > now then
-            local rem = myKickCdEnd - now
-            if not myIsPetSpell then
-                local ok, result = pcall(GetSpellCooldownRemaining, mySpellID)
-                if ok and result and result > 0 then rem = result end
+            for sid, cd in pairs(info.cds) do
+                totalTracked = totalTracked + 1
+                local defData = ALL_DEFENSIVES[sid]
+                local isActive = cd.activeEnd > now
+                local isOnCd = cd.cdEnd > now
+                if isActive or isOnCd then
+                    LogDebug(format("  STATE: %s %s active=%s activeRem=%.1f cdRem=%.1f",
+                        n, defData and defData.name or tostring(sid),
+                        tostring(isActive),
+                        isActive and (cd.activeEnd - now) or 0,
+                        isOnCd and (cd.cdEnd - now) or 0))
+                end
             end
-            bar.cdText:SetText(string.format("%.0f", rem))
-            bar.cdText:SetTextColor(1, 1, 1)
-            bar.cdBar:SetMinMaxValues(0, myBaseCd or myData.cd)
-            bar.cdBar:SetValue(rem)
-            bar.cdBar:SetStatusBarColor(col[1], col[2], col[3], 0.85)
-            bar.barBg:SetVertexColor(col[1] * 0.25, col[2] * 0.25, col[3] * 0.25, 0.9)
-        else
-            bar.cdText:SetText(db.showReady and "READY" or "")
-            bar.cdText:SetTextColor(0.2, 1.0, 0.2)
-            bar.cdBar:SetMinMaxValues(0, 1)
-            bar.cdBar:SetValue(0)
-            bar.barBg:SetVertexColor(col[1], col[2], col[3], 0.85)
         end
-        barIdx = barIdx + 1
+        local myCount = 0
+        for _ in pairs(myCds) do myCount = myCount + 1 end
+        LogDebug(format("UpdateDisplay tick: myDefensives=%d members=%d totalTracked=%d visible=%s",
+            myCount, memberCount, totalTracked, tostring(shouldShowByZone)))
     end
 
-    -- Party bars
-    for name, info in pairs(partyMembers) do
-        if barIdx > 6 then break end
-        local data = ALL_INTERRUPTS[info.spellID]
-        if data then
-            local bar = bars[barIdx]
+    local entries = CollectDisplayEntries()
+
+    for i = 1, MAX_BARS do
+        local entry = entries[i]
+        local bar = bars[i]
+        if not bar then break end
+
+        if entry then
             bar:Show()
-            bar.icon:SetTexture(data.icon)
-            local col = CLASS_COLORS[info.class] or FALLBACK_WHITE
-            bar.nameText:SetText("|cFFFFFFFF" .. name .. "|r")
+            bar.icon:SetTexture(entry.icon)
+            local col = CLASS_COLORS[entry.class] or FALLBACK_WHITE
 
-            local rem = 0
-            if info.cdEnd > now then rem = info.cdEnd - now end
-            bar.cdBar:SetMinMaxValues(0, info.baseCd or data.cd)
+            local label = entry.name
+            if db.showSpellName then
+                label = label .. " - " .. entry.spellName
+            end
+            bar.nameText:SetText("|cFFFFFFFF" .. label .. "|r")
 
-            if rem > 0.5 then
+            if entry.isActive then
+                local rem = entry.activeEnd - now
+                bar.cdBar:SetMinMaxValues(0, entry.duration)
+                bar.cdBar:SetValue(rem)
+                bar.cdBar:SetStatusBarColor(ACTIVE_COLOR[1], ACTIVE_COLOR[2], ACTIVE_COLOR[3], 0.85)
+                bar.barBg:SetVertexColor(ACTIVE_COLOR[1] * 0.25, ACTIVE_COLOR[2] * 0.25, ACTIVE_COLOR[3] * 0.25, 0.9)
+                bar.cdText:SetText(format("%.1fs", rem))
+                bar.cdText:SetTextColor(0.2, 1.0, 0.2)
+            else
+                local rem = entry.cdEnd - now
+                bar.cdBar:SetMinMaxValues(0, entry.baseCd)
                 bar.cdBar:SetValue(rem)
                 bar.cdBar:SetStatusBarColor(col[1], col[2], col[3], 0.85)
                 bar.barBg:SetVertexColor(col[1] * 0.25, col[2] * 0.25, col[3] * 0.25, 0.9)
-                bar.cdText:SetText(string.format("%.0f", rem))
+                bar.cdText:SetText(format("%.0f", rem))
                 bar.cdText:SetTextColor(1, 1, 1)
-            else
-                bar.cdBar:SetValue(0)
-                bar.barBg:SetVertexColor(col[1], col[2], col[3], 0.85)
-                bar.cdText:SetText(db.showReady and "READY" or "")
-                bar.cdText:SetTextColor(0.2, 1.0, 0.2)
             end
-            barIdx = barIdx + 1
+        else
+            bar:Hide()
         end
     end
 
-    for i = barIdx, 6 do
-        if bars[i] then bars[i]:Hide() end
-    end
-
     if not isResizing then
-        local numVisible = barIdx - 1
+        local numVisible = math.min(#entries, MAX_BARS)
         if numVisible > 0 then
             mainFrame:SetHeight(titleH + numVisible * (barH + 1))
+        else
+            mainFrame:SetHeight(titleH + barH + 1)
         end
     end
 end
@@ -684,7 +792,7 @@ local function CreateUI()
     end
     LogDebug("CreateUI: building main frame...")
 
-    mainFrame = CreateFrame("Frame", "MedaAurasInterruptedFrame", UIParent)
+    mainFrame = CreateFrame("Frame", "MedaAurasCrackedFrame", UIParent)
     mainFrame:SetSize(db.frameWidth, 200)
     mainFrame:SetFrameStrata("MEDIUM")
     mainFrame:SetClampedToScreen(true)
@@ -703,7 +811,7 @@ local function CreateUI()
     end)
     mainFrame:SetAlpha(db.alpha)
     mainFrame:SetResizable(true)
-    mainFrame:SetResizeBounds(80, 40, 600, 600)
+    mainFrame:SetResizeBounds(80, 40, 600, 800)
 
     local bg = mainFrame:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
@@ -713,7 +821,7 @@ local function CreateUI()
     titleText = mainFrame:CreateFontString(nil, "OVERLAY")
     titleText:SetFont(FONT_FACE, 12, FONT_FLAGS)
     titleText:SetPoint("TOP", 0, -3)
-    titleText:SetText("|cFF00DDDDInterrupts|r")
+    titleText:SetText("|cFF00DDDDDefensives|r")
     if not db.showTitle then titleText:Hide() end
 
     resizeHandle = CreateFrame("Button", nil, mainFrame)
@@ -741,7 +849,7 @@ local function CreateUI()
         isResizing = false
         db.frameWidth = math.floor(mainFrame:GetWidth())
         local numVisible = 0
-        for i = 1, 6 do
+        for i = 1, MAX_BARS do
             if bars[i] and bars[i]:IsShown() then numVisible = numVisible + 1 end
         end
         if numVisible < 1 then numVisible = 1 end
@@ -767,10 +875,8 @@ local function DestroyUI()
 end
 
 -- ============================================================================
--- Roster event frame (inside-module, separate from PartySpellWatcher)
+-- Roster event frame
 -- ============================================================================
-
-local rosterFrame
 
 local function SetupRosterEvents()
     if rosterFrame then return end
@@ -779,7 +885,6 @@ local function SetupRosterEvents()
     rosterFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
     rosterFrame:RegisterEvent("SPELLS_CHANGED")
     rosterFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
-    rosterFrame:RegisterEvent("ROLE_CHANGED_INFORM")
     rosterFrame:SetScript("OnEvent", function(_, event, arg1)
         LogDebug(format("Roster event: %s arg1=%s", event, tostring(arg1)))
         if event == "GROUP_ROSTER_UPDATE" then
@@ -788,7 +893,7 @@ local function SetupRosterEvents()
             if IsInGroup() then
                 if not reinspectTicker then
                     reinspectTicker = C_Timer.NewTicker(30, function()
-                        LogDebug("Reinspect ticker fired, requesting re-inspect all")
+                        LogDebug("Reinspect ticker fired")
                         ns.Services.GroupInspector:RequestReinspectAll()
                     end)
                 end
@@ -799,23 +904,10 @@ local function SetupRosterEvents()
             CheckZoneVisibility()
             AutoRegisterParty()
         elseif event == "SPELLS_CHANGED" then
-            FindMyInterrupt()
+            FindMyDefensives()
         elseif event == "PLAYER_SPECIALIZATION_CHANGED" then
             if arg1 == "player" then
-                FindMyInterrupt()
-            end
-        elseif event == "ROLE_CHANGED_INFORM" then
-            for i = 1, 4 do
-                local u = "party" .. i
-                if UnitExists(u) then
-                    local name = UnitName(u)
-                    local _, cls = UnitClass(u)
-                    local role = UnitGroupRolesAssigned(u)
-                    if name and role == "HEALER" and cls ~= "SHAMAN" and partyMembers[name] then
-                        partyMembers[name] = nil
-                        noInterruptPlayers[name] = true
-                    end
-                end
+                FindMyDefensives()
             end
         end
     end)
@@ -829,6 +921,26 @@ local function TeardownRosterEvents()
 end
 
 -- ============================================================================
+-- GroupInspector callback (update tracked defensives on spec change)
+-- ============================================================================
+
+local function OnInspectComplete(unit, name, class, specID)
+    LogDebug(format("OnInspectComplete: unit=%s name=%s class=%s specID=%s",
+        tostring(unit), tostring(name), tostring(class), tostring(specID)))
+
+    local info = partyMembers[name]
+    if not info then
+        LogDebug(format("  -> %s not tracked, skipping", tostring(name)))
+        return
+    end
+
+    UpdateMemberDefensives(name, class or info.class, specID, "inspect")
+    info = partyMembers[name]
+    LogDebug(format("  -> %s tracked with %d defensive entries, specID=%d",
+        name, (function() local n=0 for _ in pairs(info.cds) do n=n+1 end return n end)(), specID))
+end
+
+-- ============================================================================
 -- Module Lifecycle
 -- ============================================================================
 
@@ -837,12 +949,15 @@ local function OnInitialize(moduleDB)
     Log("OnInitialize starting...")
 
     LogDebug(format("  db.enabled=%s", tostring(moduleDB.enabled)))
-    LogDebug(format("  ns.InterruptData=%s", tostring(ns.InterruptData ~= nil)))
+    LogDebug(format("  ns.DefensiveData=%s", tostring(ns.DefensiveData ~= nil)))
     LogDebug(format("  ns.Services.PartySpellWatcher=%s", tostring(ns.Services.PartySpellWatcher ~= nil)))
     LogDebug(format("  ns.Services.GroupInspector=%s", tostring(ns.Services.GroupInspector ~= nil)))
+    if ns.Services.GroupInspector and ns.Services.GroupInspector.Initialize then
+        ns.Services.GroupInspector:Initialize()
+    end
 
-    LogDebug("  Step 1: FindMyInterrupt")
-    FindMyInterrupt()
+    LogDebug("  Step 1: FindMyDefensives")
+    FindMyDefensives()
 
     LogDebug("  Step 2: CreateUI")
     CreateUI()
@@ -851,8 +966,8 @@ local function OnInitialize(moduleDB)
     LogDebug("  Step 3: CheckZoneVisibility")
     CheckZoneVisibility()
 
-    LogDebug("  Step 4: SetupOwnKickTracking")
-    SetupOwnKickTracking()
+    LogDebug("  Step 4: SetupOwnTracking")
+    SetupOwnTracking()
 
     LogDebug("  Step 5: SetupRosterEvents")
     SetupRosterEvents()
@@ -860,18 +975,24 @@ local function OnInitialize(moduleDB)
     LogDebug("  Step 6: AutoRegisterParty")
     AutoRegisterParty()
 
-    LogDebug("  Step 7: Register PartySpellWatcher callbacks")
-    watcherHandle = ns.Services.PartySpellWatcher:OnPartyInterrupt(OnPartyInterruptDetected)
-    mobKickHandle = ns.Services.PartySpellWatcher:OnMobKick(OnMobKickConfirmed)
-    LogDebug(format("  watcherHandle=%s mobKickHandle=%s", tostring(watcherHandle), tostring(mobKickHandle)))
+    LogDebug("  Step 7: Register PartySpellWatcher spell match for defensives")
+    ns.Services.PartySpellWatcher:Initialize()
+    spellMatchHandle = ns.Services.PartySpellWatcher:OnPartySpellMatch({
+        label = "CrackedDefensives",
+        lookupTable = ALL_DEFENSIVES,
+        candidateResolver = ResolveDefensiveCandidates,
+        entryToID = ENTRY_TO_ID,
+        callback = OnPartyDefensiveMatch,
+    })
+    Log(format("  spellMatchHandle=%s", tostring(spellMatchHandle)))
 
     LogDebug("  Step 8: Register GroupInspector inspect-complete callback")
-    ns.Services.GroupInspector:RegisterInspectComplete("Interrupted", ScanTalentsForMember)
+    ns.Services.GroupInspector:RegisterInspectComplete("Cracked", OnInspectComplete)
 
     LogDebug("  Step 9: Start reinspect ticker (30s) if in group")
     if IsInGroup() then
         reinspectTicker = C_Timer.NewTicker(30, function()
-            LogDebug("Reinspect ticker fired, requesting re-inspect all")
+            LogDebug("Reinspect ticker fired")
             ns.Services.GroupInspector:RequestReinspectAll()
         end)
     end
@@ -880,6 +1001,7 @@ local function OnInitialize(moduleDB)
     if updateTicker then updateTicker:Cancel() end
     updateTicker = C_Timer.NewTicker(0.1, UpdateDisplay)
 
+    ProbeBlizzardUISurfaces("init")
     Log("OnInitialize complete - tracking started")
 end
 
@@ -892,25 +1014,20 @@ end
 local function OnDisable()
     Log("OnDisable called")
     DestroyUI()
-    TeardownOwnKickTracking()
+    TeardownOwnTracking()
     TeardownRosterEvents()
 
-    if watcherHandle then
-        ns.Services.PartySpellWatcher:Unregister(watcherHandle)
-        watcherHandle = nil
-    end
-    if mobKickHandle then
-        ns.Services.PartySpellWatcher:Unregister(mobKickHandle)
-        mobKickHandle = nil
+    if spellMatchHandle then
+        ns.Services.PartySpellWatcher:Unregister(spellMatchHandle)
+        spellMatchHandle = nil
     end
 
-    ns.Services.GroupInspector:UnregisterInspectComplete("Interrupted")
+    ns.Services.GroupInspector:UnregisterInspectComplete("Cracked")
 
     if reinspectTicker then reinspectTicker:Cancel(); reinspectTicker = nil end
 
     wipe(partyMembers)
-    wipe(noInterruptPlayers)
-    mySpellID = nil
+    wipe(myCds)
 end
 
 -- ============================================================================
@@ -919,23 +1036,27 @@ end
 
 local MODULE_DEFAULTS = {
     enabled = false,
-    frameWidth = 220,
-    barHeight = 28,
+    frameWidth = 240,
+    barHeight = 24,
     locked = false,
     showTitle = true,
     showIcons = true,
     showNames = true,
+    showSpellName = true,
     growUp = false,
     alpha = 0.9,
     nameFontSize = 0,
     readyFontSize = 0,
-    showReady = true,
+    showExternals = true,
+    showPartyWide = true,
+    showMajor = true,
+    showPersonal = false,
     showInDungeon = true,
     showInRaid = false,
     showInOpenWorld = true,
     showInArena = false,
     showInBG = false,
-    position = { point = "CENTER", x = 0, y = -150 },
+    position = { point = "CENTER", x = 250, y = -150 },
 }
 
 -- ============================================================================
@@ -947,11 +1068,11 @@ local pvTicker
 local pvStartTime = 0
 
 local PREVIEW_MOCK = {
-    { name = "Pummeler",    class = "WARRIOR",     spellID = 6552,   baseCd = 15, cdOffset = 8  },
-    { name = "Stabsworth",  class = "ROGUE",       spellID = 1766,   baseCd = 15, cdOffset = 0  },
-    { name = "Frostbyte",   class = "MAGE",        spellID = 2139,   baseCd = 24, cdOffset = 16 },
-    { name = "Thundercall", class = "SHAMAN",      spellID = 57994,  baseCd = 12, cdOffset = 3  },
-    { name = "Felrush",     class = "DEMONHUNTER", spellID = 183752, baseCd = 15, cdOffset = 0  },
+    { name = "Tanksworth",  class = "WARRIOR",     spellID = 97462,  baseCd = 180, duration = 10, cdOffset = 60 },
+    { name = "Stabsworth",  class = "ROGUE",       spellID = 31224,  baseCd = 120, duration = 5,  cdOffset = 0  },
+    { name = "Frostbyte",   class = "MAGE",        spellID = 45438,  baseCd = 240, duration = 10, cdOffset = 100 },
+    { name = "Healbot",     class = "PRIEST",      spellID = 33206,  baseCd = 180, duration = 8,  cdOffset = 30 },
+    { name = "Felrush",     class = "DEMONHUNTER", spellID = 196718, baseCd = 180, duration = 8,  cdOffset = 0  },
 }
 
 local function DestroyPreview()
@@ -982,7 +1103,7 @@ local function CreatePreviewBars()
         pvTitleText = pvInner:CreateFontString(nil, "OVERLAY")
         pvTitleText:SetFont(FONT_FACE, 12, FONT_FLAGS)
         pvTitleText:SetPoint("TOP", 0, -3)
-        pvTitleText:SetText("|cFF00DDDDInterrupts|r")
+        pvTitleText:SetText("|cFF00DDDDDefensives|r")
     else
         pvTitleText = nil
     end
@@ -1068,30 +1189,43 @@ local function UpdatePreview()
         local bar = pvBars[i]
         if not bar then break end
 
-        local data = ALL_INTERRUPTS[mock.spellID]
-        if data then
-            bar.icon:SetTexture(data.icon)
+        local defData = ALL_DEFENSIVES[mock.spellID]
+        if defData then
+            bar.icon:SetTexture(defData.icon)
             local col = CLASS_COLORS[mock.class] or FALLBACK_WHITE
-            bar.nameText:SetText("|cFFFFFFFF" .. mock.name .. "|r")
+
+            local label = mock.name
+            if db.showSpellName then
+                label = label .. " - " .. defData.name
+            end
+            bar.nameText:SetText("|cFFFFFFFF" .. label .. "|r")
 
             local readyWindow = 5
+            local activeWindow = mock.duration
             local cycleLen = mock.baseCd + readyWindow
             local pos = (elapsed + mock.cdOffset) % cycleLen
-            local rem = mock.baseCd - pos
-            if rem < 0 then rem = 0 end
 
-            bar.cdBar:SetMinMaxValues(0, mock.baseCd)
-
-            if rem > 0.5 then
+            if pos < activeWindow then
+                local rem = activeWindow - pos
+                bar.cdBar:SetMinMaxValues(0, activeWindow)
+                bar.cdBar:SetValue(rem)
+                bar.cdBar:SetStatusBarColor(ACTIVE_COLOR[1], ACTIVE_COLOR[2], ACTIVE_COLOR[3], 0.85)
+                bar.barBg:SetVertexColor(ACTIVE_COLOR[1] * 0.25, ACTIVE_COLOR[2] * 0.25, ACTIVE_COLOR[3] * 0.25, 0.9)
+                bar.cdText:SetText(format("%.1fs", rem))
+                bar.cdText:SetTextColor(0.2, 1.0, 0.2)
+            elseif pos < mock.baseCd then
+                local rem = mock.baseCd - pos
+                bar.cdBar:SetMinMaxValues(0, mock.baseCd)
                 bar.cdBar:SetValue(rem)
                 bar.cdBar:SetStatusBarColor(col[1], col[2], col[3], 0.85)
                 bar.barBg:SetVertexColor(col[1] * 0.25, col[2] * 0.25, col[3] * 0.25, 0.9)
                 bar.cdText:SetText(format("%.0f", rem))
                 bar.cdText:SetTextColor(1, 1, 1)
             else
+                bar.cdBar:SetMinMaxValues(0, 1)
                 bar.cdBar:SetValue(0)
                 bar.barBg:SetVertexColor(col[1], col[2], col[3], 0.85)
-                bar.cdText:SetText(db.showReady and "READY" or "")
+                bar.cdText:SetText("READY")
                 bar.cdText:SetTextColor(0.2, 1.0, 0.2)
             end
         end
@@ -1127,10 +1261,10 @@ local function BuildConfig(parent, moduleDB)
             end)
             MedaAuras:RegisterConfigCleanup(pvContainer)
 
-            local bg = pvContainer:CreateTexture(nil, "BACKGROUND")
-            bg:SetAllPoints()
-            bg:SetTexture(BAR_TEXTURE)
-            bg:SetVertexColor(0.08, 0.08, 0.08, 0.85)
+            local pvBg = pvContainer:CreateTexture(nil, "BACKGROUND")
+            pvBg:SetAllPoints()
+            pvBg:SetTexture(BAR_TEXTURE)
+            pvBg:SetVertexColor(0.08, 0.08, 0.08, 0.85)
 
             pvStartTime = GetTime()
             CreatePreviewBars()
@@ -1143,7 +1277,7 @@ local function BuildConfig(parent, moduleDB)
     local LEFT_X = 0
     local yOff = 0
 
-    local header = MedaUI:CreateSectionHeader(parent, "Interrupted")
+    local header = MedaUI:CreateSectionHeader(parent, "Cracked")
     header:SetPoint("TOPLEFT", LEFT_X, yOff)
     yOff = yOff - 45
 
@@ -1156,6 +1290,47 @@ local function BuildConfig(parent, moduleDB)
         MedaAuras:RefreshSidebarDot(MODULE_NAME)
     end
     yOff = yOff - 35
+
+    -- Category filters
+    local catHeader = MedaUI:CreateSectionHeader(parent, "Track Categories")
+    catHeader:SetPoint("TOPLEFT", LEFT_X, yOff)
+    yOff = yOff - 40
+
+    local extCB = MedaUI:CreateCheckbox(parent, "Externals (Pain Supp, Ironbark, etc.)")
+    extCB:SetPoint("TOPLEFT", LEFT_X, yOff)
+    extCB:SetChecked(moduleDB.showExternals ~= false)
+    extCB.OnValueChanged = function(_, checked)
+        moduleDB.showExternals = checked
+        RebuildPreview()
+    end
+    yOff = yOff - 30
+
+    local partyCB = MedaUI:CreateCheckbox(parent, "Party-Wide (Rally, AMZ, Darkness, etc.)")
+    partyCB:SetPoint("TOPLEFT", LEFT_X, yOff)
+    partyCB:SetChecked(moduleDB.showPartyWide ~= false)
+    partyCB.OnValueChanged = function(_, checked)
+        moduleDB.showPartyWide = checked
+        RebuildPreview()
+    end
+    yOff = yOff - 30
+
+    local majorCB = MedaUI:CreateCheckbox(parent, "Major Personals (Wall, IBF, Ice Block, etc.)")
+    majorCB:SetPoint("TOPLEFT", LEFT_X, yOff)
+    majorCB:SetChecked(moduleDB.showMajor ~= false)
+    majorCB.OnValueChanged = function(_, checked)
+        moduleDB.showMajor = checked
+        RebuildPreview()
+    end
+    yOff = yOff - 30
+
+    local persCB = MedaUI:CreateCheckbox(parent, "Minor Personals (Barkskin, AMS, Feint, etc.)")
+    persCB:SetPoint("TOPLEFT", LEFT_X, yOff)
+    persCB:SetChecked(moduleDB.showPersonal)
+    persCB.OnValueChanged = function(_, checked)
+        moduleDB.showPersonal = checked
+        RebuildPreview()
+    end
+    yOff = yOff - 40
 
     -- Display settings
     local dispHeader = MedaUI:CreateSectionHeader(parent, "Display")
@@ -1196,21 +1371,21 @@ local function BuildConfig(parent, moduleDB)
     end
     yOff = yOff - 30
 
+    local spellCB = MedaUI:CreateCheckbox(parent, "Show Spell Name")
+    spellCB:SetPoint("TOPLEFT", LEFT_X, yOff)
+    spellCB:SetChecked(moduleDB.showSpellName)
+    spellCB.OnValueChanged = function(_, checked)
+        moduleDB.showSpellName = checked
+        RebuildPreview()
+    end
+
     local growCB = MedaUI:CreateCheckbox(parent, "Grow Upward")
-    growCB:SetPoint("TOPLEFT", LEFT_X, yOff)
+    growCB:SetPoint("TOPLEFT", 240, yOff)
     growCB:SetChecked(moduleDB.growUp)
     growCB.OnValueChanged = function(_, checked)
         moduleDB.growUp = checked
         if mainFrame then RebuildBars() end
         RebuildPreview()
-    end
-
-    local readyCB = MedaUI:CreateCheckbox(parent, "Show READY Text")
-    readyCB:SetPoint("TOPLEFT", 240, yOff)
-    readyCB:SetChecked(moduleDB.showReady)
-    readyCB.OnValueChanged = function(_, checked)
-        moduleDB.showReady = checked
-        UpdatePreview()
     end
     yOff = yOff - 40
 
@@ -1250,12 +1425,13 @@ local function BuildConfig(parent, moduleDB)
     yOff = yOff - 40
 
     -- Debug info
-    if mySpellID and ALL_INTERRUPTS[mySpellID] then
+    local myCount = 0
+    for _ in pairs(myCds) do myCount = myCount + 1 end
+    if myCount > 0 then
         local infoLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         infoLabel:SetPoint("TOPLEFT", LEFT_X, yOff)
         infoLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
-        infoLabel:SetText(format("Detected: %s (ID %d, CD %ds)",
-            ALL_INTERRUPTS[mySpellID].name, mySpellID, myBaseCd or 0))
+        infoLabel:SetText(format("Own defensives tracked: %d", myCount))
         yOff = yOff - 20
     end
 
@@ -1289,13 +1465,14 @@ end
 
 MedaAuras:RegisterModule({
     name        = MODULE_NAME,
-    title       = "Interrupted",
+    title       = "Cracked",
     version     = MODULE_VERSION,
     stability   = MODULE_STABILITY,
-    description = "Tracks party interrupt cooldowns in M+ and dungeons. "
-               .. "Detects when party members use their kick and displays "
-               .. "cooldown bars for each player, colored by class.",
-    sidebarDesc = "Party interrupt cooldown tracker for M+ dungeons.",
+    description = "Tracks party defensive cooldowns in M+ and dungeons. "
+               .. "Detects when party members use defensive abilities and "
+               .. "displays cooldown bars with active/CD states, colored by class. "
+               .. "Uses secret laundering to read tainted party spell IDs.",
+    sidebarDesc = "Party defensive cooldown tracker (experimental).",
     defaults    = MODULE_DEFAULTS,
     OnInitialize = OnInitialize,
     OnEnable    = OnEnable,

@@ -1,5 +1,29 @@
 local _, ns = ...
 
+local format = format
+local GetTime = GetTime
+local pairs = pairs
+local ipairs = ipairs
+local pcall = pcall
+local wipe = wipe
+local CreateFrame = CreateFrame
+local UnitExists = UnitExists
+local UnitGUID = UnitGUID
+local UnitName = UnitName
+local UnitClass = UnitClass
+local UnitIsUnit = UnitIsUnit
+local UnitIsConnected = UnitIsConnected
+local IsInRaid = IsInRaid
+local IsInGroup = IsInGroup
+local GetNumGroupMembers = GetNumGroupMembers
+local GetSpecialization = GetSpecialization
+local GetSpecializationInfo = GetSpecializationInfo
+local GetInspectSpecialization = GetInspectSpecialization
+local CanInspect = CanInspect
+local NotifyInspect = NotifyInspect
+local IsPlayerSpell = IsPlayerSpell
+local C_Timer = C_Timer
+
 local GroupInspector = {}
 ns.Services.GroupInspector = GroupInspector
 
@@ -117,6 +141,7 @@ end
 
 local function ProcessInspectQueue()
     if inspectBusy or #inspectQueue == 0 then return end
+    if not next(callbacks) and not next(inspectCompleteCallbacks) then return end
 
     local unit = table.remove(inspectQueue, 1)
 

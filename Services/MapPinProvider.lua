@@ -1,5 +1,11 @@
 local _, ns = ...
 
+local pairs = pairs
+local ipairs = ipairs
+local wipe = wipe
+local CreateFrame = CreateFrame
+local C_Timer = C_Timer
+
 local MapPinProvider = {}
 ns.Services.MapPinProvider = MapPinProvider
 

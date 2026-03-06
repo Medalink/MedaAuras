@@ -1,5 +1,8 @@
 local _, ns = ...
 
+local ipairs = ipairs
+local UnitExists = UnitExists
+
 local UnitPriority = {}
 ns.Services.UnitPriority = UnitPriority
 

@@ -1,5 +1,10 @@
 local _, ns = ...
 
+local GetTime = GetTime
+local pairs = pairs
+local format = format
+local CreateFrame = CreateFrame
+
 local SpellCastTracker = {}
 ns.Services.SpellCastTracker = SpellCastTracker
 
@@ -18,20 +23,23 @@ function SpellCastTracker:Initialize()
     eventFrame:SetScript("OnEvent", function(_, _, unit, _, spellID)
         if unit ~= "player" then return end
 
+        local cbs = spellCallbacks[spellID]
+        local hasAny = next(anyCallbacks)
+        if not cbs and not hasAny then return end
+
         local now = GetTime()
         lastCastTimes[spellID] = now
 
-        MedaAuras.LogDebug(format("[SpellCastTracker] Player cast spell %d at %.3f", spellID, now))
-
-        local cbs = spellCallbacks[spellID]
         if cbs then
             for _, func in pairs(cbs) do
                 func(spellID, now)
             end
         end
 
-        for _, func in pairs(anyCallbacks) do
-            func(spellID, now)
+        if hasAny then
+            for _, func in pairs(anyCallbacks) do
+                func(spellID, now)
+            end
         end
     end)
 

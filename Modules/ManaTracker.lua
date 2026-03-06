@@ -2,6 +2,16 @@ local _, ns = ...
 
 local MedaUI = LibStub("MedaUI-1.0")
 
+local format = format
+local GetTime = GetTime
+local pairs = pairs
+local unpack = unpack
+local CreateFrame = CreateFrame
+local UnitPower = UnitPower
+local UnitPowerMax = UnitPowerMax
+local UnitPowerType = UnitPowerType
+local math_max = math.max
+
 -- ============================================================================
 -- Constants
 -- ============================================================================
@@ -18,6 +28,8 @@ local LOW_COLOR = { 0.8, 0.1, 0.1, 1.0 }
 local MEDIUM_COLOR = { 0.9, 0.5, 0.0, 1.0 }
 local DEFAULT_BG_COLOR = { 0.1, 0.1, 0.2, 1.0 }
 local DEFAULT_BORDER_COLOR = { 0.2, 0.4, 0.7, 1.0 }
+local DEFAULT_MANA_COLOR = { 0.0, 0.56, 1.0, 1.0 }
+local DEFAULT_OUTER_BORDER = { 0, 0, 0, 1 }
 
 local DEFAULT_WIDTH = 200
 local DEFAULT_HEIGHT = 24
@@ -214,7 +226,7 @@ local function CreateBarDisplay(parent, db)
     d.text = text
 
     local outerBorder = CreateFrame("Frame", nil, parent)
-    outerBorder:SetFrameLevel(math.max(d:GetFrameLevel() - 1, 0))
+    outerBorder:SetFrameLevel(math_max(d:GetFrameLevel() - 1, 0))
     local outerTex = outerBorder:CreateTexture(nil, "BACKGROUND")
     outerTex:SetAllPoints()
     outerTex:SetColorTexture(0, 0, 0, 1)
@@ -233,7 +245,7 @@ local function CreateBarDisplay(parent, db)
 end
 
 local function UpdateBarDisplay(d, current, max, db)
-    local manaColor = db.manaColor or { 0.0, 0.56, 1.0, 1.0 }
+    local manaColor = db.manaColor or DEFAULT_MANA_COLOR
 
     -- StatusBar fill (secret-safe)
     d.bar:SetMinMaxValues(0, max)
@@ -276,7 +288,7 @@ local function UpdateBarDisplay(d, current, max, db)
         d.outerBorder:ClearAllPoints()
         d.outerBorder:SetPoint("TOPLEFT", d, "TOPLEFT", -obs, obs)
         d.outerBorder:SetPoint("BOTTOMRIGHT", d, "BOTTOMRIGHT", obs, -obs)
-        local obc = db.outerBorderColor or { 0, 0, 0, 1 }
+        local obc = db.outerBorderColor or DEFAULT_OUTER_BORDER
         d.outerBorderTex:SetColorTexture(obc[1], obc[2], obc[3], obc[4] or 1)
     end
 
@@ -324,7 +336,7 @@ local function CreateOrbDisplay(parent, db)
     -- Outer border (circular, behind everything)
     local outerBorderTex = d:CreateTexture(nil, "BACKGROUND", nil, -8)
     outerBorderTex:SetTexture(maskPath)
-    local obc = db.outerBorderColor or { 0, 0, 0, 1 }
+    local obc = db.outerBorderColor or DEFAULT_OUTER_BORDER
     outerBorderTex:SetVertexColor(obc[1], obc[2], obc[3], obc[4] or 1)
     d.outerBorderTex = outerBorderTex
 
@@ -385,7 +397,7 @@ local function CreateOrbDisplay(parent, db)
 end
 
 local function UpdateOrbDisplay(d, current, max, db)
-    local manaColor = db.manaColor or { 0.0, 0.56, 1.0, 1.0 }
+    local manaColor = db.manaColor or DEFAULT_MANA_COLOR
 
     -- Orb texture swap
     local orbTex = db.orbTexture or "solid"
@@ -437,7 +449,7 @@ local function UpdateOrbDisplay(d, current, max, db)
         d.outerBorderTex:ClearAllPoints()
         d.outerBorderTex:SetPoint("TOPLEFT", -obs, obs)
         d.outerBorderTex:SetPoint("BOTTOMRIGHT", obs, -obs)
-        local obc = db.outerBorderColor or { 0, 0, 0, 1 }
+        local obc = db.outerBorderColor or DEFAULT_OUTER_BORDER
         d.outerBorderTex:SetVertexColor(obc[1], obc[2], obc[3], obc[4] or 1)
     end
 
@@ -674,7 +686,9 @@ end
 -- ============================================================================
 
 local function OnManaEvent(db)
-    UpdatePreview(db)
+    if previewContainer then
+        UpdatePreview(db)
+    end
     if not db.enabled then return end
     local current, max = GetMana()
     UpdateDisplay(db)
@@ -718,7 +732,7 @@ local function OnInitialize(db)
     MedaAuras.Log(format("%s Initializing", PREFIX))
 
     EnsurePercentCurve()
-    EnsureColorCurve(db.manaColor or { 0.0, 0.56, 1.0, 1.0 })
+    EnsureColorCurve(db.manaColor or DEFAULT_MANA_COLOR)
 
     containerFrame = CreateContainerFrame()
     ApplyPosition(db)
@@ -738,7 +752,7 @@ local function OnEnable(db)
         return
     end
 
-    EnsureColorCurve(db.manaColor or { 0.0, 0.56, 1.0, 1.0 })
+    EnsureColorCurve(db.manaColor or DEFAULT_MANA_COLOR)
     CreateDisplay(db)
     ApplyPosition(db)
     UpdateLock(db)
@@ -906,7 +920,7 @@ local function BuildConfig(parent, db)
         end
         yOff = yOff - 55
 
-        local obc = db.outerBorderColor or { 0.0, 0.0, 0.0, 1.0 }
+        local obc = db.outerBorderColor or DEFAULT_OUTER_BORDER
         local outerBorderColorPicker = MedaUI:CreateLabeledColorPicker(p, "Outer Border Color", nil, true)
         outerBorderColorPicker:SetPoint("TOPLEFT", LEFT_X, yOff)
         outerBorderColorPicker:SetColor(obc[1], obc[2], obc[3], obc[4] or 1)
@@ -1009,7 +1023,7 @@ local function BuildConfig(parent, db)
         colorHdr:SetPoint("TOPLEFT", LEFT_X, yOff)
         yOff = yOff - 40
 
-        local mc = db.manaColor or { 0.0, 0.56, 1.0, 1.0 }
+        local mc = db.manaColor or DEFAULT_MANA_COLOR
         local manaColorPicker = MedaUI:CreateLabeledColorPicker(p, "Mana Color", nil, true)
         manaColorPicker:SetPoint("TOPLEFT", LEFT_X, yOff)
         manaColorPicker:SetColor(mc[1], mc[2], mc[3], mc[4] or 1)

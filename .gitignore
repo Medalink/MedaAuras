@@ -1,2 +1,4 @@
-# Dev mode symlink (replaced during release by packager)
+# Dev mode symlinks (replaced during release by packager)
 Libs/MedaUI
+Libs/LibSerialize
+Libs/LibDeflate

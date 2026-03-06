@@ -3,6 +3,24 @@ local _, ns = ...
 local MedaUI = LibStub("MedaUI-1.0")
 local Pixel = MedaUI.Pixel
 
+local format = format
+local GetTime = GetTime
+local pairs = pairs
+local ipairs = ipairs
+local wipe = wipe
+local pcall = pcall
+local unpack = unpack
+local CreateFrame = CreateFrame
+local math_sqrt = math.sqrt
+local math_floor = math.floor
+local math_max = math.max
+local math_min = math.min
+local math_abs = math.abs
+local math_sin = math.sin
+local math_cos = math.cos
+local math_rad = math.rad
+local C_Timer = C_Timer
+
 -- ============================================================================
 -- Constants
 -- ============================================================================
@@ -24,6 +42,9 @@ local TIMER_INTERVAL = 1
 local CHECKLIST_MAX_VISIBLE = 6
 local CHECKLIST_ROW_HEIGHT = 20
 local RARITY_SORT = { common = 1, uncommon = 2, rare = 3 }
+local FALLBACK_DIM = { 0.6, 0.6, 0.6 }
+local FALLBACK_GOLD = { 0.9, 0.7, 0.15 }
+local FALLBACK_BRIGHT = { 1, 1, 1 }
 
 -- ============================================================================
 -- State
@@ -36,6 +57,7 @@ local fishingStartTime = 0
 local sessionStartTime = 0
 local sessionCaught = 0
 local sessionCasts = 0
+local sessionJunk = 0
 local currentStreak = 0
 local hideTimer = nil
 
@@ -158,11 +180,11 @@ local function GetQualityColor(quality)
 end
 
 local function FormatTime(seconds)
-    seconds = math.floor(seconds)
+    seconds = math_floor(seconds)
     if seconds >= 3600 then
-        return format("%dh %02dm", math.floor(seconds / 3600), math.floor((seconds % 3600) / 60))
+        return format("%dh %02dm", math_floor(seconds / 3600), math_floor((seconds % 3600) / 60))
     elseif seconds >= 60 then
-        return format("%dm %02ds", math.floor(seconds / 60), seconds % 60)
+        return format("%dm %02ds", math_floor(seconds / 60), seconds % 60)
     end
     return format("%ds", seconds)
 end
@@ -376,6 +398,43 @@ local function RepairPoolNames()
     return repaired
 end
 
+local function PurgeOpenWaterPoolData()
+    if not db then return 0 end
+    RepairPoolNames()
+    local purged = 0
+    local known = db.poolObjectNames or {}
+
+    for _, ps in pairs(db.poolStats) do
+        if ps.pools then
+            for poolName, count in pairs(ps.pools) do
+                local objID = poolName:match("^Pool #(%d+)$")
+                if objID and not known[objID] then
+                    ps.poolCatches = math_max(0, (ps.poolCatches or 0) - count)
+                    ps.pools[poolName] = nil
+                    purged = purged + 1
+                end
+            end
+        end
+    end
+
+    if db.discoveredPools then
+        for _, pools in pairs(db.discoveredPools) do
+            for poolName in pairs(pools) do
+                local objID = poolName:match("^Pool #(%d+)$")
+                if objID and not known[objID] then
+                    pools[poolName] = nil
+                    purged = purged + 1
+                end
+            end
+        end
+    end
+
+    if purged > 0 then
+        MedaAuras.Log(format("[GoneFishin] Purged %d false pool entries from open water catches", purged))
+    end
+    return purged
+end
+
 local function DetectPool()
     for i = 1, GetNumLootItems() do
         local sources = { GetLootSourceInfo(i) }
@@ -389,7 +448,7 @@ local function DetectPool()
                     local line = _G[GameTooltip:GetName() .. "TextLeft1"]
                     if line then
                         local text = line:GetText()
-                        if text and text ~= "" and not text:find("^Player") then
+                        if text and text ~= "" and LooksLikePool(text) then
                             resolvedName = text
                         end
                     end
@@ -406,7 +465,7 @@ local function DetectPool()
                     return db.poolObjectNames[objectID]
                 end
 
-                return format("Pool #%s", objectID or "0")
+                return nil
             end
         end
     end
@@ -430,6 +489,7 @@ local function RecordCatch(itemID, name, icon, quality)
 
     if category == "junk" then
         currentStreak = 0
+        sessionJunk = sessionJunk + 1
     else
         currentStreak = currentStreak + 1
         if currentStreak > db.longestStreak then
@@ -691,7 +751,7 @@ local function CreateHUD()
 
     local textFont = GetFontObj(db.auraFont or "default", db.auraTextSize or 13, db.auraTextOutline or "outline")
     local headerFont = GetFontObj(db.auraFont or "default", (db.auraTextSize or 13) + 2, "thick")
-    local smallFont = GetFontObj(db.auraFont or "default", math.max((db.auraTextSize or 13) - 3, 8), db.auraTextOutline or "outline")
+    local smallFont = GetFontObj(db.auraFont or "default", math_max((db.auraTextSize or 13) - 3, 8), db.auraTextOutline or "outline")
 
     -- ---- Left Panel (zone, session stats) ----
     leftPanel = CreateFrame("Frame", nil, hudFrame)
@@ -841,6 +901,28 @@ local function RecalcPositions()
     for _, row in ipairs(expandRows) do
         if row.icon then row.icon:SetSize(iconSz, iconSz) end
     end
+
+    local textFont = GetFontObj(db.auraFont or "default", db.auraTextSize or 13, db.auraTextOutline or "outline")
+    local headerFont = GetFontObj(db.auraFont or "default", (db.auraTextSize or 13) + 2, "thick")
+    local smallFont = GetFontObj(db.auraFont or "default", math_max((db.auraTextSize or 13) - 3, 8), db.auraTextOutline or "outline")
+
+    for i = 1, 8 do
+        if leftTexts[i] then
+            leftTexts[i]:SetFontObject(i <= 2 and headerFont or textFont)
+        end
+    end
+    for i = 1, 3 do
+        if centerTexts[i] then centerTexts[i]:SetFontObject(textFont) end
+    end
+    for _, row in ipairs(checklistRows) do
+        if row.text then row.text:SetFontObject(textFont) end
+    end
+    for _, row in ipairs(expandRows) do
+        if row.text then row.text:SetFontObject(textFont) end
+    end
+    if junkHeaderBtn and junkHeaderBtn.text then junkHeaderBtn.text:SetFontObject(smallFont) end
+    if missingHeaderBtn and missingHeaderBtn.text then missingHeaderBtn.text:SetFontObject(smallFont) end
+    if endSessionBtn and endSessionBtn.text then endSessionBtn.text:SetFontObject(textFont) end
 end
 
 -- Lure hint state for rotation
@@ -1021,9 +1103,9 @@ local function UpdateHUDContent()
     if not hudFrame or not db then return end
 
     local Theme = MedaUI.Theme
-    local gold = Theme and Theme.gold or { 0.9, 0.7, 0.15 }
-    local dim = Theme and Theme.textDim or { 0.6, 0.6, 0.6 }
-    local bright = Theme and Theme.text or { 1, 1, 1 }
+    local gold = Theme and Theme.gold or FALLBACK_GOLD
+    local dim = Theme and Theme.textDim or FALLBACK_DIM
+    local bright = Theme and Theme.text or FALLBACK_BRIGHT
 
     local area = GetCurrentArea()
     local zone = GetCurrentZone()
@@ -1035,10 +1117,14 @@ local function UpdateHUDContent()
     leftTexts[2]:SetText(area ~= zone and zone or "")
     leftTexts[2]:SetTextColor(dim[1], dim[2], dim[3])
     leftTexts[3]:SetText("")
-    leftTexts[4]:SetText(format("Session: %d fish", sessionCaught))
+    if db.auraShowSessionJunk ~= false then
+        leftTexts[4]:SetText(format("Session: %d fish | %d junk", sessionCaught, sessionJunk))
+    else
+        leftTexts[4]:SetText(format("Session: %d fish", sessionCaught))
+    end
     leftTexts[4]:SetTextColor(bright[1], bright[2], bright[3])
 
-    local rate = sessionCasts > 0 and math.floor(sessionCaught / sessionCasts * 100) or 0
+    local rate = sessionCasts > 0 and math_floor(sessionCaught / sessionCasts * 100) or 0
     leftTexts[5]:SetText(format("Casts: %d | Rate: %d%%", sessionCasts, rate))
     leftTexts[5]:SetTextColor(dim[1], dim[2], dim[3])
 
@@ -1094,10 +1180,10 @@ local function UpdateHUDContent()
         end
 
         local caughtHeight = #caught * CHECKLIST_ROW_HEIGHT
-        checklistContent:SetHeight(math.max(caughtHeight, 1))
+        checklistContent:SetHeight(math_max(caughtHeight, 1))
 
-        local scrollVisibleH = math.min(CHECKLIST_MAX_VISIBLE, #caught) * CHECKLIST_ROW_HEIGHT
-        Pixel.SetHeight(checklistScroll, math.max(scrollVisibleH, 1))
+        local scrollVisibleH = math_min(CHECKLIST_MAX_VISIBLE, #caught) * CHECKLIST_ROW_HEIGHT
+        Pixel.SetHeight(checklistScroll, math_max(scrollVisibleH, 1))
 
         -- Expand sections below the scroll area
         local belowY = -scrollVisibleH
@@ -1151,7 +1237,7 @@ local function UpdateHUDContent()
             expandRows[i]:Hide()
         end
 
-        rightPanel:SetHeight(math.max(-belowY, CHECKLIST_ROW_HEIGHT))
+        rightPanel:SetHeight(math_max(-belowY, CHECKLIST_ROW_HEIGHT))
     elseif rightPanel then
         rightPanel:Hide()
     end
@@ -1212,7 +1298,7 @@ local function UpdateDistanceText()
         for _, fav in pairs(db.favorites) do
             if fav.mapID == mapID and fav.x and fav.y then
                 local dx, dy = px - fav.x, py - fav.y
-                local dist = math.sqrt(dx * dx + dy * dy)
+                local dist = math_sqrt(dx * dx + dy * dy)
                 if dist < nearestDist then
                     nearestDist = dist
                 end
@@ -1220,7 +1306,7 @@ local function UpdateDistanceText()
         end
         if nearestDist < math.huge then
             local yards = nearestDist * 1000
-            centerTexts[3]:SetText(format("|cff999999~%d yd to fave|r", math.floor(yards)))
+            centerTexts[3]:SetText(format("|cff999999~%d yd to fave|r", math_floor(yards)))
             return
         end
     end
@@ -1234,25 +1320,33 @@ local function UpdateDistanceText()
     end
 end
 
+local FRAME_THROTTLE = 0.033 -- ~30 Hz cap
+local frameElapsed = 0
+
 local function HUD_OnUpdate(self, elapsed)
+    frameElapsed = frameElapsed + elapsed
+    timerElapsed = timerElapsed + elapsed
+    distanceElapsed = distanceElapsed + elapsed
+
+    if frameElapsed < FRAME_THROTTLE then return end
+    frameElapsed = 0
+
     if arcDirty then
         RecalcPositions()
         UpdateHUDContent()
         arcDirty = false
     end
 
-    timerElapsed = timerElapsed + elapsed
     if timerElapsed >= TIMER_INTERVAL then
         timerElapsed = 0
         if sessionActive and sessionStartTime > 0 then
             local sessionTime = GetTime() - sessionStartTime
-            local dim = MedaUI.Theme and MedaUI.Theme.textDim or { 0.6, 0.6, 0.6 }
+            local dim = MedaUI.Theme and MedaUI.Theme.textDim or FALLBACK_DIM
             leftTexts[6]:SetText(format("Time: %s", FormatTime(sessionTime)))
             leftTexts[6]:SetTextColor(dim[1], dim[2], dim[3])
         end
     end
 
-    distanceElapsed = distanceElapsed + elapsed
     if distanceElapsed >= DISTANCE_INTERVAL then
         distanceElapsed = 0
         UpdateDistanceText()
@@ -1316,6 +1410,7 @@ local function SaveSessionState()
             elapsed = elapsed,
             caught = sessionCaught,
             casts = sessionCasts,
+            junk = sessionJunk,
             streak = currentStreak,
             savedAt = GetServerTime(),
         }
@@ -1336,6 +1431,7 @@ local function RestoreSession()
     sessionStartTime = GetTime() - (s.elapsed or 0) - gap
     sessionCaught = s.caught or 0
     sessionCasts = s.casts or 0
+    sessionJunk = s.junk or 0
     currentStreak = s.streak or 0
 end
 
@@ -1444,9 +1540,9 @@ local overviewTexts = {}
 function BuildOverviewTab(parent)
     local yOff = -8
     local Theme = MedaUI.Theme
-    local gold = Theme and Theme.gold or { 0.9, 0.7, 0.15 }
-    local bright = Theme and Theme.text or { 1, 1, 1 }
-    local dim = Theme and Theme.textDim or { 0.6, 0.6, 0.6 }
+    local gold = Theme and Theme.gold or FALLBACK_GOLD
+    local bright = Theme and Theme.text or FALLBACK_BRIGHT
+    local dim = Theme and Theme.textDim or FALLBACK_DIM
 
     local function AddHeader(text)
         local hdr = MedaUI:CreateSectionHeader(parent, text)
@@ -1505,12 +1601,12 @@ function RefreshOverviewTab()
     overviewTexts.totalCaught:SetText(tostring(db.totalCaught))
     overviewTexts.totalCasts:SetText(tostring(db.totalCasts))
 
-    local rate = db.totalCasts > 0 and math.floor(db.totalCaught / db.totalCasts * 100) or 0
+    local rate = db.totalCasts > 0 and math_floor(db.totalCaught / db.totalCasts * 100) or 0
     overviewTexts.catchRate:SetText(rate .. "%")
     overviewTexts.totalTime:SetText(FormatTime(db.totalFishingTime))
 
     local hours = db.totalFishingTime / 3600
-    local fph = hours > 0 and math.floor(db.totalCaught / hours) or 0
+    local fph = hours > 0 and math_floor(db.totalCaught / hours) or 0
     overviewTexts.fishPerHour:SetText(tostring(fph))
 
     local unique = 0
@@ -1811,7 +1907,7 @@ function BuildCollectionTab(parent)
                 row.nameText:SetPoint("LEFT", 6, 4)
                 row.nameText:SetWidth(300)
                 local Theme = MedaUI.Theme
-                local gold = Theme and Theme.gold or { 0.9, 0.7, 0.15 }
+                local gold = Theme and Theme.gold or FALLBACK_GOLD
 
                 if item.isSectionHeader then
                     row.nameText:SetText(format("|cff%02x%02x%02x=== %s ===|r", gold[1]*255, gold[2]*255, gold[3]*255, item.label or ""))
@@ -2002,7 +2098,7 @@ function RefreshCollectionTab()
 
     if collectionHeader then
         local Theme = MedaUI.Theme
-        local gold = Theme and Theme.gold or { 0.9, 0.7, 0.15 }
+        local gold = Theme and Theme.gold or FALLBACK_GOLD
         collectionHeader:SetText(format("Midnight Pokedex: %d / %d", totalCaught, totalCount))
         collectionHeader:SetTextColor(gold[1], gold[2], gold[3])
     end
@@ -2041,7 +2137,7 @@ function BuildZonesTab(parent)
 
             if item.isZone then
                 local Theme = MedaUI.Theme
-                local gold = Theme and Theme.gold or { 0.9, 0.7, 0.15 }
+                local gold = Theme and Theme.gold or FALLBACK_GOLD
                 row.nameText:SetText(item.name)
                 row.nameText:SetTextColor(gold[1], gold[2], gold[3])
                 row.countText:SetText(format("%d fish", item.total or 0))
@@ -2190,6 +2286,7 @@ local function OnEvent(self, event, ...)
                 sessionStartTime = GetTime()
                 sessionCaught = 0
                 sessionCasts = 0
+                sessionJunk = 0
                 currentStreak = 0
                 sessionActive = true
             end
@@ -2299,6 +2396,8 @@ local function BuildConfig(parent, moduleDB)
     local LEFT_X, RIGHT_X = 0, 238
     db = moduleDB
 
+    local UpdatePreview
+
     local function MarkDirty()
         arcDirty = true
         wipe(fontCache)
@@ -2306,6 +2405,7 @@ local function BuildConfig(parent, moduleDB)
             RecalcPositions()
             UpdateHUDContent()
         end
+        if UpdatePreview then UpdatePreview() end
     end
 
     local tabBar, tabs = MedaAuras:CreateConfigTabs(parent, {
@@ -2359,21 +2459,27 @@ local function BuildConfig(parent, moduleDB)
         local checklistCB = MedaUI:CreateCheckbox(p, "Show Zone Checklist")
         checklistCB:SetPoint("TOPLEFT", LEFT_X, yOff)
         checklistCB:SetChecked(moduleDB.auraShowChecklist ~= false)
-        checklistCB.OnValueChanged = function(_, checked) moduleDB.auraShowChecklist = checked; arcDirty = true end
+        checklistCB.OnValueChanged = function(_, checked) moduleDB.auraShowChecklist = checked; MarkDirty() end
         local faveCB = MedaUI:CreateCheckbox(p, "Show Favorite Spot")
         faveCB:SetPoint("TOPLEFT", RIGHT_X, yOff)
         faveCB:SetChecked(moduleDB.auraShowFaves ~= false)
-        faveCB.OnValueChanged = function(_, checked) moduleDB.auraShowFaves = checked; arcDirty = true end
+        faveCB.OnValueChanged = function(_, checked) moduleDB.auraShowFaves = checked; MarkDirty() end
         yOff = yOff - 30
 
         local bestCB = MedaUI:CreateCheckbox(p, "Show Best Spot")
         bestCB:SetPoint("TOPLEFT", LEFT_X, yOff)
         bestCB:SetChecked(moduleDB.auraShowBestSpot ~= false)
-        bestCB.OnValueChanged = function(_, checked) moduleDB.auraShowBestSpot = checked; arcDirty = true end
+        bestCB.OnValueChanged = function(_, checked) moduleDB.auraShowBestSpot = checked; MarkDirty() end
         local tipsCB = MedaUI:CreateCheckbox(p, "Show Lure Tips")
         tipsCB:SetPoint("TOPLEFT", RIGHT_X, yOff)
         tipsCB:SetChecked(moduleDB.auraShowTips ~= false)
-        tipsCB.OnValueChanged = function(_, checked) moduleDB.auraShowTips = checked; arcDirty = true end
+        tipsCB.OnValueChanged = function(_, checked) moduleDB.auraShowTips = checked; MarkDirty() end
+        yOff = yOff - 30
+
+        local junkCB = MedaUI:CreateCheckbox(p, "Show Session Junk")
+        junkCB:SetPoint("TOPLEFT", LEFT_X, yOff)
+        junkCB:SetChecked(moduleDB.auraShowSessionJunk ~= false)
+        junkCB.OnValueChanged = function(_, checked) moduleDB.auraShowSessionJunk = checked; MarkDirty() end
         yOff = yOff - 40
 
         local scaleSlider = MedaUI:CreateLabeledSlider(p, "Scale (%)", 200, 50, 200, 5)
@@ -2488,6 +2594,61 @@ local function BuildConfig(parent, moduleDB)
     do
         local p = tabs["data"]
         local yOff = 0
+        local Theme = MedaUI.Theme
+        local dim = Theme and Theme.textDim or FALLBACK_DIM
+        local bright = Theme and Theme.text or FALLBACK_BRIGHT
+
+        local function DataLabel(label, x, y)
+            local lbl = p:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            lbl:SetPoint("TOPLEFT", x, y)
+            lbl:SetTextColor(dim[1], dim[2], dim[3])
+            lbl:SetText(label)
+            return lbl
+        end
+
+        local function DataValue(anchor, text)
+            local val = p:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            val:SetPoint("LEFT", anchor, "RIGHT", 6, 0)
+            val:SetTextColor(bright[1], bright[2], bright[3])
+            val:SetText(text)
+            return val
+        end
+
+        local hdrSummary = MedaUI:CreateSectionHeader(p, "Data Summary")
+        hdrSummary:SetPoint("TOPLEFT", LEFT_X, yOff)
+        yOff = yOff - 35
+
+        local uniqueItems = 0
+        for _ in pairs(db.fishLog or {}) do uniqueItems = uniqueItems + 1 end
+        local zoneCount = 0
+        for _ in pairs(db.zoneStats or {}) do zoneCount = zoneCount + 1 end
+        local poolNames = {}
+        for _, ps in pairs(db.poolStats or {}) do
+            if ps.pools then
+                for name in pairs(ps.pools) do poolNames[name] = true end
+            end
+        end
+        local poolCount = 0
+        for _ in pairs(poolNames) do poolCount = poolCount + 1 end
+        local faveCount = 0
+        for _ in pairs(db.favorites or {}) do faveCount = faveCount + 1 end
+        local rate = db.totalCasts > 0 and math_floor(db.totalCaught / db.totalCasts * 100) or 0
+
+        DataValue(DataLabel("Total Caught:", 8, yOff), tostring(db.totalCaught))
+        DataValue(DataLabel("Total Casts:", RIGHT_X, yOff), tostring(db.totalCasts))
+        yOff = yOff - 20
+        DataValue(DataLabel("Catch Rate:", 8, yOff), rate .. "%")
+        DataValue(DataLabel("Time Fishing:", RIGHT_X, yOff), FormatTime(db.totalFishingTime))
+        yOff = yOff - 20
+        DataValue(DataLabel("Sessions:", 8, yOff), tostring(db.sessionCount))
+        DataValue(DataLabel("Longest Streak:", RIGHT_X, yOff), tostring(db.longestStreak))
+        yOff = yOff - 20
+        DataValue(DataLabel("Unique Items:", 8, yOff), tostring(uniqueItems))
+        DataValue(DataLabel("Zones Fished:", RIGHT_X, yOff), tostring(zoneCount))
+        yOff = yOff - 20
+        DataValue(DataLabel("Pools Found:", 8, yOff), tostring(poolCount))
+        DataValue(DataLabel("Favorite Spots:", RIGHT_X, yOff), tostring(faveCount))
+        yOff = yOff - 35
 
         local hdr = MedaUI:CreateSectionHeader(p, "Data Management")
         hdr:SetPoint("TOPLEFT", LEFT_X, yOff)
@@ -2501,9 +2662,21 @@ local function BuildConfig(parent, moduleDB)
         resetDataBtn:SetScript("OnClick", function()
             StaticPopup_Show("GONEFISHIN_RESET_DATA")
         end)
+        yOff = yOff - 35
+
+        local resetStreakBtn = MedaUI:CreateButton(p, "Reset Streak Record")
+        resetStreakBtn:SetPoint("TOPLEFT", LEFT_X, yOff)
+        resetStreakBtn:SetScript("OnClick", function()
+            StaticPopup_Show("GONEFISHIN_RESET_STREAK")
+        end)
+        local repairPoolBtn = MedaUI:CreateButton(p, "Repair Pool Data")
+        repairPoolBtn:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        repairPoolBtn:SetScript("OnClick", function()
+            StaticPopup_Show("GONEFISHIN_REPAIR_POOLS")
+        end)
     end
 
-    MedaAuras:SetContentHeight(500)
+    MedaAuras:SetContentHeight(550)
 
     -- ================================================================
     -- Floating Side Preview (mock HUD panels)
@@ -2513,86 +2686,135 @@ local function BuildConfig(parent, moduleDB)
         if not anchor then return end
 
         local PV_PAD = 12
-        local PV_W = 220
+        local PV_W = 280
         local LINE_H = 15
         local dim = { 0.55, 0.55, 0.55 }
         local gold = { 1, 0.82, 0 }
         local green = { 0.53, 0.80, 0.53 }
         local blue = { 0.4, 0.78, 1 }
 
-        local pvContainer = CreateFrame("Frame", nil, anchor, "BackdropTemplate")
+        local pvContainer = CreateFrame("Frame", nil, anchor)
         pvContainer:SetFrameStrata("HIGH")
         pvContainer:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 6, 0)
-        pvContainer:SetBackdrop(MedaUI:CreateBackdrop(true))
         MedaAuras:RegisterConfigCleanup(pvContainer)
 
-        local function ApplyPVTheme()
-            pvContainer:SetBackdropColor(unpack(MedaUI.Theme.backgroundDark))
-            pvContainer:SetBackdropBorderColor(unpack(MedaUI.Theme.border))
-        end
-        MedaUI:RegisterThemedWidget(pvContainer, ApplyPVTheme)
-        ApplyPVTheme()
+        local pvHeaders = {}
+        local pvBodyLines = {}
+        local pvSections = { junk = {}, checklist = {}, fave = {}, best = {}, tips = {} }
 
         local yOff = -PV_PAD
 
-        local function AddLine(text, color, font)
-            local fs = pvContainer:CreateFontString(nil, "OVERLAY", font or "GameFontNormalSmall")
+        local function AddLine(text, color, section)
+            local fs = pvContainer:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
             fs:SetPoint("TOPLEFT", PV_PAD, yOff)
             fs:SetPoint("RIGHT", -PV_PAD, 0)
             fs:SetJustifyH("LEFT")
+            fs:SetWordWrap(false)
             fs:SetText(text)
             if color then fs:SetTextColor(color[1], color[2], color[3]) end
             yOff = yOff - LINE_H
+            pvBodyLines[#pvBodyLines + 1] = fs
+            if section then pvSections[section][#pvSections[section] + 1] = fs end
+            return fs
+        end
+
+        local function AddHeader(text, color)
+            local fs = pvContainer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            fs:SetPoint("TOPLEFT", PV_PAD, yOff)
+            fs:SetPoint("RIGHT", -PV_PAD, 0)
+            fs:SetJustifyH("LEFT")
+            fs:SetWordWrap(false)
+            fs:SetText(text)
+            if color then fs:SetTextColor(color[1], color[2], color[3]) end
+            yOff = yOff - LINE_H
+            pvHeaders[#pvHeaders + 1] = fs
             return fs
         end
 
         local function AddGap(h) yOff = yOff - (h or 6) end
 
         -- Left panel mock
-        AddLine("Zone Stats", gold, "GameFontNormal")
+        AddHeader("Zone Stats", gold)
         AddGap(2)
-        AddLine("Zone: Silvermoon Harbor", dim)
-        AddLine("Area: The Moonwell", dim)
-        AddLine("Session: 24 caught / 31 casts", dim)
-        AddLine("Catch Rate: 77%", dim)
+        AddLine("Silvermoon Harbor", gold)
+        AddLine("The Moonwell", dim)
+        AddLine("", dim)
+        AddLine("Session: 24 fish | 3 junk", { 1, 1, 1 }, "junk")
+        AddLine("Casts: 31 | Rate: 77%", dim)
         AddLine("Time: 12m 34s", dim)
-        AddLine("Fish/hr: 116.8", dim)
         AddLine("Streak: 8", green)
         AddGap(10)
 
-        -- Right panel mock
-        AddLine("Zone Fish", gold, "GameFontNormal")
+        -- Right panel mock (checklist)
+        local checklistHdr = AddHeader("Zone Fish", gold)
+        pvSections.checklist[#pvSections.checklist + 1] = checklistHdr
         AddGap(2)
-        local mockFish = {
-            { name = "Lunker Salmon",       q = 3, count = 7 },
-            { name = "Moonpearl Trout",     q = 2, count = 12 },
-            { name = "Midnight Anglerfish", q = 4, count = 2 },
-            { name = "Duskwater Eel",       q = 1, count = 5 },
-        }
         local QUALITY_COLORS = {
             [1] = { 0.62, 0.62, 0.62 },
             [2] = { 0.12, 1.00, 0.00 },
             [3] = { 0.00, 0.44, 0.87 },
             [4] = { 0.64, 0.21, 0.93 },
         }
-        for _, fish in ipairs(mockFish) do
-            local c = QUALITY_COLORS[fish.q] or dim
-            AddLine(format("  %s  x%d", fish.name, fish.count), c)
+        for _, fish in ipairs({
+            { name = "Lunker Salmon",       q = 3, count = 7 },
+            { name = "Moonpearl Trout",     q = 2, count = 12 },
+            { name = "Midnight Anglerfish", q = 4, count = 2 },
+            { name = "Duskwater Eel",       q = 1, count = 5 },
+        }) do
+            AddLine(format("  %s  x%d", fish.name, fish.count), QUALITY_COLORS[fish.q] or dim, "checklist")
         end
-        AddLine("  [+] Junk (3)", dim)
-        AddLine("  [+] Missing (2)", dim)
+        AddLine("  [+] Junk (3)", dim, "checklist")
+        AddLine("  [+] Missing (2)", dim, "checklist")
         AddGap(10)
 
         -- Bottom panel mock
-        AddLine("Info", gold, "GameFontNormal")
+        AddHeader("Info", gold)
         AddGap(2)
-        AddLine("Favorite: The Moonwell", blue)
-        AddLine("Best Spot: Sunsail Anchorage (41)", dim)
-        AddLine("Tip: Use Moonpearl Lure for rare fish", dim)
+        AddLine("Favorite: The Moonwell", blue, "fave")
+        AddLine("Best Spot: Sunsail Anchorage (41)", dim, "best")
+        AddLine("Tip: Use Moonpearl Lure for rare fish", dim, "tips")
         AddGap(PV_PAD)
 
-        pvContainer:SetSize(PV_W, math.abs(yOff))
+        pvContainer:SetSize(PV_W, math_abs(yOff))
         pvContainer:Show()
+
+        UpdatePreview = function()
+            local textFont = GetFontObj(moduleDB.auraFont or "default", moduleDB.auraTextSize or 13, moduleDB.auraTextOutline or "outline")
+            local headerFont = GetFontObj(moduleDB.auraFont or "default", (moduleDB.auraTextSize or 13) + 2, "thick")
+
+            for _, fs in ipairs(pvHeaders) do fs:SetFontObject(headerFont) end
+            for _, fs in ipairs(pvBodyLines) do fs:SetFontObject(textFont) end
+
+            pvContainer:SetScale(moduleDB.auraScale or 1)
+            pvContainer:SetAlpha(moduleDB.auraOpacity or 0.92)
+
+            local showJunk = moduleDB.auraShowSessionJunk ~= false
+            local showChecklist = moduleDB.auraShowChecklist ~= false
+            local showFave = moduleDB.auraShowFaves ~= false
+            local showBest = moduleDB.auraShowBestSpot ~= false
+            local showTips = moduleDB.auraShowTips ~= false
+
+            for _, fs in ipairs(pvSections.junk) do
+                if showJunk then
+                    fs:SetText("Session: 24 fish | 3 junk")
+                else
+                    fs:SetText("Session: 24 fish")
+                end
+            end
+            for _, fs in ipairs(pvSections.checklist) do
+                if showChecklist then fs:Show() else fs:Hide() end
+            end
+            for _, fs in ipairs(pvSections.fave) do
+                if showFave then fs:Show() else fs:Hide() end
+            end
+            for _, fs in ipairs(pvSections.best) do
+                if showBest then fs:Show() else fs:Hide() end
+            end
+            for _, fs in ipairs(pvSections.tips) do
+                if showTips then fs:Show() else fs:Hide() end
+            end
+        end
+        UpdatePreview()
     end
 end
 
@@ -2614,7 +2836,7 @@ local function SerializeTable(t, indent)
     local isArray = true
     local maxN = 0
     for k in pairs(t) do
-        if type(k) ~= "number" or k < 1 or k ~= math.floor(k) then
+        if type(k) ~= "number" or k < 1 or k ~= math_floor(k) then
             isArray = false
             break
         end
@@ -2802,8 +3024,41 @@ StaticPopupDialogs["GONEFISHIN_RESET_DATA"] = {
         db.bestSpot = nil
         sessionCaught = 0
         sessionCasts = 0
+        sessionJunk = 0
         currentStreak = 0
         print("|cff00ccffGone Fishin':|r All fishing data has been reset.")
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+}
+
+StaticPopupDialogs["GONEFISHIN_RESET_STREAK"] = {
+    text = "Reset your longest streak record? This cannot be undone!",
+    button1 = "Yes, Reset",
+    button2 = "Cancel",
+    OnAccept = function()
+        if not db then return end
+        db.longestStreak = 0
+        currentStreak = 0
+        print("|cff00ccffGone Fishin':|r Streak record has been reset.")
+    end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+}
+
+StaticPopupDialogs["GONEFISHIN_REPAIR_POOLS"] = {
+    text = "Remove false pool entries caused by open water fishing? This corrects pool catch counts but cannot be undone.",
+    button1 = "Yes, Repair",
+    button2 = "Cancel",
+    OnAccept = function()
+        local count = PurgeOpenWaterPoolData()
+        if count > 0 then
+            print(format("|cff00ccffGone Fishin':|r Purged %d false pool entries from open water catches.", count))
+        else
+            print("|cff00ccffGone Fishin':|r No false pool entries found.")
+        end
     end,
     timeout = 0,
     whileDead = true,
@@ -2953,6 +3208,15 @@ local slashCommands = {
             print("|cff00ccffGone Fishin':|r No pool entries to repair.")
         end
     end,
+    ["repairdata"] = function(moduleDB)
+        db = moduleDB
+        local count = PurgeOpenWaterPoolData()
+        if count > 0 then
+            print(format("|cff00ccffGone Fishin':|r Purged %d false pool entries from open water catches.", count))
+        else
+            print("|cff00ccffGone Fishin':|r No false pool entries found.")
+        end
+    end,
 }
 
 -- ============================================================================
@@ -2990,6 +3254,7 @@ local MODULE_DEFAULTS = {
     auraShowTips = true,
     auraShowFaves = true,
     auraShowBestSpot = true,
+    auraShowSessionJunk = true,
     auraHOffset = 200,
     auraVerticalOffset = -20,
     auraScale = 1.0,

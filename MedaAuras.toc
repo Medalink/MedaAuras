@@ -13,9 +13,12 @@ Bindings.xml
 
 # Libraries
 Libs\MedaUI\MedaUI.xml
+Libs\LibSerialize\lib.xml
+Libs\LibDeflate\LibDeflate.lua
 
 # Core
 Core\Core.lua
+Core\CustomModules.lua
 
 # Data (load first, init before domain files)
 Data\RemindersInit.lua
@@ -28,6 +31,7 @@ Data\Recommendations.lua
 Data\GoneFishinFish.lua
 Data\CreatureVO.lua
 Data\Interrupts.lua
+Data\Defensives.lua
 
 # Shared Services (load before modules)
 Services\SpellCastTracker.lua
@@ -46,3 +50,4 @@ Modules\GoneFishin.lua
 Modules\ShutIt.lua
 Modules\LazyCast.lua
 Modules\Interrupted.lua
+Modules\Cracked.lua

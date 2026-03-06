@@ -2,6 +2,16 @@ local _, ns = ...
 
 local MedaUI = LibStub("MedaUI-1.0")
 
+local format = format
+local pairs = pairs
+local ipairs = ipairs
+local wipe = wipe
+local pcall = pcall
+local unpack = unpack
+local CreateFrame = CreateFrame
+local IsInGroup = IsInGroup
+local UnitExists = UnitExists
+
 -- ============================================================================
 -- Constants
 -- ============================================================================

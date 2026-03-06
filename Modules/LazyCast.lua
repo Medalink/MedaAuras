@@ -2,6 +2,14 @@ local _, ns = ...
 
 local MedaUI = LibStub("MedaUI-1.0")
 
+local format = format
+local pairs = pairs
+local ipairs = ipairs
+local wipe = wipe
+local unpack = unpack
+local CreateFrame = CreateFrame
+local UnitExists = UnitExists
+
 local MODULE_NAME = "LazyCast"
 local MODULE_VERSION = "1.0"
 local MODULE_STABILITY = "beta"

@@ -2,6 +2,18 @@ local _, ns = ...
 
 local MedaUI = LibStub("MedaUI-1.0")
 
+local format = format
+local GetTime = GetTime
+local UnitExists = UnitExists
+local pcall = pcall
+local pairs = pairs
+local ipairs = ipairs
+local wipe = wipe
+local unpack = unpack
+local CreateFrame = CreateFrame
+local C_Spell = C_Spell
+local C_Timer = C_Timer
+
 -- ============================================================================
 -- Module Info
 -- ============================================================================
@@ -462,15 +474,15 @@ local function ShowOverlayMode(db)
 
     if not actionBarFrame then
         actionBarFrame = CreateFrame("Frame")
-        actionBarFrame:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
-        actionBarFrame:RegisterEvent("UPDATE_BONUS_ACTIONBAR")
-        actionBarFrame:RegisterEvent("ACTIONBAR_PAGE_CHANGED")
-        actionBarFrame:RegisterEvent("SPELL_UPDATE_USABLE")
         actionBarFrame:SetScript("OnEvent", function(_, event)
             MedaAuras.LogDebug(format("[FIH:Overlay] Re-scanning buttons due to %s", event))
             ScanActionButtons()
         end)
     end
+    actionBarFrame:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
+    actionBarFrame:RegisterEvent("UPDATE_BONUS_ACTIONBAR")
+    actionBarFrame:RegisterEvent("ACTIONBAR_PAGE_CHANGED")
+    actionBarFrame:RegisterEvent("SPELL_UPDATE_USABLE")
     actionBarFrame:Show()
 
     -- Delayed re-scan in case bars weren't ready
@@ -493,6 +505,7 @@ end
 local function HideOverlayMode()
     HideAllOverlays()
     if actionBarFrame then
+        actionBarFrame:UnregisterAllEvents()
         actionBarFrame:Hide()
     end
 end
@@ -614,16 +627,16 @@ local function ShowHookMode(db)
 
     if not hookEventFrame then
         hookEventFrame = CreateFrame("Frame")
-        hookEventFrame:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
-        hookEventFrame:RegisterEvent("UPDATE_BONUS_ACTIONBAR")
-        hookEventFrame:RegisterEvent("ACTIONBAR_PAGE_CHANGED")
-        hookEventFrame:RegisterEvent("SPELL_UPDATE_USABLE")
-        hookEventFrame:RegisterEvent("ACTIONBAR_UPDATE_COOLDOWN")
         hookEventFrame:SetScript("OnEvent", function(_, event)
             if not hookActive then return end
             RescanAllButtonsForHook()
         end)
     end
+    hookEventFrame:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
+    hookEventFrame:RegisterEvent("UPDATE_BONUS_ACTIONBAR")
+    hookEventFrame:RegisterEvent("ACTIONBAR_PAGE_CHANGED")
+    hookEventFrame:RegisterEvent("SPELL_UPDATE_USABLE")
+    hookEventFrame:RegisterEvent("ACTIONBAR_UPDATE_COOLDOWN")
     hookEventFrame:Show()
 
     if #cachedButtons == 0 then
@@ -646,6 +659,7 @@ local function HideHookMode()
     hookActive = false
     HideAllOverlays()
     if hookEventFrame then
+        hookEventFrame:UnregisterAllEvents()
         hookEventFrame:Hide()
     end
 end
@@ -957,6 +971,9 @@ local function OnDisable(db)
     HideIconFrame()
     HideOverlayMode()
     HideHookMode()
+    if activeSpellID then
+        ns.Services.CooldownTimer:Untrack(activeSpellID)
+    end
     activeSpellID = nil
     activeSpellName = nil
     activeIsPetSpell = false
