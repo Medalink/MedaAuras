@@ -29,6 +29,7 @@ local SEVERITY_COLORS = {
     info     = { 0.4, 0.7, 1.0 },
 }
 local COVERED_COLOR = { 0.3, 0.85, 0.3 }
+local RECOMMEND_COLOR = { 1, 0.82, 0 }
 local CHROME_HEIGHT = 88
 
 local CLASS_COLORS = RAID_CLASS_COLORS
@@ -67,6 +68,11 @@ local currentAffixes = nil
 local playerRows = {}
 local playerHeaders = {}
 local playerToolkit = nil
+local playerSectionExpanded = {}
+local playerSectionLastCtxKey = nil
+local GetPreferredStats
+local FindPlayerBuff
+local IsStatRecommended
 
 -- ============================================================================
 -- Logging
@@ -882,6 +888,7 @@ local function EvaluatePlayerToolkit(data, ctx)
         dangers   = filtered,
         tips      = tips,
         lusts     = lusts,
+        interactiveBuffs = dungeonCtx.interactiveBuffs or {},
         header    = dungeonCtx.header or dungeonCtx.name or "Unknown Instance",
         notes     = notes,
         tier      = ctx.difficultyTier or "normal",
@@ -949,6 +956,72 @@ local function ReleasePlayerHeaders()
     wipe(playerHeaders)
 end
 
+-- Dispel school colors (standard WoW convention)
+local DISPEL_COLORS = {
+    dispel_magic   = "3399ff",   -- blue
+    dispel_curse   = "9933cc",   -- purple
+    dispel_poison  = "00cc44",   -- green
+    dispel_disease = "cc8833",   -- brown
+}
+local SPELL_COLOR_DEFAULT = "00ccff" -- cyan fallback
+
+-- Color [Spell Name] references, using dispel-type colors when a spellMap is provided
+local function ColorSpellNames(text, spellMap)
+    if not text then return text end
+    return text:gsub("%[([^%]]+)%]", function(name)
+        local color = SPELL_COLOR_DEFAULT
+        if spellMap and spellMap[name] then
+            color = spellMap[name]
+        end
+        return "|cff" .. color .. "[" .. name .. "]|r"
+    end)
+end
+
+-- Color known mob/NPC names with a distinct mob color (gold)
+local function ColorMobNames(text, mobSet)
+    if not text or not mobSet then return text end
+    for name in pairs(mobSet) do
+        text = text:gsub(name, "|cffddaa44" .. name .. "|r")
+    end
+    return text
+end
+
+-- Build a set of known mob names from danger source fields
+local function BuildMobSet(dangers)
+    local set = {}
+    if not dangers then return set end
+    for _, d in ipairs(dangers) do
+        if d.source and d.source ~= "" then
+            for mob in d.source:gmatch("([^,]+)") do
+                mob = mob:match("^%s*(.-)%s*$")
+                if mob ~= "" then
+                    set[mob] = true
+                end
+            end
+        end
+    end
+    return set
+end
+
+-- Build a map of spell name -> hex color from danger mechanic/capability fields
+local function BuildSpellMap(dangers)
+    local map = {}
+    if not dangers then return map end
+    for _, d in ipairs(dangers) do
+        if d.mechanic and d.capability and DISPEL_COLORS[d.capability] then
+            map[d.mechanic] = DISPEL_COLORS[d.capability]
+        end
+    end
+    return map
+end
+
+-- Apply spell (with dispel-type colors) and mob coloring to a text string
+local function ColorText(text, mobSet, spellMap)
+    text = ColorSpellNames(text, spellMap)
+    text = ColorMobNames(text, mobSet)
+    return text
+end
+
 local function RenderPlayerTab(content)
     if not content then return end
 
@@ -975,46 +1048,103 @@ local function RenderPlayerTab(content)
     local Theme = MedaUI.Theme
     local yOff = -4
 
-    -- Instance briefing
-    local briefHdr = MedaUI:CreateSectionHeader(content, "Instance Briefing", content:GetWidth() - 8)
-    briefHdr:SetPoint("TOPLEFT", 4, yOff)
-    playerHeaders[#playerHeaders + 1] = briefHdr
-    yOff = yOff - 32
-
-    local headerFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    headerFS:SetPoint("TOPLEFT", 8, yOff)
-    headerFS:SetPoint("RIGHT", content, "RIGHT", -8, 0)
-    headerFS:SetJustifyH("LEFT")
-    headerFS:SetWordWrap(true)
-    headerFS:SetText(tk.header)
-    yOff = yOff - headerFS:GetStringHeight() - 4
-
-    local tierLabel = (tk.tier == "mythicplus" and "|cffff8800Mythic+|r") or
-                      (tk.tier == "heroic" and "|cff00ccffHeroic|r") or
-                      "|cff888888Normal|r"
-    local tierFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    tierFS:SetPoint("TOPLEFT", 8, yOff)
-    tierFS:SetTextColor(0.6, 0.6, 0.6)
-    tierFS:SetText("Difficulty: " .. tierLabel)
-    yOff = yOff - 16
-
-    if tk.notes then
-        for _, note in ipairs(tk.notes) do
-            local noteFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            noteFS:SetPoint("TOPLEFT", 12, yOff)
-            noteFS:SetPoint("RIGHT", content, "RIGHT", -8, 0)
-            noteFS:SetJustifyH("LEFT")
-            noteFS:SetWordWrap(true)
-            noteFS:SetTextColor(0.7, 0.7, 0.7)
-            noteFS:SetText("- " .. note)
-            yOff = yOff - noteFS:GetStringHeight() - 2
-        end
+    local ctxKey = tk.instanceName or tk.header or ""
+    if ctxKey ~= playerSectionLastCtxKey then
+        wipe(playerSectionExpanded)
+        playerSectionLastCtxKey = ctxKey
     end
-    yOff = yOff - 8
+
+    local MAX_VISIBLE = 4
+    local mobSet = BuildMobSet(tk.dangers)
+    local spellMap = BuildSpellMap(tk.dangers)
+
+    -- Instance briefing
+    do
+        local noteCount = tk.notes and #tk.notes or 0
+        local briefExpanded = playerSectionExpanded["briefing"] or false
+        local briefHdr = MedaUI:CreateCollapsibleSectionHeader(content, {
+            text = "Instance Briefing",
+            width = content:GetWidth() - 8,
+            count = noteCount,
+            expanded = briefExpanded,
+            onToggle = function(exp)
+                playerSectionExpanded["briefing"] = exp
+                RenderPlayerTab(content)
+            end,
+        })
+        briefHdr:SetPoint("TOPLEFT", 4, yOff)
+        playerHeaders[#playerHeaders + 1] = briefHdr
+        yOff = yOff - 32
+
+        local headerFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        headerFS:SetPoint("TOPLEFT", 8, yOff)
+        headerFS:SetPoint("RIGHT", content, "RIGHT", -8, 0)
+        headerFS:SetJustifyH("LEFT")
+        headerFS:SetWordWrap(true)
+        headerFS:SetText(tk.header)
+        yOff = yOff - headerFS:GetStringHeight() - 4
+
+        local tierLabel = (tk.tier == "mythicplus" and "|cffff8800Mythic+|r") or
+                          (tk.tier == "heroic" and "|cff00ccffHeroic|r") or
+                          "|cff888888Normal|r"
+        local tierFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        tierFS:SetPoint("TOPLEFT", 8, yOff)
+        tierFS:SetTextColor(0.6, 0.6, 0.6)
+        tierFS:SetText("Difficulty: " .. tierLabel)
+        yOff = yOff - 16
+
+        if tk.notes then
+            local showNotes = briefExpanded and noteCount or math.min(MAX_VISIBLE, noteCount)
+            for i = 1, showNotes do
+                local note = tk.notes[i]
+                local noteFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                noteFS:SetPoint("TOPLEFT", 12, yOff)
+                noteFS:SetPoint("RIGHT", content, "RIGHT", -8, 0)
+                noteFS:SetJustifyH("LEFT")
+                noteFS:SetWordWrap(true)
+                noteFS:SetTextColor(0.7, 0.7, 0.7)
+                noteFS:SetText("- " .. ColorText(note, mobSet, spellMap))
+                yOff = yOff - noteFS:GetStringHeight() - 2
+            end
+
+            if noteCount > MAX_VISIBLE then
+                local toggle = MedaUI:CreateExpandToggle(content, {
+                    hiddenCount = noteCount - MAX_VISIBLE,
+                    expanded = briefExpanded,
+                    onToggle = function(exp)
+                        playerSectionExpanded["briefing"] = exp
+                        RenderPlayerTab(content)
+                    end,
+                })
+                toggle:SetPoint("TOPLEFT", 8, yOff)
+                toggle:SetPoint("RIGHT", content, "RIGHT", 0, 0)
+                yOff = yOff - toggle:GetHeight() - 2
+            end
+        end
+        yOff = yOff - 8
+    end
 
     -- Key Dangers
     if #tk.dangers > 0 then
-        local dangerHdr = MedaUI:CreateSectionHeader(content, "Key Dangers", content:GetWidth() - 8)
+        local SEV_WEIGHT = { critical=6, high=5, warning=4, medium=3, info=2, low=1 }
+        table.sort(tk.dangers, function(a, b)
+            return (SEV_WEIGHT[a.severity] or 0) > (SEV_WEIGHT[b.severity] or 0)
+        end)
+
+        local totalDangers = #tk.dangers
+        local dangersExpanded = playerSectionExpanded["dangers"] or false
+        local showDangers = dangersExpanded and totalDangers or math.min(MAX_VISIBLE, totalDangers)
+
+        local dangerHdr = MedaUI:CreateCollapsibleSectionHeader(content, {
+            text = "Key Dangers",
+            width = content:GetWidth() - 8,
+            count = totalDangers,
+            expanded = dangersExpanded,
+            onToggle = function(exp)
+                playerSectionExpanded["dangers"] = exp
+                RenderPlayerTab(content)
+            end,
+        })
         dangerHdr:SetPoint("TOPLEFT", 4, yOff)
         playerHeaders[#playerHeaders + 1] = dangerHdr
         yOff = yOff - 32
@@ -1034,8 +1164,8 @@ local function RenderPlayerTab(content)
         }
 
         local DANGER_ICONS = {
-            interrupt = 132938,  -- Kick icon
-            awareness = 132323,  -- Awareness eye icon
+            interrupt = 132938,
+            awareness = 132323,
             dispel_magic  = 135894,
             dispel_curse  = 135952,
             dispel_poison = 136068,
@@ -1045,7 +1175,8 @@ local function RenderPlayerTab(content)
         }
         local DANGER_ICON_DEFAULT = 136116
 
-        for _, d in ipairs(tk.dangers) do
+        for i = 1, showDangers do
+            local d = tk.dangers[i]
             local accent = DANGER_ACCENT[d.severity] or DANGER_ACCENT.info
             local isInterrupt = d.type == "interrupt"
             local isAwareness = d.type == "awareness"
@@ -1058,7 +1189,12 @@ local function RenderPlayerTab(content)
 
             local icon = DANGER_ICONS[d.type] or DANGER_ICONS[d.capability] or DANGER_ICON_DEFAULT
             row:SetIcon(icon)
-            row:SetLabel(d.mechanic or "Unknown")
+            local mechLabel = d.mechanic or "Unknown"
+            local dispelHex = d.capability and DISPEL_COLORS[d.capability]
+            if dispelHex then
+                mechLabel = "|cff" .. dispelHex .. mechLabel .. "|r"
+            end
+            row:SetLabel(mechLabel)
             row:SetAccentColor(accent[1], accent[2], accent[3])
 
             local srcColored = ""
@@ -1091,7 +1227,7 @@ local function RenderPlayerTab(content)
             if srcColored ~= "" then
                 noteText = srcColored .. "  "
             end
-            noteText = noteText .. (d.tip or "")
+            noteText = noteText .. ColorSpellNames(d.tip or "", spellMap)
             if d.boosted then
                 noteText = noteText .. "  |cffff4400(boosted by affix)|r"
             end
@@ -1112,18 +1248,47 @@ local function RenderPlayerTab(content)
 
             yOff = yOff - row:GetHeight() - 6
         end
+
+        if totalDangers > MAX_VISIBLE then
+            local toggle = MedaUI:CreateExpandToggle(content, {
+                hiddenCount = totalDangers - MAX_VISIBLE,
+                expanded = dangersExpanded,
+                onToggle = function(exp)
+                    playerSectionExpanded["dangers"] = exp
+                    RenderPlayerTab(content)
+                end,
+            })
+            toggle:SetPoint("TOPLEFT", 8, yOff)
+            toggle:SetPoint("RIGHT", content, "RIGHT", 0, 0)
+            yOff = yOff - toggle:GetHeight() - 2
+        end
+
         yOff = yOff - 8
     end
 
     -- Lust Timings
     if tk.lusts and #tk.lusts > 0 then
-        local lustHdr = MedaUI:CreateSectionHeader(content, "Bloodlust Timings", content:GetWidth() - 8)
+        local totalLusts = #tk.lusts
+        local lustsExpanded = playerSectionExpanded["lusts"] or false
+        local showLusts = lustsExpanded and totalLusts or math.min(MAX_VISIBLE, totalLusts)
+
+        local lustHdr = MedaUI:CreateCollapsibleSectionHeader(content, {
+            text = "Bloodlust Timings",
+            width = content:GetWidth() - 8,
+            count = totalLusts,
+            expanded = lustsExpanded,
+            onToggle = function(exp)
+                playerSectionExpanded["lusts"] = exp
+                RenderPlayerTab(content)
+            end,
+        })
         lustHdr:SetPoint("TOPLEFT", 4, yOff)
         playerHeaders[#playerHeaders + 1] = lustHdr
         yOff = yOff - 32
 
         local lustNum = 0
-        for _, lt in ipairs(tk.lusts) do
+        for i = 1, showLusts do
+            local lt = tk.lusts[i]
             lustNum = lustNum + 1
             local pct = lt.pct or 0
             local pctColor
@@ -1170,29 +1335,139 @@ local function RenderPlayerTab(content)
                 yOff = yOff - noteFS:GetStringHeight() - 4
             end
         end
+
+        if totalLusts > MAX_VISIBLE then
+            local toggle = MedaUI:CreateExpandToggle(content, {
+                hiddenCount = totalLusts - MAX_VISIBLE,
+                expanded = lustsExpanded,
+                onToggle = function(exp)
+                    playerSectionExpanded["lusts"] = exp
+                    RenderPlayerTab(content)
+                end,
+            })
+            toggle:SetPoint("TOPLEFT", 8, yOff)
+            toggle:SetPoint("RIGHT", content, "RIGHT", 0, 0)
+            yOff = yOff - toggle:GetHeight() - 2
+        end
+
         yOff = yOff - 8
     end
 
     -- Talent Tips
     if #tk.tips > 0 then
-        local tipHdr = MedaUI:CreateSectionHeader(content, "Talent Tips", content:GetWidth() - 8)
+        local totalTips = #tk.tips
+        local tipsExpanded = playerSectionExpanded["tips"] or false
+        local showTips = tipsExpanded and totalTips or math.min(MAX_VISIBLE, totalTips)
+
+        local tipHdr = MedaUI:CreateCollapsibleSectionHeader(content, {
+            text = "Talent Tips",
+            width = content:GetWidth() - 8,
+            count = totalTips,
+            expanded = tipsExpanded,
+            onToggle = function(exp)
+                playerSectionExpanded["tips"] = exp
+                RenderPlayerTab(content)
+            end,
+        })
         tipHdr:SetPoint("TOPLEFT", 4, yOff)
         playerHeaders[#playerHeaders + 1] = tipHdr
         yOff = yOff - 32
 
-        for _, tt in ipairs(tk.tips) do
+        for i = 1, showTips do
+            local tt = tk.tips[i]
             local icon = tt.known and "|cff4ddb4d+|r " or "|cffffcc00?|r "
             local tipFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
             tipFS:SetPoint("TOPLEFT", 8, yOff)
             tipFS:SetPoint("RIGHT", content, "RIGHT", -8, 0)
             tipFS:SetJustifyH("LEFT")
             tipFS:SetWordWrap(true)
-            tipFS:SetText(icon .. tt.tip)
+            tipFS:SetText(icon .. ColorText(tt.tip, mobSet, spellMap))
             yOff = yOff - tipFS:GetStringHeight() - 4
         end
+
+        if totalTips > MAX_VISIBLE then
+            local toggle = MedaUI:CreateExpandToggle(content, {
+                hiddenCount = totalTips - MAX_VISIBLE,
+                expanded = tipsExpanded,
+                onToggle = function(exp)
+                    playerSectionExpanded["tips"] = exp
+                    RenderPlayerTab(content)
+                end,
+            })
+            toggle:SetPoint("TOPLEFT", 8, yOff)
+            toggle:SetPoint("RIGHT", content, "RIGHT", 0, 0)
+            yOff = yOff - toggle:GetHeight() - 2
+        end
+
         yOff = yOff - 8
     end
 
+    -- Interactive Dungeon Buffs
+    if tk.interactiveBuffs and #tk.interactiveBuffs > 0 then
+        local preferredStats = GetPreferredStats()
+        local buffHdr = MedaUI:CreateSectionHeader(content, "Dungeon Buffs", content:GetWidth() - 8)
+        buffHdr:SetPoint("TOPLEFT", 4, yOff)
+        playerHeaders[#playerHeaders + 1] = buffHdr
+        yOff = yOff - 32
+
+        for _, ib in ipairs(tk.interactiveBuffs) do
+            local ok, detail = FindPlayerBuff(ib.pattern)
+            local recommended = IsStatRecommended(ib.statType, preferredStats)
+
+            local row = MedaUI:CreateStatusRow(content, { iconSize = 24, showNote = true })
+            playerRows[#playerRows + 1] = row
+            row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, yOff)
+            row:SetPoint("RIGHT", content, "RIGHT", 0, 0)
+
+            local labelText = ib.buff
+            if recommended and not ok then
+                labelText = "\226\152\133 " .. labelText
+            end
+            row:SetLabel(labelText)
+
+            if ok then
+                row:SetAccentColor(COVERED_COLOR[1], COVERED_COLOR[2], COVERED_COLOR[3])
+                row:SetStatus(detail or "Active")
+                row:SetHighlight(false)
+            elseif recommended then
+                row:SetAccentColor(RECOMMEND_COLOR[1], RECOMMEND_COLOR[2], RECOMMEND_COLOR[3])
+                row:SetStatus("Recommended", RECOMMEND_COLOR[1], RECOMMEND_COLOR[2], RECOMMEND_COLOR[3])
+                row:SetHighlight(true)
+            else
+                row:SetAccentColor(0.5, 0.5, 0.5)
+                row:SetStatus(ib.effect or "")
+                row:SetHighlight(false)
+            end
+
+            local noteText = ib.location or ""
+            if ib.requires then
+                noteText = noteText .. "  |cffdd8888Requires: " .. ib.requires .. "|r"
+            end
+            row:SetNote(noteText)
+
+            row:SetTooltipFunc(function(_, tip)
+                tip:AddLine(ib.buff, 1, 0.82, 0)
+                tip:AddLine(ib.effect, 1, 1, 1, true)
+                if ib.location and ib.location ~= "" then
+                    tip:AddLine("Location: " .. ib.location, 0.7, 0.7, 0.7, true)
+                end
+                if ib.requires then
+                    tip:AddLine("Requires: " .. ib.requires, 0.9, 0.5, 0.5, true)
+                end
+                if recommended then
+                    tip:AddLine(" ")
+                    tip:AddLine("Matches your spec's preferred stats", RECOMMEND_COLOR[1], RECOMMEND_COLOR[2], RECOMMEND_COLOR[3])
+                end
+                if ib.tip and ib.tip ~= "" then
+                    tip:AddLine(" ")
+                    tip:AddLine(ib.tip, 1, 1, 1, true)
+                end
+            end)
+
+            yOff = yOff - row:GetHeight() - 6
+        end
+        yOff = yOff - 8
+    end
 
     if coveragePanel then coveragePanel:SetContentHeight(CHROME_HEIGHT + math.abs(yOff) + 8) end
 end
@@ -1448,6 +1723,102 @@ local function RenderPanel(results)
         end
     end
 
+    -- Interactive Dungeon Buffs
+    local dungeonCtx = lastContext.instanceID
+        and data.contexts
+        and data.contexts.dungeons
+        and data.contexts.dungeons[lastContext.instanceID]
+    local interactiveBuffs = dungeonCtx and dungeonCtx.interactiveBuffs
+    if interactiveBuffs and #interactiveBuffs > 0 then
+        local preferredStats = GetPreferredStats()
+        local GI = ns.Services.GroupInspector
+        local groupCache = GI and GI:GetAllCached() or {}
+
+        local buffHdr = MedaUI:CreateSectionHeader(content, "Dungeon Buffs", content:GetWidth() - 8)
+        buffHdr:SetPoint("TOPLEFT", 4, yOff)
+        sectionHeaders[#sectionHeaders + 1] = buffHdr
+        yOff = yOff - 32
+
+        for _, ib in ipairs(interactiveBuffs) do
+            local reqClasses = ib.requiredClasses
+            local hasReq = reqClasses and #reqClasses > 0
+            local coveredBy = nil
+
+            if hasReq then
+                local reqSet = {}
+                for _, cls in ipairs(reqClasses) do reqSet[cls] = true end
+                for _, member in pairs(groupCache) do
+                    if member.class and reqSet[member.class] then
+                        coveredBy = member
+                        break
+                    end
+                end
+            end
+
+            local recommended = IsStatRecommended(ib.statType, preferredStats)
+            local row = AcquireRow(content)
+            activeRows[#activeRows + 1] = row
+            row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, yOff)
+            row:SetPoint("RIGHT", content, "RIGHT", 0, 0)
+
+            local labelText = ib.buff
+            if recommended then
+                labelText = "\226\152\133 " .. labelText
+            end
+            row:SetLabel(labelText)
+
+            if not hasReq then
+                row:SetAccentColor(COVERED_COLOR[1], COVERED_COLOR[2], COVERED_COLOR[3])
+                row:SetStatus("Anyone")
+                row:SetHighlight(false)
+                row:SetNote(ib.effect or "")
+            elseif coveredBy then
+                local cc = CLASS_COLORS[coveredBy.class]
+                local cr, cg, cb = 1, 1, 1
+                if cc then cr, cg, cb = cc.r, cc.g, cc.b end
+                row:SetAccentColor(COVERED_COLOR[1], COVERED_COLOR[2], COVERED_COLOR[3])
+                row:SetStatus(format("|cff%02x%02x%02x%s|r", cr*255, cg*255, cb*255, coveredBy.name))
+                row:SetHighlight(false)
+                row:SetNote(ib.effect or "")
+            else
+                local warnColor = SEVERITY_COLORS.warning or { 1, 0.6, 0.2 }
+                row:SetAccentColor(warnColor[1], warnColor[2], warnColor[3])
+                row:SetStatus("Missing", warnColor[1], warnColor[2], warnColor[3])
+                row:SetHighlight(true)
+                row:SetNote(ib.requires or "Requires specific class")
+            end
+
+            row:SetTooltipFunc(function(_, tip)
+                tip:AddLine(ib.buff, 1, 0.82, 0)
+                tip:AddLine(ib.effect, 1, 1, 1, true)
+                if ib.location and ib.location ~= "" then
+                    tip:AddLine("Location: " .. ib.location, 0.7, 0.7, 0.7, true)
+                end
+                if hasReq then
+                    if coveredBy then
+                        local cc = CLASS_COLORS[coveredBy.class]
+                        local cr, cg, cb = 1, 1, 1
+                        if cc then cr, cg, cb = cc.r, cc.g, cc.b end
+                        tip:AddLine(format("Can be activated by: %s", coveredBy.name), cr, cg, cb)
+                    else
+                        tip:AddLine("Requires: " .. (ib.requires or "specific class"), 0.9, 0.5, 0.5, true)
+                    end
+                end
+                if recommended then
+                    tip:AddLine(" ")
+                    tip:AddLine("Matches your spec's preferred stats", RECOMMEND_COLOR[1], RECOMMEND_COLOR[2], RECOMMEND_COLOR[3])
+                end
+                if ib.tip and ib.tip ~= "" then
+                    tip:AddLine(" ")
+                    tip:AddLine(ib.tip, 1, 1, 1, true)
+                end
+            end)
+
+            yOff = yOff - row:GetHeight() - 8
+        end
+        yOff = yOff - 8
+    end
+
     -- Personal reminders footer
     if #personalReminders > 0 and db and db.personalReminders ~= false then
         local first = personalReminders[1]
@@ -1561,19 +1932,6 @@ local function RenderTalentsTab(content)
     local yOff = -4
     local ctx = lastContext or {}
     local Theme = MedaUI.Theme
-
-    -- Source freshness
-    local freshnessText = BuildSourceFreshnessLine()
-    if freshnessText then
-        local freshFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        freshFS:SetPoint("TOPLEFT", 8, yOff)
-        freshFS:SetPoint("RIGHT", content, "RIGHT", -8, 0)
-        freshFS:SetJustifyH("LEFT")
-        freshFS:SetWordWrap(true)
-        freshFS:SetTextColor(0.5, 0.5, 0.5)
-        freshFS:SetText(freshnessText)
-        yOff = yOff - freshFS:GetStringHeight() - 6
-    end
 
     -- Dungeon talent notes
     local talentNote = GetDungeonTalentNotes(data, ctx)
@@ -1887,13 +2245,49 @@ local function ReleasePrepHeaders()
     wipe(prepHeaders)
 end
 
-local function FindPlayerBuff(pattern)
+FindPlayerBuff = function(pattern)
     for i = 1, 40 do
         local aura = C_UnitAuras.GetBuffDataByIndex("player", i)
         if not aura then break end
         if aura.name and aura.name:match(pattern) then return true, aura.name end
     end
     return false, nil
+end
+
+GetPreferredStats = function()
+    local data = GetData()
+    if not data or not data.recommendations then return {} end
+    local classToken = select(2, UnitClass("player"))
+    local specIdx = GetSpecialization()
+    if not classToken or not specIdx then return {} end
+    local specID = GetSpecializationInfo(specIdx)
+    if not specID then return {} end
+    local key = classToken .. "_" .. specID
+    local recs = data.recommendations[key]
+    if not recs then return {} end
+    local PRIMARY = { Strength = true, Agility = true, Intellect = true }
+    for _, rec in ipairs(recs) do
+        if rec.buildType == "stats" and rec.content then
+            local sorted = {}
+            for stat, weight in pairs(rec.content) do
+                if not PRIMARY[stat] then
+                    sorted[#sorted + 1] = { stat = stat, weight = weight }
+                end
+            end
+            table.sort(sorted, function(a, b) return a.weight > b.weight end)
+            return sorted
+        end
+    end
+    return {}
+end
+
+local function IsStatRecommended(statType, preferredStats, topN)
+    if not statType or #preferredStats == 0 then return false end
+    topN = topN or 2
+    for i = 1, math.min(topN, #preferredStats) do
+        if preferredStats[i].stat == statType then return true end
+    end
+    return false
 end
 
 local PREP_CHECKS = {
@@ -1951,19 +2345,6 @@ local function RenderPrepTab(content)
     local Theme = MedaUI.Theme
     local yOff = -4
     local ctx = lastContext or {}
-
-    -- Source freshness
-    local freshnessText = BuildSourceFreshnessLine()
-    if freshnessText then
-        local freshFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        freshFS:SetPoint("TOPLEFT", 8, yOff)
-        freshFS:SetPoint("RIGHT", content, "RIGHT", -8, 0)
-        freshFS:SetJustifyH("LEFT")
-        freshFS:SetWordWrap(true)
-        freshFS:SetTextColor(0.5, 0.5, 0.5)
-        freshFS:SetText(freshnessText)
-        yOff = yOff - freshFS:GetStringHeight() - 6
-    end
 
     -- Affix summary at top of prep tab
     if currentAffixes then
@@ -2034,6 +2415,84 @@ local function RenderPrepTab(content)
     end
 
     yOff = yOff - 8
+
+    -- Dungeon Interactive Buffs
+    local dungeonCtx = ResolveInstanceContext(data, ctx)
+    local interactiveBuffs = dungeonCtx and dungeonCtx.interactiveBuffs
+    if interactiveBuffs and #interactiveBuffs > 0 then
+        local preferredStats = GetPreferredStats()
+        local buffHdr = MedaUI:CreateSectionHeader(content, "Dungeon Buffs", content:GetWidth() - 8)
+        buffHdr:SetPoint("TOPLEFT", 4, yOff)
+        prepHeaders[#prepHeaders + 1] = buffHdr
+        yOff = yOff - 32
+
+        for _, ib in ipairs(interactiveBuffs) do
+            local ok, detail = FindPlayerBuff(ib.pattern)
+            local recommended = IsStatRecommended(ib.statType, preferredStats)
+            local statusColor, statusText
+
+            if ok then
+                statusColor = COVERED_COLOR
+                statusText = detail or "Active"
+            elseif recommended then
+                statusColor = RECOMMEND_COLOR
+                statusText = "Recommended"
+            else
+                statusColor = SEVERITY_COLORS.info
+                statusText = ib.effect or ""
+            end
+
+            local buffFrame = CreateFrame("Frame", nil, content)
+            buffFrame:SetHeight(24)
+            buffFrame:SetPoint("TOPLEFT", 8, yOff)
+            buffFrame:SetPoint("RIGHT", content, "RIGHT", -8, 0)
+            prepRows[#prepRows + 1] = buffFrame
+
+            local labelText = ib.buff
+            if recommended and not ok then
+                labelText = "\226\152\133 " .. labelText
+            end
+            local labelFS = buffFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            labelFS:SetPoint("LEFT", 0, 0)
+            labelFS:SetText(labelText)
+            if recommended and not ok then
+                labelFS:SetTextColor(RECOMMEND_COLOR[1], RECOMMEND_COLOR[2], RECOMMEND_COLOR[3])
+            end
+
+            local statusFS = buffFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            statusFS:SetPoint("RIGHT", 0, 0)
+            statusFS:SetTextColor(statusColor[1], statusColor[2], statusColor[3])
+            statusFS:SetText(statusText)
+
+            buffFrame:EnableMouse(true)
+            buffFrame:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                GameTooltip:AddLine(ib.buff, 1, 0.82, 0)
+                GameTooltip:AddLine(ib.effect, 1, 1, 1, true)
+                if ib.location and ib.location ~= "" then
+                    GameTooltip:AddLine("Location: " .. ib.location, 0.7, 0.7, 0.7, true)
+                end
+                if ib.requires then
+                    GameTooltip:AddLine("Requires: " .. ib.requires, 0.9, 0.5, 0.5, true)
+                end
+                if recommended then
+                    GameTooltip:AddLine(" ")
+                    GameTooltip:AddLine("Matches your spec's preferred stats", RECOMMEND_COLOR[1], RECOMMEND_COLOR[2], RECOMMEND_COLOR[3])
+                end
+                if ib.tip and ib.tip ~= "" then
+                    GameTooltip:AddLine(" ")
+                    GameTooltip:AddLine(ib.tip, 1, 1, 1, true)
+                end
+                GameTooltip:Show()
+            end)
+            buffFrame:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+            buffFrame:Show()
+            yOff = yOff - 26
+        end
+
+        yOff = yOff - 8
+    end
 
     -- Recommended consumables from data
     local _, playerClass = UnitClass("player")
@@ -2139,6 +2598,12 @@ local function ShowBannerIfNeeded(results)
 end
 
 
+local function RefreshFreshnessBar()
+    if not coveragePanel then return end
+    local text = BuildSourceFreshnessLine()
+    coveragePanel:SetStatusBar(text or "", 0.5, 0.5, 0.5)
+end
+
 -- ============================================================================
 -- Evaluation + render pipeline
 -- ============================================================================
@@ -2176,6 +2641,8 @@ local function RunPipeline(clearDismiss)
         coveragePanel:SetTitle(ctxName or "Group Coverage")
     end
 
+    RefreshFreshnessBar()
+
     RenderPanel(results)
     ShowBannerIfNeeded(results)
 
@@ -2204,7 +2671,7 @@ local function RunPipeline(clearDismiss)
     end
 
     -- Auto-show panel only when inside an instance (not in cities/open world)
-    if coveragePanel and not dismissed and lastContext and lastContext.inInstance then
+    if db.autoShowInInstance ~= false and coveragePanel and not dismissed and lastContext and lastContext.inInstance then
         coveragePanel:Show()
     end
 end
@@ -2468,6 +2935,8 @@ local function StopModule()
     ReleasePlayerRows()
     ReleasePlayerHeaders()
     wipe(tabRendered)
+    wipe(playerSectionExpanded)
+    playerSectionLastCtxKey = nil
     currentAffixes = nil
     playerToolkit = nil
 
@@ -2772,6 +3241,12 @@ local function BuildConfig(parent, moduleDB)
             if coveragePanel then coveragePanel:SetLocked(val) end
         end
         lockCb:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        yOff = yOff - 28
+
+        local autoShowCb = MedaUI:CreateCheckbox(p, "Auto-show on instance entrance")
+        autoShowCb:SetChecked(db.autoShowInInstance ~= false)
+        autoShowCb.OnValueChanged = function(_, val) db.autoShowInInstance = val end
+        autoShowCb:SetPoint("TOPLEFT", LEFT_X, yOff)
         yOff = yOff - 34
 
         local talHdr = MedaUI:CreateSectionHeader(p, "Talent")
@@ -3058,6 +3533,16 @@ local slashCommands = {
     end,
 }
 
+SLASH_MEDAREMINDERS1 = "/mr"
+SlashCmdList["MEDAREMINDERS"] = function()
+    if coveragePanel then
+        dismissed = false
+        coveragePanel:ClearDismissed()
+        RunPipeline(false)
+        coveragePanel:Show()
+    end
+end
+
 -- ============================================================================
 -- Defaults & Registration
 -- ============================================================================
@@ -3066,6 +3551,7 @@ local MODULE_DEFAULTS = {
     enabled = false,
     locked = false,
     showMinimapButton = true,
+    autoShowInInstance = true,
     personalReminders = true,
 
     panelWidth = 640,
