@@ -1033,13 +1033,13 @@ local MODULE_DEFAULTS = {
     locked = false,
     position = { point = "CENTER", x = 0, y = 0 },
     iconSize = 48,
-    overlayAlpha = 0.35,
-    colorReady = { r = 0,   g = 0.8, b = 0   },
-    colorOOR   = { r = 0.8, g = 0,   b = 0   },
-    colorOnCD  = { r = 1,   g = 0.5, b = 0   },
-    focusOnly = false,
+    overlayAlpha = 0.6,
+    colorReady = { r = 0.2, g = 0.8, b = 0.2 },
+    colorOOR   = { r = 1,   g = 0.6, b = 0   },
+    colorOnCD  = { r = 0.8, g = 0.2, b = 0.2 },
+    focusOnly = true,
     spellID = nil,
-    cooldownDuration = nil,
+    cooldownDuration = 24,
     cooldownManual = false,
     iconSpellID = nil,
 }
@@ -1332,15 +1332,6 @@ local function BuildConfig(parent, db)
         yOff = yOff - 30
     end
 
-    local resetBtn = MedaUI:CreateButton(parent, "Reset to Defaults")
-    resetBtn:SetPoint("TOPLEFT", LEFT_X, yOff)
-    resetBtn:SetScript("OnClick", function()
-        for k, v in pairs(MODULE_DEFAULTS) do db[k] = MedaAuras.DeepCopy(v) end
-        MedaAuras:ToggleSettings()
-        MedaAuras:ToggleSettings()
-    end)
-    yOff = yOff - 45
-
     MedaAuras:SetContentHeight(math.abs(yOff))
 
     local sentinel = CreateFrame("Frame", nil, parent)
@@ -1365,6 +1356,7 @@ MedaAuras:RegisterModule({
     title = "Focus Interrupt Helper",
     version = MODULE_VERSION,
     stability = MODULE_STABILITY,
+    author = "Medalink",
     description = "Highlights your interrupt spell based on range and cooldown status of focus/target.",
     sidebarDesc = "Highlights your interrupt spell based on focus target interruptability.",
     defaults = MODULE_DEFAULTS,

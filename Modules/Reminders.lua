@@ -3091,6 +3091,7 @@ MedaAuras:RegisterModule({
     title         = "Reminders",
     version       = MODULE_VERSION,
     stability     = MODULE_STABILITY,
+    author        = "Medalink",
     description   = "Data-driven group composition checker and dungeon prep assistant. "
                  .. "Shows dispel coverage, utility gaps, interrupt priorities, affix tips, "
                  .. "full build recommendations (talents, stats, gear, enchants, consumables), "

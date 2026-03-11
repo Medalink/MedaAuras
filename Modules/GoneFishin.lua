@@ -2933,13 +2933,7 @@ local function ShowExportWindow()
     exportFrame = CreateFrame("Frame", "GoneFishinExportFrame", UIParent, "BackdropTemplate")
     exportFrame:SetSize(600, 400)
     exportFrame:SetPoint("CENTER")
-    exportFrame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
-    exportFrame:SetBackdropColor(0.08, 0.08, 0.08, 0.95)
-    exportFrame:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
+    MedaUI:ApplyBackdrop(exportFrame, "backgroundDark", "border")
     exportFrame:SetMovable(true)
     exportFrame:EnableMouse(true)
     exportFrame:RegisterForDrag("LeftButton")
@@ -3248,7 +3242,7 @@ local MODULE_DEFAULTS = {
     collectionSort = "missing",
 
     auraEnabled = true,
-    auraLockPanels = true,
+    auraLockPanels = false,
     auraShowChecklist = true,
     auraShowRecent = true,
     auraShowTips = true,
@@ -3265,7 +3259,7 @@ local MODULE_DEFAULTS = {
     auraTextOutline = "outline",
     auraFadeIn = 0.4,
     auraFadeOut = 0.6,
-    auraHideDelay = 2,
+    auraHideDelay = 8,
 
     leftPanelPos = nil,
     rightPanelPos = nil,
@@ -3285,6 +3279,7 @@ MedaAuras:RegisterModule({
     title         = "Gone Fishin'",
     version       = MODULE_VERSION,
     stability     = MODULE_STABILITY,
+    author        = "Medalink",
     description   = "Tracks every fish and item caught while fishing. "
                  .. "Displays a three-panel HUD with zone stats, a zone fish checklist "
                  .. "(with collapsible junk and missing sections), and favorites/tips. "

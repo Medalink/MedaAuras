@@ -192,11 +192,7 @@ local function CreateBarDisplay(parent, db)
 
     local d = CreateFrame("Frame", nil, parent, "BackdropTemplate")
     d:SetAllPoints()
-    d:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8x8",
-        edgeFile = "Interface\\Buttons\\WHITE8x8",
-        edgeSize = 1,
-    })
+    d:SetBackdrop(MedaUI:CreateBackdrop(true))
     local bgc = db.backgroundColor or DEFAULT_BG_COLOR
     d:SetBackdropColor(bgc[1], bgc[2], bgc[3], db.backgroundOpacity or 0.8)
     d:SetBackdropBorderColor(DEFAULT_BORDER_COLOR[1], DEFAULT_BORDER_COLOR[2], DEFAULT_BORDER_COLOR[3], DEFAULT_BORDER_COLOR[4])
@@ -797,14 +793,14 @@ local MODULE_DEFAULTS = {
     orbFillTexture = "solid",
 
     -- Shared visual settings
-    backgroundColor = { 0.1, 0.1, 0.2, 1.0 },
-    manaColor = { 0.0, 0.56, 1.0, 1.0 },
-    borderColor = { 0.2, 0.4, 0.7, 1.0 },
+    backgroundColor = { 0.1, 0.1, 0.1, 1.0 },
+    manaColor = { 0.0, 0.44, 0.87, 1.0 },
+    borderColor = { 0.3, 0.3, 0.3, 1.0 },
     backgroundOpacity = 0.8,
     showBorder = true,
-    showOuterBorder = true,
+    showOuterBorder = false,
     outerBorderSize = 2,
-    outerBorderColor = { 0.0, 0.0, 0.0, 1.0 },
+    outerBorderColor = { 0.1, 0.1, 0.1, 1.0 },
     showText = true,
     showPercentage = true,
     textSize = 14,
@@ -1109,15 +1105,6 @@ local function BuildConfig(parent, db)
         end
         yOff = yOff - 50
 
-        local resetBtn = MedaUI:CreateButton(p, "Reset to Defaults")
-        resetBtn:SetPoint("TOPLEFT", LEFT_X, yOff)
-        resetBtn:SetScript("OnClick", function()
-            for k, v in pairs(MODULE_DEFAULTS) do
-                db[k] = MedaAuras.DeepCopy(v)
-            end
-            MedaAuras:ToggleSettings()
-            MedaAuras:ToggleSettings()
-        end)
     end
 
     MedaAuras:SetContentHeight(500)
@@ -1140,6 +1127,7 @@ MedaAuras:RegisterModule({
     title = "Mana Tracker",
     version = MODULE_VERSION,
     stability = MODULE_STABILITY,
+    author = "Medalink",
     description = "Displays your mana regardless of form or combat state.",
     sidebarDesc = "Displays your mana regardless of current form or combat state.",
     defaults = MODULE_DEFAULTS,

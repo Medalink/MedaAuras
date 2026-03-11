@@ -1098,113 +1098,25 @@ end
 -- Export / Import Popup
 -- ============================================================================
 
-local exportImportFrame
+local exportImportDialog
 
 ShowExportImportPopup = function(mode, text)
-    if not exportImportFrame then
-        exportImportFrame = CreateFrame("Frame", "MedaAurasShutItExportImport", UIParent, "BackdropTemplate")
-        exportImportFrame:SetSize(480, 220)
-        exportImportFrame:SetPoint("CENTER")
-        exportImportFrame:SetBackdrop(MedaUI:CreateBackdrop(true))
-        exportImportFrame:SetFrameStrata("FULLSCREEN_DIALOG")
-        exportImportFrame:SetMovable(true)
-        exportImportFrame:EnableMouse(true)
-        exportImportFrame:RegisterForDrag("LeftButton")
-        exportImportFrame:SetScript("OnDragStart", exportImportFrame.StartMoving)
-        exportImportFrame:SetScript("OnDragStop", exportImportFrame.StopMovingOrSizing)
-
-        local function ApplyTheme()
-            local Theme = MedaUI.Theme
-            exportImportFrame:SetBackdropColor(unpack(Theme.backgroundDark))
-            exportImportFrame:SetBackdropBorderColor(unpack(Theme.border))
-        end
-        MedaUI:RegisterThemedWidget(exportImportFrame, ApplyTheme)
-        ApplyTheme()
-
-        exportImportFrame.title = exportImportFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        exportImportFrame.title:SetPoint("TOP", 0, -10)
-
-        local scrollBg = CreateFrame("Frame", nil, exportImportFrame, "BackdropTemplate")
-        scrollBg:SetPoint("TOPLEFT", 12, -32)
-        scrollBg:SetPoint("BOTTOMRIGHT", -12, 42)
-        scrollBg:SetBackdrop(MedaUI:CreateBackdrop(true))
-        scrollBg:SetBackdropColor(0.05, 0.05, 0.08, 0.9)
-        scrollBg:SetBackdropBorderColor(0.3, 0.3, 0.3, 0.5)
-
-        local scrollParent = MedaUI:CreateScrollFrame(scrollBg)
-        Pixel.SetPoint(scrollParent, "TOPLEFT", 6, -6)
-        Pixel.SetPoint(scrollParent, "BOTTOMRIGHT", -6, 6)
-        scrollParent:SetScrollStep(40)
-
-        local editBox = CreateFrame("EditBox", nil, scrollParent.scrollContent)
-        editBox:SetMultiLine(true)
-        editBox:SetAutoFocus(false)
-        editBox:SetFontObject("ChatFontNormal")
-        editBox:SetMaxLetters(0)
-        editBox:SetPoint("TOPLEFT")
-        editBox:SetPoint("TOPRIGHT")
-        editBox:SetHeight(200)
-        editBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-
-        local function RecalcEditBoxHeight()
-            local w = editBox:GetWidth()
-            if w < 1 then return end
-            local textH = editBox:GetHeight()
-            scrollParent:SetContentHeight(textH, true, true)
-        end
-        exportImportFrame.RecalcEditBoxHeight = RecalcEditBoxHeight
-
-        editBox:HookScript("OnTextChanged", function()
-            RecalcEditBoxHeight()
-        end)
-        exportImportFrame.editBox = editBox
-
-        scrollBg:SetScript("OnMouseDown", function()
-            editBox:SetFocus()
-        end)
-        scrollParent.scrollFrame:EnableMouse(true)
-        scrollParent.scrollFrame:SetScript("OnMouseDown", function()
-            editBox:SetFocus()
-        end)
-
-        local closeBtn = MedaUI:CreateButton(exportImportFrame, "Close")
-        closeBtn:SetSize(80, 24)
-        closeBtn:SetPoint("BOTTOMRIGHT", -12, 12)
-        closeBtn:SetScript("OnClick", function() exportImportFrame:Hide() end)
-
-        local importBtn = MedaUI:CreateButton(exportImportFrame, "Import")
-        importBtn:SetSize(80, 24)
-        importBtn:SetPoint("RIGHT", closeBtn, "LEFT", -8, 0)
-        exportImportFrame.importBtn = importBtn
+    if not exportImportDialog then
+        exportImportDialog = MedaUI:CreateImportExportDialog({ width = 480, height = 220 })
     end
-
-    local frame = exportImportFrame
-    local editBox = frame.editBox
 
     local function RaiseAboveExplorer()
         if explorerPanel then
             local level = explorerPanel:GetFrameLevel()
-            frame:SetFrameLevel(level + 50)
+            exportImportDialog.frame:SetFrameLevel(level + 50)
         end
     end
 
     if mode == "export" then
-        frame.title:SetText("Export - Copy this string")
-        frame.title:SetTextColor(1, 0.82, 0)
-        editBox:SetText(text or "")
-        frame.importBtn:Hide()
-        frame:Show()
+        exportImportDialog:ShowExport("Export - Copy this string", text)
         RaiseAboveExplorer()
-        C_Timer.After(0, function() frame.RecalcEditBoxHeight() end)
-        editBox:SetFocus()
-        editBox:HighlightText()
     else
-        frame.title:SetText("Import - Paste string below")
-        frame.title:SetTextColor(0.4, 0.8, 1)
-        editBox:SetText("")
-        frame.importBtn:Show()
-        frame.importBtn:SetScript("OnClick", function()
-            local str = editBox:GetText()
+        exportImportDialog:ShowImport("Import - Paste string below", "", function(str)
             local entries, err = ParseImportString(str)
             if not entries then
                 print(format("%s Import failed: %s", PREFIX, err or "unknown error"))
@@ -1220,16 +1132,14 @@ ShowExportImportPopup = function(mode, text)
             end
             RebuildNameLookup()
             print(format("%s Imported %d NPC(s).", PREFIX, count))
-            frame:Hide()
+            exportImportDialog:Hide()
             if explorerPanel and explorerPanel:IsShown() then
                 RefreshSidebar()
                 RefreshDetail()
             end
             MedaAuras:RefreshModuleConfig()
         end)
-        frame:Show()
         RaiseAboveExplorer()
-        editBox:SetFocus()
     end
 end
 
@@ -1541,21 +1451,6 @@ local function BuildConfig(parent, moduleDB)
     end)
     yOff = yOff - 40
 
-    -- Reset
-    local resetBtn = MedaUI:CreateButton(parent, "Reset to Defaults")
-    resetBtn:SetPoint("TOPLEFT", 0, yOff)
-    resetBtn:SetScript("OnClick", function()
-        RemoveAllMutes()
-        for k, v in pairs(MODULE_DEFAULTS) do
-            moduleDB[k] = MedaAuras.DeepCopy(v)
-        end
-        RebuildNameLookup()
-        StopLiveCapture()
-        MedaAuras:ToggleSettings()
-        MedaAuras:ToggleSettings()
-    end)
-    yOff = yOff - 45
-
     MedaAuras:SetContentHeight(math.abs(yOff))
 end
 
@@ -1647,6 +1542,7 @@ MedaAuras:RegisterModule({
     title         = "Shut It",
     version       = MODULE_VERSION,
     stability     = MODULE_STABILITY,
+    author        = "Medalink",
     description   = "Silence annoying NPCs. Target an NPC and click the minimap button to "
                  .. "instantly mute their chat, talking heads, and voice lines. Supports live "
                  .. "capture during delves and dungeons, manual NPC lookup by name or ID, "
@@ -1656,6 +1552,11 @@ MedaAuras:RegisterModule({
     OnInitialize  = OnInitialize,
     OnEnable      = OnEnable,
     OnDisable     = OnDisable,
+    OnResetDefaults = function()
+        RemoveAllMutes()
+        RebuildNameLookup()
+        StopLiveCapture()
+    end,
     BuildConfig   = BuildConfig,
     slashCommands = slashCommands,
 })

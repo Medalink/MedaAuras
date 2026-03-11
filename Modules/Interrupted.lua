@@ -932,8 +932,8 @@ local MODULE_DEFAULTS = {
     showReady = true,
     showInDungeon = true,
     showInRaid = false,
-    showInOpenWorld = true,
-    showInArena = false,
+    showInOpenWorld = false,
+    showInArena = true,
     showInBG = false,
     position = { point = "CENTER", x = 0, y = -150 },
 }
@@ -1271,15 +1271,6 @@ local function BuildConfig(parent, moduleDB)
 
     yOff = yOff - 10
 
-    local resetBtn = MedaUI:CreateButton(parent, "Reset to Defaults")
-    resetBtn:SetPoint("TOPLEFT", LEFT_X, yOff)
-    resetBtn:SetScript("OnClick", function()
-        for k, v in pairs(MODULE_DEFAULTS) do moduleDB[k] = MedaAuras.DeepCopy(v) end
-        MedaAuras:ToggleSettings()
-        MedaAuras:ToggleSettings()
-    end)
-    yOff = yOff - 45
-
     MedaAuras:SetContentHeight(math.abs(yOff))
 end
 
@@ -1292,6 +1283,7 @@ MedaAuras:RegisterModule({
     title       = "Interrupted",
     version     = MODULE_VERSION,
     stability   = MODULE_STABILITY,
+    author      = "Medalink",
     description = "Tracks party interrupt cooldowns in M+ and dungeons. "
                .. "Detects when party members use their kick and displays "
                .. "cooldown bars for each player, colored by class.",

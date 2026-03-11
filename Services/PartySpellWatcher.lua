@@ -18,6 +18,18 @@ local PartySpellWatcher = {}
 ns.Services.PartySpellWatcher = PartySpellWatcher
 
 -- ============================================================================
+-- Taint-safe string helper (must be first -- used everywhere below)
+-- ============================================================================
+
+local function SafeStr(value)
+    local ok, str = pcall(tostring, value)
+    if not ok then return "<secret>" end
+    local clean = pcall(function() return str == str end)
+    if not clean then return "<secret>" end
+    return str
+end
+
+-- ============================================================================
 -- Logging helpers (must be first -- laundering callbacks can fire at load time)
 -- ============================================================================
 
@@ -70,7 +82,7 @@ local function LaunderSpellID(taintedID)
     local cleanID = barResult or sliderResult
     if not cleanID then
         LogDebug(format("LaunderSpellID FAILED: barOk=%s barErr=%s sliderOk=%s sliderErr=%s",
-            tostring(barOk), tostring(barErr), tostring(sliderOk), tostring(sliderErr)))
+            tostring(barOk), SafeStr(barErr), tostring(sliderOk), SafeStr(sliderErr)))
     end
     return cleanID, {
         barOk = barOk,
@@ -276,7 +288,7 @@ local function FireInterrupt(name, spellID, unit)
     for handle, func in pairs(interruptCallbacks) do
         local ok, err = pcall(func, name, spellID, unit)
         if not ok then
-            MedaAuras.LogWarn(format("[PartySpellWatcher] callback[%d] error: %s", handle, tostring(err)))
+            MedaAuras.LogWarn(format("[PartySpellWatcher] callback[%d] error: %s", handle, SafeStr(err)))
         end
     end
 end
@@ -285,7 +297,7 @@ local function FireMobKick(name)
     for handle, func in pairs(mobKickCallbacks) do
         local ok, err = pcall(func, name)
         if not ok then
-            MedaAuras.LogWarn(format("[PartySpellWatcher] mob-kick callback[%d] error: %s", handle, tostring(err)))
+            MedaAuras.LogWarn(format("[PartySpellWatcher] mob-kick callback[%d] error: %s", handle, SafeStr(err)))
         end
     end
 end
@@ -296,7 +308,7 @@ local function FireAnySpell(name, spellID, unit)
         count = count + 1
         local ok, err = pcall(func, name, spellID, unit)
         if not ok then
-            MedaAuras.LogWarn(format("[PartySpellWatcher] any-spell callback[%d] error: %s", handle, tostring(err)))
+            MedaAuras.LogWarn(format("[PartySpellWatcher] any-spell callback[%d] error: %s", handle, SafeStr(err)))
         end
     end
     if count > 0 then
@@ -371,11 +383,11 @@ local function FireSpellMatches(name, taintedID, unit, cleanID, launderInfo, cas
             castID,
             handle,
             label,
-            tostring(name),
-            tostring(unit),
-            tostring(cleanID),
-            tostring(launderInfo and launderInfo.barOk),
-            tostring(launderInfo and launderInfo.sliderOk),
+            SafeStr(name),
+            SafeStr(unit),
+            SafeStr(cleanID),
+            SafeStr(launderInfo and launderInfo.barOk),
+            SafeStr(launderInfo and launderInfo.sliderOk),
             tostring(candidate and #candidate.knownIDs or 0),
             FormatIDList(candidate and candidate.knownIDs or nil, candidate and candidate.lookupTable or nil, 5),
             candidateDirect.hit and tostring(candidateDirect.spellID) or "miss",
@@ -407,7 +419,7 @@ local function FireSpellMatches(name, taintedID, unit, cleanID, launderInfo, cas
             }
             local ok, err = pcall(entry.callback, name, chosenID, chosenData, unit, debugInfo)
             if not ok then
-                MedaAuras.LogWarn(format("[PartySpellWatcher] spell-match callback[%d] error: %s", handle, tostring(err)))
+                MedaAuras.LogWarn(format("[PartySpellWatcher] spell-match callback[%d] error: %s", handle, SafeStr(err)))
             end
         else
             LogDebug(format("Cast[%d] SpellMatch[%d:%s] suppressed: confidence=%s via=%s",
@@ -436,7 +448,7 @@ local function OnPartyCast(partyIndex, isOwnerOfPet)
 
         local cleanID, launderInfo = LaunderSpellID(eSpellID)
         LogDebug(format("Cast[%d] PARTY SPELL: name=%s unit=%s pet=%s cleanID=%s",
-            castSequence, cleanName, ownerUnit, tostring(isOwnerOfPet), tostring(cleanID)))
+            castSequence, cleanName, ownerUnit, tostring(isOwnerOfPet), SafeStr(cleanID)))
 
         if hasAny and cleanID then
             FireAnySpell(cleanName, cleanID, ownerUnit)
@@ -454,12 +466,21 @@ local function OnPartyCast(partyIndex, isOwnerOfPet)
         if hasInterrupt then
             local data = ns.InterruptData and ns.InterruptData.ALL_INTERRUPTS
             if data then
-                local ok, kickData = pcall(function() return data[cleanID] end)
-                if ok and kickData then
+                local directOk, kickData = pcall(function() return data[cleanID] end)
+                if directOk and kickData then
                     Log(format("PARTY KICK: %s cast %s (ID %d) via %s",
                         cleanName, kickData.name, cleanID,
                         isOwnerOfPet and "pet" or "self"))
                     FireInterrupt(cleanName, cleanID, ownerUnit)
+                else
+                    local interruptIDs = BuildKnownIDs(data)
+                    local result = MatchTaintedAgainstTable(eSpellID, interruptIDs, data)
+                    if result.matchID and result.matchData then
+                        Log(format("PARTY KICK: %s cast %s (ID %d) via %s [equality]",
+                            cleanName, result.matchData.name, result.matchID,
+                            isOwnerOfPet and "pet" or "self"))
+                        FireInterrupt(cleanName, result.matchID, ownerUnit)
+                    end
                 end
             end
         end

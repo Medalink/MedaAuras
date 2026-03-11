@@ -431,7 +431,7 @@ local function ShowAlert(text)
 
     local soundPath = MedaUI:GetSoundPath(db.alertSound)
     if soundPath then
-        pcall(PlaySoundFile, soundPath, "Master")
+        MedaUI:PlaySoundPath(soundPath)
     end
 
     alertFrame:SetScript("OnDragStop", function(self)
@@ -1436,7 +1436,7 @@ local function BuildConfig(parent, moduleDB)
         soundPreviewBtn:SetPoint("LEFT", alertSoundDD, "RIGHT", 8, -6)
         soundPreviewBtn:SetScript("OnClick", function()
             local path = MedaUI:GetSoundPath(moduleDB.alertSound)
-            if path then pcall(PlaySoundFile, path, "Master") end
+            if path then MedaUI:PlaySoundPath(path) end
         end)
         yOff = yOff - 55
 
@@ -1555,7 +1555,7 @@ local MODULE_DEFAULTS = {
     enabled = false,
     locked = false,
     showSelf = true,
-    showMaxMana = true,
+    showMaxMana = false,
     showManaList = true,
 
     -- layout
@@ -1617,6 +1617,7 @@ MedaAuras:RegisterModule({
     title = "Group Mana Tracker",
     version = MODULE_VERSION,
     stability = MODULE_STABILITY,
+    author = "Medalink",
     description = "Displays healer mana for your group using visual tainted-value rendering.",
     sidebarDesc = "Shows healer mana bars for your group in dungeons and raids.",
     defaults = MODULE_DEFAULTS,

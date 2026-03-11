@@ -38,7 +38,7 @@ local runtimeModules = {}
 local nameToModuleId = {}
 
 local importFrame
-local textPopup
+local textPopupDialog
 
 local function Log(msg)
     if MedaAuras and MedaAuras.Log then
@@ -1375,81 +1375,11 @@ function MedaAuras:InstallImportedCustomModule(pkg, installMode)
     return installed
 end
 
-local function EnsureTextPopup()
-    if textPopup then
-        return textPopup
-    end
-
-    textPopup = CreateFrame("Frame", "MedaAurasCustomModuleTextPopup", UIParent, "BackdropTemplate")
-    textPopup:SetSize(560, 360)
-    textPopup:SetPoint("CENTER")
-    textPopup:SetBackdrop(MedaUI:CreateBackdrop(true))
-    textPopup:SetFrameStrata("FULLSCREEN_DIALOG")
-    textPopup:SetMovable(true)
-    textPopup:EnableMouse(true)
-    textPopup:RegisterForDrag("LeftButton")
-    textPopup:SetScript("OnDragStart", textPopup.StartMoving)
-    textPopup:SetScript("OnDragStop", textPopup.StopMovingOrSizing)
-
-    local function ApplyTheme()
-        local theme = MedaUI.Theme
-        textPopup:SetBackdropColor(unpack(theme.backgroundDark))
-        textPopup:SetBackdropBorderColor(unpack(theme.border))
-    end
-    MedaUI:RegisterThemedWidget(textPopup, ApplyTheme)
-    ApplyTheme()
-
-    textPopup.title = textPopup:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    textPopup.title:SetPoint("TOP", 0, -10)
-
-    local scrollBg = CreateFrame("Frame", nil, textPopup, "BackdropTemplate")
-    scrollBg:SetPoint("TOPLEFT", 12, -34)
-    scrollBg:SetPoint("BOTTOMRIGHT", -12, 44)
-    scrollBg:SetBackdrop(MedaUI:CreateBackdrop(true))
-    MedaUI:RegisterThemedWidget(scrollBg, function()
-        ApplyInputContainerTheme(scrollBg, textPopup.editBox and textPopup.editBox:HasFocus())
-    end)
-    ApplyInputContainerTheme(scrollBg, false)
-
-    local scrollParent = MedaUI:CreateScrollFrame(scrollBg)
-    Pixel.SetPoint(scrollParent, "TOPLEFT", 6, -6)
-    Pixel.SetPoint(scrollParent, "BOTTOMRIGHT", -6, 6)
-    textPopup.scrollParent = scrollParent
-
-    local editBox = CreateFrame("EditBox", nil, scrollParent.scrollContent)
-    editBox:SetMultiLine(true)
-    editBox:SetAutoFocus(false)
-    editBox:SetFontObject("ChatFontNormal")
-    editBox:SetMaxLetters(0)
-    editBox:SetPoint("TOPLEFT")
-    editBox:SetPoint("TOPRIGHT")
-    editBox:SetWidth(480)
-    editBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    editBox:SetScript("OnTextChanged", function()
-        local height = EstimateEditBoxHeight(editBox, 280)
-        editBox:SetHeight(height)
-        scrollParent:SetContentHeight(height, true, true)
-    end)
-    textPopup.editBox = editBox
-    AttachInputFocusStyling(editBox, scrollBg, scrollParent.scrollFrame)
-
-    textPopup.closeBtn = MedaUI:CreateButton(textPopup, "Close")
-    textPopup.closeBtn:SetSize(90, 24)
-    textPopup.closeBtn:SetPoint("BOTTOMRIGHT", -12, 12)
-    textPopup.closeBtn:SetScript("OnClick", function() textPopup:Hide() end)
-
-    return textPopup
-end
-
 function MedaAuras:ShowCustomModuleTextPopup(title, text, highlight)
-    local popup = EnsureTextPopup()
-    popup.title:SetText(title or "Custom Module")
-    popup.editBox:SetText(text or "")
-    popup:Show()
-    popup.editBox:SetFocus()
-    if highlight then
-        popup.editBox:HighlightText()
+    if not textPopupDialog then
+        textPopupDialog = MedaUI:CreateImportExportDialog({ width = 560, height = 360 })
     end
+    textPopupDialog:ShowExport(title or "Custom Module", text)
 end
 
 local function EnsureImportFrame()
@@ -1457,24 +1387,14 @@ local function EnsureImportFrame()
         return importFrame
     end
 
-    importFrame = CreateFrame("Frame", "MedaAurasCustomModuleImport", UIParent, "BackdropTemplate")
-    importFrame:SetSize(720, 600)
+    importFrame = MedaUI:CreateThemedFrame(UIParent, "MedaAurasCustomModuleImport", 720, 600, "backgroundDark")
     importFrame:SetPoint("CENTER")
-    importFrame:SetBackdrop(MedaUI:CreateBackdrop(true))
     importFrame:SetFrameStrata("FULLSCREEN_DIALOG")
     importFrame:SetMovable(true)
     importFrame:EnableMouse(true)
     importFrame:RegisterForDrag("LeftButton")
     importFrame:SetScript("OnDragStart", importFrame.StartMoving)
     importFrame:SetScript("OnDragStop", importFrame.StopMovingOrSizing)
-
-    local function ApplyTheme()
-        local theme = MedaUI.Theme
-        importFrame:SetBackdropColor(unpack(theme.backgroundDark))
-        importFrame:SetBackdropBorderColor(unpack(theme.border))
-    end
-    MedaUI:RegisterThemedWidget(importFrame, ApplyTheme)
-    ApplyTheme()
 
     importFrame.title = importFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     importFrame.title:SetPoint("TOPLEFT", 14, -12)

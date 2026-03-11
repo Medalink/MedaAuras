@@ -476,17 +476,6 @@ local function BuildConfig(parent, db)
 
     yOff = yOff - 10
 
-    -- Reset button
-    local resetBtn = MedaUI:CreateButton(parent, "Reset to Defaults")
-    resetBtn:SetPoint("TOPLEFT", LEFT_X, yOff)
-    resetBtn:SetScript("OnClick", function()
-        for k, v in pairs(MODULE_DEFAULTS) do
-            db[k] = MedaAuras.DeepCopy(v)
-        end
-        MedaAuras:RefreshModuleConfig()
-    end)
-    yOff = yOff - 45
-
     MedaAuras:SetContentHeight(math.abs(yOff))
 end
 
@@ -546,6 +535,7 @@ MedaAuras:RegisterModule({
     title = "Lazy Cast",
     version = MODULE_VERSION,
     stability = MODULE_STABILITY,
+    author = "Medalink",
     description = "Auto-cast spells on group members by role (Tank, Healer, DPS, Self) without changing target.",
     sidebarDesc = "Cast spells on tank/healer/dps without targeting",
     defaults = MODULE_DEFAULTS,

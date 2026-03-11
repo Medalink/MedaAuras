@@ -1042,7 +1042,7 @@ local MODULE_DEFAULTS = {
     showTitle = true,
     showIcons = true,
     showNames = true,
-    showSpellName = true,
+    showSpellName = false,
     growUp = false,
     alpha = 0.9,
     nameFontSize = 0,
@@ -1052,9 +1052,9 @@ local MODULE_DEFAULTS = {
     showMajor = true,
     showPersonal = false,
     showInDungeon = true,
-    showInRaid = false,
-    showInOpenWorld = true,
-    showInArena = false,
+    showInRaid = true,
+    showInOpenWorld = false,
+    showInArena = true,
     showInBG = false,
     position = { point = "CENTER", x = 250, y = -150 },
 }
@@ -1277,9 +1277,9 @@ local function BuildConfig(parent, moduleDB)
     local LEFT_X = 0
     local yOff = 0
 
-    local header = MedaUI:CreateSectionHeader(parent, "Cracked")
+    local header = MedaUI:CreateSectionHeader(parent, "Cracked", 470)
     header:SetPoint("TOPLEFT", LEFT_X, yOff)
-    yOff = yOff - 45
+    yOff = yOff - 40
 
     local enableCB = MedaUI:CreateCheckbox(parent, "Enable Module")
     enableCB:SetPoint("TOPLEFT", LEFT_X, yOff)
@@ -1289,10 +1289,9 @@ local function BuildConfig(parent, moduleDB)
         else MedaAuras:DisableModule(MODULE_NAME) end
         MedaAuras:RefreshSidebarDot(MODULE_NAME)
     end
-    yOff = yOff - 35
+    yOff = yOff - 42
 
-    -- Category filters
-    local catHeader = MedaUI:CreateSectionHeader(parent, "Track Categories")
+    local catHeader = MedaUI:CreateSectionHeader(parent, "Track Categories", 470)
     catHeader:SetPoint("TOPLEFT", LEFT_X, yOff)
     yOff = yOff - 40
 
@@ -1303,7 +1302,7 @@ local function BuildConfig(parent, moduleDB)
         moduleDB.showExternals = checked
         RebuildPreview()
     end
-    yOff = yOff - 30
+    yOff = yOff - 32
 
     local partyCB = MedaUI:CreateCheckbox(parent, "Party-Wide (Rally, AMZ, Darkness, etc.)")
     partyCB:SetPoint("TOPLEFT", LEFT_X, yOff)
@@ -1312,7 +1311,7 @@ local function BuildConfig(parent, moduleDB)
         moduleDB.showPartyWide = checked
         RebuildPreview()
     end
-    yOff = yOff - 30
+    yOff = yOff - 32
 
     local majorCB = MedaUI:CreateCheckbox(parent, "Major Personals (Wall, IBF, Ice Block, etc.)")
     majorCB:SetPoint("TOPLEFT", LEFT_X, yOff)
@@ -1321,7 +1320,7 @@ local function BuildConfig(parent, moduleDB)
         moduleDB.showMajor = checked
         RebuildPreview()
     end
-    yOff = yOff - 30
+    yOff = yOff - 32
 
     local persCB = MedaUI:CreateCheckbox(parent, "Minor Personals (Barkskin, AMS, Feint, etc.)")
     persCB:SetPoint("TOPLEFT", LEFT_X, yOff)
@@ -1330,10 +1329,9 @@ local function BuildConfig(parent, moduleDB)
         moduleDB.showPersonal = checked
         RebuildPreview()
     end
-    yOff = yOff - 40
+    yOff = yOff - 42
 
-    -- Display settings
-    local dispHeader = MedaUI:CreateSectionHeader(parent, "Display")
+    local dispHeader = MedaUI:CreateSectionHeader(parent, "Display", 470)
     dispHeader:SetPoint("TOPLEFT", LEFT_X, yOff)
     yOff = yOff - 40
 
@@ -1350,7 +1348,7 @@ local function BuildConfig(parent, moduleDB)
     lockCB:SetPoint("TOPLEFT", 240, yOff)
     lockCB:SetChecked(moduleDB.locked)
     lockCB.OnValueChanged = function(_, checked) moduleDB.locked = checked end
-    yOff = yOff - 30
+    yOff = yOff - 32
 
     local iconsCB = MedaUI:CreateCheckbox(parent, "Show Icons")
     iconsCB:SetPoint("TOPLEFT", LEFT_X, yOff)
@@ -1369,7 +1367,7 @@ local function BuildConfig(parent, moduleDB)
         if mainFrame then RebuildBars() end
         RebuildPreview()
     end
-    yOff = yOff - 30
+    yOff = yOff - 32
 
     local spellCB = MedaUI:CreateCheckbox(parent, "Show Spell Name")
     spellCB:SetPoint("TOPLEFT", LEFT_X, yOff)
@@ -1387,7 +1385,7 @@ local function BuildConfig(parent, moduleDB)
         if mainFrame then RebuildBars() end
         RebuildPreview()
     end
-    yOff = yOff - 40
+    yOff = yOff - 36
 
     local alphaSlider = MedaUI:CreateLabeledSlider(parent, "Opacity", 200, 0.3, 1.0, 0.05)
     alphaSlider:SetPoint("TOPLEFT", LEFT_X, yOff)
@@ -1397,10 +1395,9 @@ local function BuildConfig(parent, moduleDB)
         if mainFrame then mainFrame:SetAlpha(value) end
         UpdatePreview()
     end
-    yOff = yOff - 55
+    yOff = yOff - 60
 
-    -- Zone visibility
-    local zoneHeader = MedaUI:CreateSectionHeader(parent, "Show In")
+    local zoneHeader = MedaUI:CreateSectionHeader(parent, "Show In", 470)
     zoneHeader:SetPoint("TOPLEFT", LEFT_X, yOff)
     yOff = yOff - 40
 
@@ -1417,44 +1414,12 @@ local function BuildConfig(parent, moduleDB)
 
     ZoneCB("Dungeons", "showInDungeon", LEFT_X, yOff)
     ZoneCB("Raids", "showInRaid", 240, yOff)
-    yOff = yOff - 30
+    yOff = yOff - 32
     ZoneCB("Open World", "showInOpenWorld", LEFT_X, yOff)
     ZoneCB("Arena", "showInArena", 240, yOff)
-    yOff = yOff - 30
+    yOff = yOff - 32
     ZoneCB("Battlegrounds", "showInBG", LEFT_X, yOff)
-    yOff = yOff - 40
-
-    -- Debug info
-    local myCount = 0
-    for _ in pairs(myCds) do myCount = myCount + 1 end
-    if myCount > 0 then
-        local infoLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        infoLabel:SetPoint("TOPLEFT", LEFT_X, yOff)
-        infoLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
-        infoLabel:SetText(format("Own defensives tracked: %d", myCount))
-        yOff = yOff - 20
-    end
-
-    local partyCount = 0
-    for _ in pairs(partyMembers) do partyCount = partyCount + 1 end
-    if partyCount > 0 then
-        local partyLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        partyLabel:SetPoint("TOPLEFT", LEFT_X, yOff)
-        partyLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
-        partyLabel:SetText(format("Tracking %d party member(s)", partyCount))
-        yOff = yOff - 20
-    end
-
-    yOff = yOff - 10
-
-    local resetBtn = MedaUI:CreateButton(parent, "Reset to Defaults")
-    resetBtn:SetPoint("TOPLEFT", LEFT_X, yOff)
-    resetBtn:SetScript("OnClick", function()
-        for k, v in pairs(MODULE_DEFAULTS) do moduleDB[k] = MedaAuras.DeepCopy(v) end
-        MedaAuras:ToggleSettings()
-        MedaAuras:ToggleSettings()
-    end)
-    yOff = yOff - 45
+    yOff = yOff - 46
 
     MedaAuras:SetContentHeight(math.abs(yOff))
 end
@@ -1468,6 +1433,7 @@ MedaAuras:RegisterModule({
     title       = "Cracked",
     version     = MODULE_VERSION,
     stability   = MODULE_STABILITY,
+    author      = "Medalink",
     description = "Tracks party defensive cooldowns in M+ and dungeons. "
                .. "Detects when party members use defensive abilities and "
                .. "displays cooldown bars with active/CD states, colored by class. "
