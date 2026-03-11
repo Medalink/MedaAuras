@@ -225,6 +225,7 @@ local DEFAULT_DB = {
     options = {
         theme = nil,
         debugMode = false,
+        muteSounds = false,
     },
     modules = {},
     customModules = {},
@@ -285,6 +286,17 @@ local function BuildGeneralConfig(parent)
             MedaAurasDB.options.debugMode = checked
         end
         Log(format("Debug mode toggled %s", checked and "ON" or "OFF"))
+    end
+    yOff = yOff - 40
+
+    local muteSoundsCheck = MedaUI:CreateCheckbox(parent, "Mute All Sounds")
+    muteSoundsCheck:SetPoint("TOPLEFT", 0, yOff)
+    muteSoundsCheck:SetChecked(MedaAurasDB and MedaAurasDB.options.muteSounds)
+    muteSoundsCheck.OnValueChanged = function(_, checked)
+        if MedaAurasDB then
+            MedaAurasDB.options.muteSounds = checked
+        end
+        MedaUI:SetSoundsEnabled(not checked)
     end
     yOff = yOff - 40
 
@@ -710,6 +722,10 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
         if MedaUI and MedaUI.SetTheme then
             MedaUI:SetTheme(uiTheme)
             LogDebug(format("Applied UI theme: %s", uiTheme))
+        end
+
+        if MedaAurasDB.options.muteSounds then
+            MedaUI:SetSoundsEnabled(false)
         end
 
     elseif event == "PLAYER_LOGIN" then
