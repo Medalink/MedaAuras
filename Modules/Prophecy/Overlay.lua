@@ -65,21 +65,9 @@ local function ApplyOverlayState()
     local db = GetDB()
     if not db then return end
 
-    if db.showBackground then
-        if not overlayFrame._bg then
-            local bg = overlayFrame:CreateTexture(nil, "BACKGROUND")
-            bg:SetAllPoints()
-            overlayFrame._bg = bg
-        end
-        overlayFrame._bg:SetColorTexture(0, 0, 0, db.backgroundOpacity or 0.4)
-        overlayFrame._bg:Show()
-    elseif overlayFrame._bg then
-        overlayFrame._bg:Hide()
-    end
-
-    overlayFrame:SetMovable(true)
-    overlayFrame:EnableMouse(true)
-    overlayFrame:RegisterForDrag("LeftButton")
+    overlayFrame:SetBackgroundVisible(db.showBackground or false)
+    overlayFrame:SetBackgroundOpacity(db.backgroundOpacity or 0.4)
+    overlayFrame:SetLocked(db.locked or false)
 
     local fontObject = FONT_OBJECTS[db.fontSize] or FONT_OBJECTS.md
     if headerText then headerText:SetFontObject(fontObject) end
@@ -103,49 +91,45 @@ local function EnsureOverlay()
     local db = GetDB()
     if not db then return end
 
-    overlayFrame = CreateFrame("Frame", "MedaAurasProphecyOverlay", UIParent)
-    overlayFrame:SetSize(280, 300)
-    overlayFrame:SetFrameStrata("MEDIUM")
-    overlayFrame:SetClampedToScreen(true)
+    overlayFrame = MedaUI:CreateOverlayContainer("MedaAurasProphecyOverlay", {
+        width = 280,
+        height = 300,
+        strata = "MEDIUM",
+        title = "Prophecy",
+        titleFont = "GameFontNormal",
+        titleTone = "dim",
+        titleAlpha = 0.6,
+        showBackground = db.showBackground or false,
+        backgroundOpacity = db.backgroundOpacity or 0.4,
+        locked = db.locked or false,
+        point = db.overlayPoint and {
+            point = db.overlayPoint[1] or "CENTER",
+            relativePoint = db.overlayPoint[1] or "CENTER",
+            x = db.overlayPoint[2] or 0,
+            y = db.overlayPoint[3] or 0,
+        } or {
+            point = "RIGHT",
+            relativePoint = "RIGHT",
+            x = -200,
+            y = 100,
+        },
+    })
+    headerText = overlayFrame.title
 
-    if db.overlayPoint then
-        overlayFrame:SetPoint(db.overlayPoint[1] or "CENTER", UIParent, db.overlayPoint[1] or "CENTER", db.overlayPoint[2] or 0, db.overlayPoint[3] or 0)
-    else
-        overlayFrame:SetPoint("RIGHT", UIParent, "RIGHT", -200, 100)
+    overlayFrame.OnMove = function(_, state)
+        local d = GetDB()
+        if d and state then
+            d.overlayPoint = { state.point, state.x, state.y }
+        end
     end
 
-    -- Draggable header
-    local header = MedaUI:CreateAutoHideContainer("ProphecyHeader", {
-        parent = overlayFrame,
-        width = 280,
-        height = 20,
-    })
-    headerText = overlayFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    headerText:SetPoint("TOPLEFT", overlayFrame, "TOPLEFT", 4, 0)
-    headerText:SetText("Prophecy")
-    headerText:SetTextColor(1, 1, 1, 0.6)
-    headerText:SetShadowOffset(1, -1)
-    headerText:SetShadowColor(0, 0, 0, 0.8)
-
-    overlayFrame:SetScript("OnDragStart", function(self)
-        local d = GetDB()
-        if d and not d.locked then
-            self:StartMoving()
-        end
-    end)
-    overlayFrame:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        local point, _, _, x, y = self:GetPoint()
-        local d = GetDB()
-        if d then d.overlayPoint = { point, x, y } end
-    end)
-
     -- Wipe re-sync indicator
-    wipeIndicator = overlayFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    wipeIndicator = MedaUI:CreateLabel(overlayFrame, "\226\159\179  Re-syncing at next boss...", {
+        fontObject = "GameFontNormalSmall",
+        tone = "warning",
+        shadow = true,
+    })
     wipeIndicator:SetPoint("TOPLEFT", overlayFrame, "TOPLEFT", 4, -22)
-    wipeIndicator:SetText("\226\159\179  Re-syncing at next boss...")
-    wipeIndicator:SetShadowOffset(1, -1)
-    wipeIndicator:SetShadowColor(0, 0, 0, 0.8)
     wipeIndicator:Hide()
 
     -- Fulfilled collapse section
@@ -155,25 +139,18 @@ local function EnsureOverlay()
     })
     fulfilledSection:SetPoint("BOTTOMLEFT", overlayFrame, "BOTTOMLEFT", 4, 4)
     fulfilledSection:Hide()
-    if fulfilledSection.OnToggle then
-        fulfilledSection.OnToggle = function(_, expanded)
-            fulfilledExpanded = expanded
-            Refresh()
-        end
-    elseif fulfilledSection:GetScript("OnMouseUp") == nil then
-        fulfilledSection:EnableMouse(true)
-        fulfilledSection:SetScript("OnMouseUp", function()
-            fulfilledExpanded = not fulfilledExpanded
-            Refresh()
-        end)
-    end
+    fulfilledSection:SetOnToggle(function(expanded)
+        fulfilledExpanded = expanded
+        Refresh()
+    end)
 
     -- Overflow indicator
-    overflowText = overlayFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    overflowText = MedaUI:CreateLabel(overlayFrame, "", {
+        fontObject = "GameFontNormalSmall",
+        tone = "dim",
+        shadow = true,
+    })
     overflowText:SetText("")
-    overflowText:SetTextColor(0.6, 0.6, 0.6)
-    overflowText:SetShadowOffset(1, -1)
-    overflowText:SetShadowColor(0, 0, 0, 0.8)
     overflowText:Hide()
 
     -- Timer tick
@@ -247,7 +224,8 @@ Refresh = function()
     if drift.wipeActive then
         wipeIndicator:Show()
         local Theme = MedaUI.Theme
-        wipeIndicator:SetTextColor(unpack(Theme.warning or {1, 0.62, 0.12}))
+        local warning = Theme.warning or { 1, 0.62, 0.12, 1 }
+        wipeIndicator:SetColorOverride(warning[1], warning[2], warning[3], warning[4] or 1)
         yOff = yOff - 18
     else
         wipeIndicator:Hide()

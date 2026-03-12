@@ -63,18 +63,17 @@ local function BuildTimelineTab(parent, db)
     yOff = yOff + 60
 
     -- Template source radio group
-    local sourceLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    Pixel.SetPoint(sourceLabel, "TOPLEFT", 0, -yOff)
-    sourceLabel:SetText("Template Source")
-    yOff = yOff + 18
-
-    local sourceCurated = MedaUI:CreateRadio(parent, "Curated", "prophecy_source")
-    Pixel.SetPoint(sourceCurated, "TOPLEFT", 0, -yOff)
-    local sourcePersonal = MedaUI:CreateRadio(parent, "Personal", "prophecy_source")
-    Pixel.SetPoint(sourcePersonal, "TOPLEFT", 80, -yOff)
-    local sourceCustom = MedaUI:CreateRadio(parent, "Custom", "prophecy_source")
-    Pixel.SetPoint(sourceCustom, "TOPLEFT", 160, -yOff)
-    yOff = yOff + 28
+    local sourceGroup = MedaUI:CreateInlineRadioGroup(parent, {
+        label = "Template Source",
+        width = 260,
+        options = {
+            { value = "curated", label = "Curated" },
+            { value = "personal", label = "Personal" },
+            { value = "custom", label = "Custom" },
+        },
+    })
+    Pixel.SetPoint(sourceGroup, "TOPLEFT", 0, -yOff)
+    yOff = yOff + 46
 
     -- Prophecy node list (reorderable for custom, read-only for others)
     local nodeList = MedaUI:CreateReorderableList(parent, 440, 300, {
@@ -82,7 +81,10 @@ local function BuildTimelineTab(parent, db)
         dragEnabled = false,
         renderRow = function(row, data, index)
             if not row._label then
-                row._label = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                row._label = MedaUI:CreateLabel(row, nil, {
+                    fontObject = "GameFontNormal",
+                    tone = "text",
+                })
                 Pixel.SetPoint(row._label, "LEFT", 28, 0)
                 row._label:SetJustifyH("LEFT")
             end
@@ -136,9 +138,7 @@ local function BuildTimelineTab(parent, db)
 
     local function SyncSourceControls()
         local source = GetSelectedSource(selectedDungeonID)
-        if sourceCurated.SetChecked then sourceCurated:SetChecked(source == "curated") end
-        if sourcePersonal.SetChecked then sourcePersonal:SetChecked(source == "personal") end
-        if sourceCustom.SetChecked then sourceCustom:SetChecked(source == "custom") end
+        sourceGroup:SetValue(source)
     end
 
     local function LoadSelectedTemplate(instanceID)
@@ -158,17 +158,11 @@ local function BuildTimelineTab(parent, db)
         LoadSelectedTemplate(instanceID)
     end
 
-    local function BindSourceRadio(control, source)
-        control:SetScript("OnClick", function()
-            SetSelectedSource(source)
-            SyncSourceControls()
-            LoadSelectedTemplate(selectedDungeonID)
-        end)
+    sourceGroup.OnValueChanged = function(_, source)
+        SetSelectedSource(source)
+        SyncSourceControls()
+        LoadSelectedTemplate(selectedDungeonID)
     end
-
-    BindSourceRadio(sourceCurated, "curated")
-    BindSourceRadio(sourcePersonal, "personal")
-    BindSourceRadio(sourceCustom, "custom")
 
     if dungeonOptions[1] then
         if dungeonDropdown.SetSelected then
@@ -343,6 +337,7 @@ local function BuildHistoryTab(parent, db)
         local dialog = MedaUI:CreateImportExportDialog({
             title = "Import Prophecy Template",
             mode = "import",
+            hintText = "Paste a compressed Prophecy template string, then click Import.",
             onImport = function(encodedString)
                 local LibSerialize = LibStub("LibSerialize")
                 local LibDeflate = LibStub("LibDeflate")
@@ -386,6 +381,7 @@ local function BuildHistoryTab(parent, db)
             title = "Export Prophecy Template",
             mode = "export",
             exportText = encoded,
+            hintText = "Press Ctrl+A to select all, then Ctrl+C to copy.",
         })
         dialog:Show()
     end)

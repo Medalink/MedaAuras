@@ -164,9 +164,10 @@ function ns.Prophecy.BuildConfig(parent, db)
     })
     Pixel.SetPoint(tabBar, "TOPLEFT", 0, 0)
 
-    local contentFrame = CreateFrame("Frame", nil, parent)
-    Pixel.SetPoint(contentFrame, "TOPLEFT", 0, -34)
-    Pixel.SetPoint(contentFrame, "BOTTOMRIGHT", 0, 0)
+    local contentFrame = MedaUI:CreateContentFrame(parent, {
+        fillParent = true,
+        insets = { top = 34 },
+    })
 
     local tabFrames = {}
     local currentContent = nil
@@ -181,8 +182,7 @@ function ns.Prophecy.BuildConfig(parent, db)
         ClearContent()
         local frame = tabFrames[tabId]
         if not frame then
-            frame = CreateFrame("Frame", nil, contentFrame)
-            frame:SetAllPoints()
+            frame = MedaUI:CreateContentFrame(contentFrame, { fillParent = true })
             tabFrames[tabId] = frame
 
             if tabId == "timeline" then

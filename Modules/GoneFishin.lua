@@ -2921,58 +2921,17 @@ local function BuildExportString()
 end
 
 local function ShowExportWindow()
-    if exportFrame then
-        exportFrame:Show()
-        local exportStr = BuildExportString()
-        exportFrame.editBox:SetText(exportStr)
-        exportFrame.editBox:HighlightText()
-        exportFrame.editBox:SetFocus()
-        return
+    if not exportFrame then
+        exportFrame = MedaUI:CreateImportExportDialog({
+            width = 600,
+            height = 400,
+            title = "|cff00ccffGone Fishin'|r Export Data",
+            mode = "export",
+            hintText = "Press Ctrl+A to select all, then Ctrl+C to copy.",
+        })
     end
 
-    exportFrame = CreateFrame("Frame", "GoneFishinExportFrame", UIParent, "BackdropTemplate")
-    exportFrame:SetSize(600, 400)
-    exportFrame:SetPoint("CENTER")
-    MedaUI:ApplyBackdrop(exportFrame, "backgroundDark", "border")
-    exportFrame:SetMovable(true)
-    exportFrame:EnableMouse(true)
-    exportFrame:RegisterForDrag("LeftButton")
-    exportFrame:SetScript("OnDragStart", exportFrame.StartMoving)
-    exportFrame:SetScript("OnDragStop", exportFrame.StopMovingOrSizing)
-    exportFrame:SetFrameStrata("DIALOG")
-
-    local title = exportFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-    title:SetPoint("TOPLEFT", 12, -10)
-    title:SetText("|cff00ccffGone Fishin'|r Export Data")
-
-    local closeBtn = CreateFrame("Button", nil, exportFrame, "UIPanelCloseButton")
-    closeBtn:SetPoint("TOPRIGHT", -2, -2)
-
-    local scrollParent = MedaUI:CreateScrollFrame(exportFrame)
-    Pixel.SetPoint(scrollParent, "TOPLEFT", 12, -36)
-    Pixel.SetPoint(scrollParent, "BOTTOMRIGHT", -12, 40)
-    scrollParent:SetScrollStep(40)
-
-    local editBox = CreateFrame("EditBox", nil, scrollParent.scrollContent)
-    editBox:SetMultiLine(true)
-    editBox:SetAutoFocus(false)
-    editBox:SetFontObject(GameFontHighlightSmall)
-    editBox:SetPoint("TOPLEFT")
-    editBox:SetPoint("TOPRIGHT")
-    editBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
-    editBox:HookScript("OnTextChanged", function(self)
-        scrollParent:SetContentHeight(self:GetHeight(), true, true)
-    end)
-    exportFrame.editBox = editBox
-
-    local hint = exportFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    hint:SetPoint("BOTTOMLEFT", 12, 12)
-    hint:SetText("|cff888888Press Ctrl+A to select all, then Ctrl+C to copy.|r")
-
-    local exportStr = BuildExportString()
-    editBox:SetText(exportStr)
-    editBox:HighlightText()
-    editBox:SetFocus()
+    exportFrame:ShowExport("|cff00ccffGone Fishin'|r Export Data", BuildExportString())
 end
 
 -- ============================================================================

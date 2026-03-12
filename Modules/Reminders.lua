@@ -1856,38 +1856,16 @@ end
 
 local function ShowCopyPopup(text)
     if not copyPopup then
-        copyPopup = CreateFrame("Frame", "MedaAurasRemindersCopy", UIParent, "BackdropTemplate")
-        copyPopup:SetFrameStrata("DIALOG")
-        copyPopup:SetSize(420, 70)
-        copyPopup:SetPoint("CENTER")
-        copyPopup:SetMovable(true)
-        copyPopup:EnableMouse(true)
-        copyPopup:RegisterForDrag("LeftButton")
-        copyPopup:SetScript("OnDragStart", function(self) self:StartMoving() end)
-        copyPopup:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
-        copyPopup:SetBackdrop(MedaUI:CreateBackdrop(true))
-
-        local Theme = MedaUI.Theme
-        copyPopup:SetBackdropColor(unpack(Theme.background))
-        copyPopup:SetBackdropBorderColor(unpack(Theme.border))
-
-        local lbl = copyPopup:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        lbl:SetPoint("TOPLEFT", 8, -8)
-        lbl:SetText("Press Ctrl+C to copy, then Esc to close:")
-        lbl:SetTextColor(unpack(Theme.textDim or { 0.6, 0.6, 0.6 }))
-
-        local eb = CreateFrame("EditBox", nil, copyPopup, "InputBoxTemplate")
-        eb:SetSize(396, 24)
-        eb:SetPoint("TOPLEFT", 10, -28)
-        eb:SetAutoFocus(true)
-        eb:SetScript("OnEscapePressed", function() copyPopup:Hide() end)
-        copyPopup.editBox = eb
+        copyPopup = MedaUI:CreateImportExportDialog({
+            width = 420,
+            height = 160,
+            title = "Copy Reminder",
+            mode = "export",
+            hintText = "Press Ctrl+C to copy, then Esc to close.",
+        })
     end
 
-    copyPopup.editBox:SetText(text)
-    copyPopup:Show()
-    copyPopup.editBox:HighlightText()
-    copyPopup.editBox:SetFocus()
+    copyPopup:ShowExport("Copy Reminder", text)
 end
 
 -- ============================================================================
