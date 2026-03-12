@@ -49,7 +49,9 @@ Services\ProphecyEngine.lua
 Modules\FocusInterruptHelper.lua
 Modules\GroupManaTracker.lua
 Modules\ManaTracker.lua
-Modules\Reminders.lua
+Modules\Reminders\Core.lua
+Modules\Reminders\Workspace.lua
+Modules\Reminders\Init.lua
 Modules\GoneFishin.lua
 Modules\ShutIt.lua
 Modules\LazyCast.lua

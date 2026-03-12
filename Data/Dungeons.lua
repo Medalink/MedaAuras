@@ -161,7 +161,7 @@ D.contexts.dungeons[658] = {
         {
             class = "DEMONHUNTER",
             spell = "",
-            tip = "[IV] Disruptis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of yourself and the rest of\nthe group. It ishighly recommendedto use a Focus Kick macro for this.",
+            tip = "[IV] Consume Magicis Havoc's offensive dispel with a 10-second cooldown.\nThis has the advantage of a 30-yard range and can be used to remove buffs from\nenemy targets. Its cooldown does mean you have to be picky with what to dispel\nthough, especially if multiple enemies are buffed at once.",
         },
         {
             class = "DRUID",
@@ -176,7 +176,7 @@ D.contexts.dungeons[658] = {
         {
             class = "EVOKER",
             spell = "",
-            tip = "[IV] Expunge/Cauterizing FlamePoison/Disease dispel is a source of dispel type for removingVoid Rift.",
+            tip = "[IV] Expunge's Poison dispel is a source of dispel type for removingVoid Rift.",
         },
         {
             class = "EVOKER",
@@ -241,12 +241,12 @@ D.contexts.dungeons[658] = {
         {
             class = "SHAMAN",
             spell = "",
-            tip = "[IV] As Restoration Shamans has many situational talents, make sure to adapt\nyour general tree talents from dungeon to dungeon to include situational utility\nsuch asTremor Totemfor fears,Improved Purify Spirit(curse dispel)\nandPoison Cleansing Totem(poison dispel),Hex,Thunderous PawsandJet Streamto remov",
+            tip = "[IV] Poison Cleansing Totemimmediately dispels everything. Pretty strong!",
         },
         {
             class = "SHAMAN",
             spell = "",
-            tip = "[IV] Restoration Shaman provides support for the party through healing, damage,\nand other additional effects, such as dispels and crowd control, as detailed below:",
+            tip = "[IV] Wind Shearis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of the group and especially\nthe tank. It ishighly recommendedto use a Focus Kick macro for this.",
         },
         {
             class = "WARLOCK",
@@ -524,7 +524,7 @@ D.contexts.dungeons[658] = {
                     id = "pit_of_saron_tip_4",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Disruptis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of yourself and the rest of\nthe group. It ishighly recommendedto use a Focus Kick macro for this.",
+                    body = "[IV] Consume Magicis Havoc's offensive dispel with a 10-second cooldown.\nThis has the advantage of a 30-yard range and can be used to remove buffs from\nenemy targets. Its cooldown does mean you have to be picky with what to dispel\nthough, especially if multiple enemies are buffed at once.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -548,7 +548,7 @@ D.contexts.dungeons[658] = {
                     id = "pit_of_saron_tip_7",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Expunge/Cauterizing FlamePoison/Disease dispel is a source of dispel type for removingVoid Rift.",
+                    body = "[IV] Expunge's Poison dispel is a source of dispel type for removingVoid Rift.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -654,7 +654,7 @@ D.contexts.dungeons[658] = {
                     id = "pit_of_saron_tip_20",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] As Restoration Shamans has many situational talents, make sure to adapt\nyour general tree talents from dungeon to dungeon to include situational utility\nsuch asTremor Totemfor fears,Improved Purify Spirit(curse dispel)\nandPoison Cleansing Totem(poison dispel),Hex,Thunderous PawsandJet Streamto remov",
+                    body = "[IV] Poison Cleansing Totemimmediately dispels everything. Pretty strong!",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -662,7 +662,7 @@ D.contexts.dungeons[658] = {
                     id = "pit_of_saron_tip_21",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Restoration Shaman provides support for the party through healing, damage,\nand other additional effects, such as dispels and crowd control, as detailed below:",
+                    body = "[IV] Wind Shearis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of the group and especially\nthe tank. It ishighly recommendedto use a Focus Kick macro for this.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -1099,7 +1099,7 @@ D.contexts.dungeons[1209] = {
         {
             class = "DEMONHUNTER",
             spell = "",
-            tip = "[IV] Disruptis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of yourself and the rest of\nthe group. It ishighly recommendedto use a Focus Kick macro for this.",
+            tip = "[IV] Consume Magicis Havoc's offensive dispel with a 10-second cooldown.\nThis has the advantage of a 30-yard range and can be used to remove buffs from\nenemy targets. Its cooldown does mean you have to be picky with what to dispel\nthough, especially if multiple enemies are buffed at once.",
         },
         {
             class = "DRUID",
@@ -1114,7 +1114,7 @@ D.contexts.dungeons[1209] = {
         {
             class = "EVOKER",
             spell = "",
-            tip = "[IV] Expunge/Cauterizing FlamePoison/Disease dispel is a source of dispel type for removingVoid Rift.",
+            tip = "[IV] Expunge's Poison dispel is a source of dispel type for removingVoid Rift.",
         },
         {
             class = "EVOKER",
@@ -1179,12 +1179,12 @@ D.contexts.dungeons[1209] = {
         {
             class = "SHAMAN",
             spell = "",
-            tip = "[IV] As Restoration Shamans has many situational talents, make sure to adapt\nyour general tree talents from dungeon to dungeon to include situational utility\nsuch asTremor Totemfor fears,Improved Purify Spirit(curse dispel)\nandPoison Cleansing Totem(poison dispel),Hex,Thunderous PawsandJet Streamto remov",
+            tip = "[IV] Poison Cleansing Totemimmediately dispels everything. Pretty strong!",
         },
         {
             class = "SHAMAN",
             spell = "",
-            tip = "[IV] Restoration Shaman provides support for the party through healing, damage,\nand other additional effects, such as dispels and crowd control, as detailed below:",
+            tip = "[IV] Wind Shearis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of the group and especially\nthe tank. It ishighly recommendedto use a Focus Kick macro for this.",
         },
         {
             class = "WARLOCK",
@@ -1462,7 +1462,7 @@ D.contexts.dungeons[1209] = {
                     id = "skyreach_tip_4",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Disruptis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of yourself and the rest of\nthe group. It ishighly recommendedto use a Focus Kick macro for this.",
+                    body = "[IV] Consume Magicis Havoc's offensive dispel with a 10-second cooldown.\nThis has the advantage of a 30-yard range and can be used to remove buffs from\nenemy targets. Its cooldown does mean you have to be picky with what to dispel\nthough, especially if multiple enemies are buffed at once.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -1486,7 +1486,7 @@ D.contexts.dungeons[1209] = {
                     id = "skyreach_tip_7",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Expunge/Cauterizing FlamePoison/Disease dispel is a source of dispel type for removingVoid Rift.",
+                    body = "[IV] Expunge's Poison dispel is a source of dispel type for removingVoid Rift.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -1590,7 +1590,7 @@ D.contexts.dungeons[1209] = {
                     id = "skyreach_tip_20",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] As Restoration Shamans has many situational talents, make sure to adapt\nyour general tree talents from dungeon to dungeon to include situational utility\nsuch asTremor Totemfor fears,Improved Purify Spirit(curse dispel)\nandPoison Cleansing Totem(poison dispel),Hex,Thunderous PawsandJet Streamto remov",
+                    body = "[IV] Poison Cleansing Totemimmediately dispels everything. Pretty strong!",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -1598,7 +1598,7 @@ D.contexts.dungeons[1209] = {
                     id = "skyreach_tip_21",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Restoration Shaman provides support for the party through healing, damage,\nand other additional effects, such as dispels and crowd control, as detailed below:",
+                    body = "[IV] Wind Shearis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of the group and especially\nthe tank. It ishighly recommendedto use a Focus Kick macro for this.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -2024,7 +2024,7 @@ D.contexts.dungeons[1753] = {
         {
             class = "DEMONHUNTER",
             spell = "",
-            tip = "[IV] Disruptis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of yourself and the rest of\nthe group. It ishighly recommendedto use a Focus Kick macro for this.",
+            tip = "[IV] Consume Magicis Havoc's offensive dispel with a 10-second cooldown.\nThis has the advantage of a 30-yard range and can be used to remove buffs from\nenemy targets. Its cooldown does mean you have to be picky with what to dispel\nthough, especially if multiple enemies are buffed at once.",
         },
         {
             class = "DRUID",
@@ -2039,7 +2039,7 @@ D.contexts.dungeons[1753] = {
         {
             class = "EVOKER",
             spell = "",
-            tip = "[IV] Expunge/Cauterizing FlamePoison/Disease dispel is a source of dispel type for removingVoid Rift.",
+            tip = "[IV] Expunge's Poison dispel is a source of dispel type for removingVoid Rift.",
         },
         {
             class = "EVOKER",
@@ -2104,12 +2104,12 @@ D.contexts.dungeons[1753] = {
         {
             class = "SHAMAN",
             spell = "",
-            tip = "[IV] As Restoration Shamans has many situational talents, make sure to adapt\nyour general tree talents from dungeon to dungeon to include situational utility\nsuch asTremor Totemfor fears,Improved Purify Spirit(curse dispel)\nandPoison Cleansing Totem(poison dispel),Hex,Thunderous PawsandJet Streamto remov",
+            tip = "[IV] Poison Cleansing Totemimmediately dispels everything. Pretty strong!",
         },
         {
             class = "SHAMAN",
             spell = "",
-            tip = "[IV] Restoration Shaman provides support for the party through healing, damage,\nand other additional effects, such as dispels and crowd control, as detailed below:",
+            tip = "[IV] Wind Shearis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of the group and especially\nthe tank. It ishighly recommendedto use a Focus Kick macro for this.",
         },
         {
             class = "WARLOCK",
@@ -2377,7 +2377,7 @@ D.contexts.dungeons[1753] = {
                     id = "seat_of_the_triumvirate_tip_4",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Disruptis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of yourself and the rest of\nthe group. It ishighly recommendedto use a Focus Kick macro for this.",
+                    body = "[IV] Consume Magicis Havoc's offensive dispel with a 10-second cooldown.\nThis has the advantage of a 30-yard range and can be used to remove buffs from\nenemy targets. Its cooldown does mean you have to be picky with what to dispel\nthough, especially if multiple enemies are buffed at once.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -2401,7 +2401,7 @@ D.contexts.dungeons[1753] = {
                     id = "seat_of_the_triumvirate_tip_7",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Expunge/Cauterizing FlamePoison/Disease dispel is a source of dispel type for removingVoid Rift.",
+                    body = "[IV] Expunge's Poison dispel is a source of dispel type for removingVoid Rift.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -2506,7 +2506,7 @@ D.contexts.dungeons[1753] = {
                     id = "seat_of_the_triumvirate_tip_20",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] As Restoration Shamans has many situational talents, make sure to adapt\nyour general tree talents from dungeon to dungeon to include situational utility\nsuch asTremor Totemfor fears,Improved Purify Spirit(curse dispel)\nandPoison Cleansing Totem(poison dispel),Hex,Thunderous PawsandJet Streamto remov",
+                    body = "[IV] Poison Cleansing Totemimmediately dispels everything. Pretty strong!",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -2514,7 +2514,7 @@ D.contexts.dungeons[1753] = {
                     id = "seat_of_the_triumvirate_tip_21",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Restoration Shaman provides support for the party through healing, damage,\nand other additional effects, such as dispels and crowd control, as detailed below:",
+                    body = "[IV] Wind Shearis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of the group and especially\nthe tank. It ishighly recommendedto use a Focus Kick macro for this.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -2939,7 +2939,7 @@ D.contexts.dungeons[2526] = {
         {
             class = "DEMONHUNTER",
             spell = "",
-            tip = "[IV] Disruptis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of yourself and the rest of\nthe group. It ishighly recommendedto use a Focus Kick macro for this.",
+            tip = "[IV] Consume Magicis Havoc's offensive dispel with a 10-second cooldown.\nThis has the advantage of a 30-yard range and can be used to remove buffs from\nenemy targets. Its cooldown does mean you have to be picky with what to dispel\nthough, especially if multiple enemies are buffed at once.",
         },
         {
             class = "DRUID",
@@ -2954,7 +2954,7 @@ D.contexts.dungeons[2526] = {
         {
             class = "EVOKER",
             spell = "",
-            tip = "[IV] Expunge/Cauterizing FlamePoison/Disease dispel is a source of dispel type for removingVoid Rift.",
+            tip = "[IV] Expunge's Poison dispel is a source of dispel type for removingVoid Rift.",
         },
         {
             class = "EVOKER",
@@ -3019,12 +3019,12 @@ D.contexts.dungeons[2526] = {
         {
             class = "SHAMAN",
             spell = "",
-            tip = "[IV] As Restoration Shamans has many situational talents, make sure to adapt\nyour general tree talents from dungeon to dungeon to include situational utility\nsuch asTremor Totemfor fears,Improved Purify Spirit(curse dispel)\nandPoison Cleansing Totem(poison dispel),Hex,Thunderous PawsandJet Streamto remov",
+            tip = "[IV] Poison Cleansing Totemimmediately dispels everything. Pretty strong!",
         },
         {
             class = "SHAMAN",
             spell = "",
-            tip = "[IV] Restoration Shaman provides support for the party through healing, damage,\nand other additional effects, such as dispels and crowd control, as detailed below:",
+            tip = "[IV] Wind Shearis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of the group and especially\nthe tank. It ishighly recommendedto use a Focus Kick macro for this.",
         },
         {
             class = "WARLOCK",
@@ -3355,7 +3355,7 @@ D.contexts.dungeons[2526] = {
                     id = "algeth_ar_academy_tip_4",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Disruptis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of yourself and the rest of\nthe group. It ishighly recommendedto use a Focus Kick macro for this.",
+                    body = "[IV] Consume Magicis Havoc's offensive dispel with a 10-second cooldown.\nThis has the advantage of a 30-yard range and can be used to remove buffs from\nenemy targets. Its cooldown does mean you have to be picky with what to dispel\nthough, especially if multiple enemies are buffed at once.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -3380,7 +3380,7 @@ D.contexts.dungeons[2526] = {
                     id = "algeth_ar_academy_tip_7",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Expunge/Cauterizing FlamePoison/Disease dispel is a source of dispel type for removingVoid Rift.",
+                    body = "[IV] Expunge's Poison dispel is a source of dispel type for removingVoid Rift.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -3485,7 +3485,7 @@ D.contexts.dungeons[2526] = {
                     id = "algeth_ar_academy_tip_20",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] As Restoration Shamans has many situational talents, make sure to adapt\nyour general tree talents from dungeon to dungeon to include situational utility\nsuch asTremor Totemfor fears,Improved Purify Spirit(curse dispel)\nandPoison Cleansing Totem(poison dispel),Hex,Thunderous PawsandJet Streamto remov",
+                    body = "[IV] Poison Cleansing Totemimmediately dispels everything. Pretty strong!",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -3493,7 +3493,7 @@ D.contexts.dungeons[2526] = {
                     id = "algeth_ar_academy_tip_21",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Restoration Shaman provides support for the party through healing, damage,\nand other additional effects, such as dispels and crowd control, as detailed below:",
+                    body = "[IV] Wind Shearis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of the group and especially\nthe tank. It ishighly recommendedto use a Focus Kick macro for this.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -3981,7 +3981,7 @@ D.contexts.dungeons[2801] = {
         {
             class = "DEMONHUNTER",
             spell = "",
-            tip = "[IV] Disruptis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of yourself and the rest of\nthe group. It ishighly recommendedto use a Focus Kick macro for this.",
+            tip = "[IV] Consume Magicis Havoc's offensive dispel with a 10-second cooldown.\nThis has the advantage of a 30-yard range and can be used to remove buffs from\nenemy targets. Its cooldown does mean you have to be picky with what to dispel\nthough, especially if multiple enemies are buffed at once.",
         },
         {
             class = "DRUID",
@@ -3996,7 +3996,7 @@ D.contexts.dungeons[2801] = {
         {
             class = "EVOKER",
             spell = "",
-            tip = "[IV] Expunge/Cauterizing FlamePoison/Disease dispel is a source of dispel type for removingVoid Rift.",
+            tip = "[IV] Expunge's Poison dispel is a source of dispel type for removingVoid Rift.",
         },
         {
             class = "EVOKER",
@@ -4061,12 +4061,12 @@ D.contexts.dungeons[2801] = {
         {
             class = "SHAMAN",
             spell = "",
-            tip = "[IV] As Restoration Shamans has many situational talents, make sure to adapt\nyour general tree talents from dungeon to dungeon to include situational utility\nsuch asTremor Totemfor fears,Improved Purify Spirit(curse dispel)\nandPoison Cleansing Totem(poison dispel),Hex,Thunderous PawsandJet Streamto remov",
+            tip = "[IV] Poison Cleansing Totemimmediately dispels everything. Pretty strong!",
         },
         {
             class = "SHAMAN",
             spell = "",
-            tip = "[IV] Restoration Shaman provides support for the party through healing, damage,\nand other additional effects, such as dispels and crowd control, as detailed below:",
+            tip = "[IV] Wind Shearis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of the group and especially\nthe tank. It ishighly recommendedto use a Focus Kick macro for this.",
         },
         {
             class = "WARLOCK",
@@ -4349,7 +4349,7 @@ D.contexts.dungeons[2801] = {
                     id = "windrunner_spire_tip_4",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Disruptis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of yourself and the rest of\nthe group. It ishighly recommendedto use a Focus Kick macro for this.",
+                    body = "[IV] Consume Magicis Havoc's offensive dispel with a 10-second cooldown.\nThis has the advantage of a 30-yard range and can be used to remove buffs from\nenemy targets. Its cooldown does mean you have to be picky with what to dispel\nthough, especially if multiple enemies are buffed at once.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -4374,7 +4374,7 @@ D.contexts.dungeons[2801] = {
                     id = "windrunner_spire_tip_7",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Expunge/Cauterizing FlamePoison/Disease dispel is a source of dispel type for removingVoid Rift.",
+                    body = "[IV] Expunge's Poison dispel is a source of dispel type for removingVoid Rift.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -4479,7 +4479,7 @@ D.contexts.dungeons[2801] = {
                     id = "windrunner_spire_tip_20",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] As Restoration Shamans has many situational talents, make sure to adapt\nyour general tree talents from dungeon to dungeon to include situational utility\nsuch asTremor Totemfor fears,Improved Purify Spirit(curse dispel)\nandPoison Cleansing Totem(poison dispel),Hex,Thunderous PawsandJet Streamto remov",
+                    body = "[IV] Poison Cleansing Totemimmediately dispels everything. Pretty strong!",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -4487,7 +4487,7 @@ D.contexts.dungeons[2801] = {
                     id = "windrunner_spire_tip_21",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Restoration Shaman provides support for the party through healing, damage,\nand other additional effects, such as dispels and crowd control, as detailed below:",
+                    body = "[IV] Wind Shearis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of the group and especially\nthe tank. It ishighly recommendedto use a Focus Kick macro for this.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -4920,7 +4920,7 @@ D.contexts.dungeons[2802] = {
         {
             class = "DEMONHUNTER",
             spell = "",
-            tip = "[IV] Disruptis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of yourself and the rest of\nthe group. It ishighly recommendedto use a Focus Kick macro for this.",
+            tip = "[IV] Consume Magicis Havoc's offensive dispel with a 10-second cooldown.\nThis has the advantage of a 30-yard range and can be used to remove buffs from\nenemy targets. Its cooldown does mean you have to be picky with what to dispel\nthough, especially if multiple enemies are buffed at once.",
         },
         {
             class = "DRUID",
@@ -4935,7 +4935,7 @@ D.contexts.dungeons[2802] = {
         {
             class = "EVOKER",
             spell = "",
-            tip = "[IV] Expunge/Cauterizing FlamePoison/Disease dispel is a source of dispel type for removingVoid Rift.",
+            tip = "[IV] Expunge's Poison dispel is a source of dispel type for removingVoid Rift.",
         },
         {
             class = "EVOKER",
@@ -5000,12 +5000,12 @@ D.contexts.dungeons[2802] = {
         {
             class = "SHAMAN",
             spell = "",
-            tip = "[IV] As Restoration Shamans has many situational talents, make sure to adapt\nyour general tree talents from dungeon to dungeon to include situational utility\nsuch asTremor Totemfor fears,Improved Purify Spirit(curse dispel)\nandPoison Cleansing Totem(poison dispel),Hex,Thunderous PawsandJet Streamto remov",
+            tip = "[IV] Poison Cleansing Totemimmediately dispels everything. Pretty strong!",
         },
         {
             class = "SHAMAN",
             spell = "",
-            tip = "[IV] Restoration Shaman provides support for the party through healing, damage,\nand other additional effects, such as dispels and crowd control, as detailed below:",
+            tip = "[IV] Wind Shearis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of the group and especially\nthe tank. It ishighly recommendedto use a Focus Kick macro for this.",
         },
         {
             class = "WARLOCK",
@@ -5235,7 +5235,7 @@ D.contexts.dungeons[2802] = {
                     id = "murder_row_tip_4",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Disruptis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of yourself and the rest of\nthe group. It ishighly recommendedto use a Focus Kick macro for this.",
+                    body = "[IV] Consume Magicis Havoc's offensive dispel with a 10-second cooldown.\nThis has the advantage of a 30-yard range and can be used to remove buffs from\nenemy targets. Its cooldown does mean you have to be picky with what to dispel\nthough, especially if multiple enemies are buffed at once.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -5259,7 +5259,7 @@ D.contexts.dungeons[2802] = {
                     id = "murder_row_tip_7",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Expunge/Cauterizing FlamePoison/Disease dispel is a source of dispel type for removingVoid Rift.",
+                    body = "[IV] Expunge's Poison dispel is a source of dispel type for removingVoid Rift.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -5364,7 +5364,7 @@ D.contexts.dungeons[2802] = {
                     id = "murder_row_tip_20",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] As Restoration Shamans has many situational talents, make sure to adapt\nyour general tree talents from dungeon to dungeon to include situational utility\nsuch asTremor Totemfor fears,Improved Purify Spirit(curse dispel)\nandPoison Cleansing Totem(poison dispel),Hex,Thunderous PawsandJet Streamto remov",
+                    body = "[IV] Poison Cleansing Totemimmediately dispels everything. Pretty strong!",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -5372,7 +5372,7 @@ D.contexts.dungeons[2802] = {
                     id = "murder_row_tip_21",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Restoration Shaman provides support for the party through healing, damage,\nand other additional effects, such as dispels and crowd control, as detailed below:",
+                    body = "[IV] Wind Shearis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of the group and especially\nthe tank. It ishighly recommendedto use a Focus Kick macro for this.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -5757,7 +5757,7 @@ D.contexts.dungeons[2803] = {
         {
             class = "DEMONHUNTER",
             spell = "",
-            tip = "[IV] Disruptis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of yourself and the rest of\nthe group. It ishighly recommendedto use a Focus Kick macro for this.",
+            tip = "[IV] Consume Magicis Havoc's offensive dispel with a 10-second cooldown.\nThis has the advantage of a 30-yard range and can be used to remove buffs from\nenemy targets. Its cooldown does mean you have to be picky with what to dispel\nthough, especially if multiple enemies are buffed at once.",
         },
         {
             class = "DRUID",
@@ -5771,13 +5771,13 @@ D.contexts.dungeons[2803] = {
         },
         {
             class = "EVOKER",
-            spell = "",
-            tip = "[IV] Expunge/Cauterizing FlamePoison/Disease dispel is a source of dispel type for removingVoid Rift.",
+            spell = "Nullifying Shroud",
+            tip = "Group magic dispel is valuable for Arcane Burn stacks on multiple allies.",
         },
         {
             class = "EVOKER",
-            spell = "Nullifying Shroud",
-            tip = "Group magic dispel is valuable for Arcane Burn stacks on multiple allies.",
+            spell = "",
+            tip = "[IV] Expunge's Poison dispel is a source of dispel type for removingVoid Rift.",
         },
         {
             class = "HUNTER",
@@ -5837,12 +5837,12 @@ D.contexts.dungeons[2803] = {
         {
             class = "SHAMAN",
             spell = "",
-            tip = "[IV] As Restoration Shamans has many situational talents, make sure to adapt\nyour general tree talents from dungeon to dungeon to include situational utility\nsuch asTremor Totemfor fears,Improved Purify Spirit(curse dispel)\nandPoison Cleansing Totem(poison dispel),Hex,Thunderous PawsandJet Streamto remov",
+            tip = "[IV] Poison Cleansing Totemimmediately dispels everything. Pretty strong!",
         },
         {
             class = "SHAMAN",
-            spell = "Purge",
-            tip = "Purge shields constantly. Consider Greater Purge talent if available for double-purge.",
+            spell = "",
+            tip = "[IV] Wind Shearis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of the group and especially\nthe tank. It ishighly recommendedto use a Focus Kick macro for this.",
         },
         {
             class = "WARLOCK",
@@ -6136,7 +6136,7 @@ D.contexts.dungeons[2803] = {
                     id = "magister_s_terrace_tip_4",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Disruptis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of yourself and the rest of\nthe group. It ishighly recommendedto use a Focus Kick macro for this.",
+                    body = "[IV] Consume Magicis Havoc's offensive dispel with a 10-second cooldown.\nThis has the advantage of a 30-yard range and can be used to remove buffs from\nenemy targets. Its cooldown does mean you have to be picky with what to dispel\nthough, especially if multiple enemies are buffed at once.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -6159,19 +6159,19 @@ D.contexts.dungeons[2803] = {
                 {
                     id = "magister_s_terrace_tip_7",
                     kind = "helper",
-                    title = "Class Tip",
-                    body = "[IV] Expunge/Cauterizing FlamePoison/Disease dispel is a source of dispel type for removingVoid Rift.",
-                    tone = "info",
-                    source = "icyveins",
-                },
-                {
-                    id = "magister_s_terrace_tip_8",
-                    kind = "helper",
                     title = "Nullifying Shroud",
                     body = "Group magic dispel is valuable for Arcane Burn stacks on multiple allies.",
                     tone = "info",
                     source = "icyveins",
                     spell = "Nullifying Shroud",
+                },
+                {
+                    id = "magister_s_terrace_tip_8",
+                    kind = "helper",
+                    title = "Class Tip",
+                    body = "[IV] Expunge's Poison dispel is a source of dispel type for removingVoid Rift.",
+                    tone = "info",
+                    source = "icyveins",
                 },
                 {
                     id = "magister_s_terrace_tip_9",
@@ -6266,18 +6266,17 @@ D.contexts.dungeons[2803] = {
                     id = "magister_s_terrace_tip_20",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] As Restoration Shamans has many situational talents, make sure to adapt\nyour general tree talents from dungeon to dungeon to include situational utility\nsuch asTremor Totemfor fears,Improved Purify Spirit(curse dispel)\nandPoison Cleansing Totem(poison dispel),Hex,Thunderous PawsandJet Streamto remov",
+                    body = "[IV] Poison Cleansing Totemimmediately dispels everything. Pretty strong!",
                     tone = "info",
                     source = "icyveins",
                 },
                 {
                     id = "magister_s_terrace_tip_21",
                     kind = "helper",
-                    title = "Purge",
-                    body = "Purge shields constantly. Consider Greater Purge talent if available for double-purge.",
+                    title = "Class Tip",
+                    body = "[IV] Wind Shearis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of the group and especially\nthe tank. It ishighly recommendedto use a Focus Kick macro for this.",
                     tone = "info",
                     source = "icyveins",
-                    spell = "Purge",
                 },
                 {
                     id = "magister_s_terrace_tip_22",
@@ -6714,7 +6713,7 @@ D.contexts.dungeons[2804] = {
         {
             class = "DEMONHUNTER",
             spell = "",
-            tip = "[IV] Disruptis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of yourself and the rest of\nthe group. It ishighly recommendedto use a Focus Kick macro for this.",
+            tip = "[IV] Consume Magicis Havoc's offensive dispel with a 10-second cooldown.\nThis has the advantage of a 30-yard range and can be used to remove buffs from\nenemy targets. Its cooldown does mean you have to be picky with what to dispel\nthough, especially if multiple enemies are buffed at once.",
         },
         {
             class = "DRUID",
@@ -6729,7 +6728,7 @@ D.contexts.dungeons[2804] = {
         {
             class = "EVOKER",
             spell = "",
-            tip = "[IV] Expunge/Cauterizing FlamePoison/Disease dispel is a source of dispel type for removingVoid Rift.",
+            tip = "[IV] Expunge's Poison dispel is a source of dispel type for removingVoid Rift.",
         },
         {
             class = "EVOKER",
@@ -6794,12 +6793,12 @@ D.contexts.dungeons[2804] = {
         {
             class = "SHAMAN",
             spell = "",
-            tip = "[IV] As Restoration Shamans has many situational talents, make sure to adapt\nyour general tree talents from dungeon to dungeon to include situational utility\nsuch asTremor Totemfor fears,Improved Purify Spirit(curse dispel)\nandPoison Cleansing Totem(poison dispel),Hex,Thunderous PawsandJet Streamto remov",
+            tip = "[IV] Poison Cleansing Totemimmediately dispels everything. Pretty strong!",
         },
         {
             class = "SHAMAN",
             spell = "",
-            tip = "[IV] Restoration Shaman provides support for the party through healing, damage,\nand other additional effects, such as dispels and crowd control, as detailed below:",
+            tip = "[IV] Wind Shearis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of the group and especially\nthe tank. It ishighly recommendedto use a Focus Kick macro for this.",
         },
         {
             class = "WARLOCK",
@@ -7050,7 +7049,7 @@ D.contexts.dungeons[2804] = {
                     id = "the_blinding_vale_tip_4",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Disruptis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of yourself and the rest of\nthe group. It ishighly recommendedto use a Focus Kick macro for this.",
+                    body = "[IV] Consume Magicis Havoc's offensive dispel with a 10-second cooldown.\nThis has the advantage of a 30-yard range and can be used to remove buffs from\nenemy targets. Its cooldown does mean you have to be picky with what to dispel\nthough, especially if multiple enemies are buffed at once.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -7074,7 +7073,7 @@ D.contexts.dungeons[2804] = {
                     id = "the_blinding_vale_tip_7",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Expunge/Cauterizing FlamePoison/Disease dispel is a source of dispel type for removingVoid Rift.",
+                    body = "[IV] Expunge's Poison dispel is a source of dispel type for removingVoid Rift.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -7178,7 +7177,7 @@ D.contexts.dungeons[2804] = {
                     id = "the_blinding_vale_tip_20",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] As Restoration Shamans has many situational talents, make sure to adapt\nyour general tree talents from dungeon to dungeon to include situational utility\nsuch asTremor Totemfor fears,Improved Purify Spirit(curse dispel)\nandPoison Cleansing Totem(poison dispel),Hex,Thunderous PawsandJet Streamto remov",
+                    body = "[IV] Poison Cleansing Totemimmediately dispels everything. Pretty strong!",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -7186,7 +7185,7 @@ D.contexts.dungeons[2804] = {
                     id = "the_blinding_vale_tip_21",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Restoration Shaman provides support for the party through healing, damage,\nand other additional effects, such as dispels and crowd control, as detailed below:",
+                    body = "[IV] Wind Shearis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of the group and especially\nthe tank. It ishighly recommendedto use a Focus Kick macro for this.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -7578,7 +7577,7 @@ D.contexts.dungeons[2805] = {
         {
             class = "DEMONHUNTER",
             spell = "",
-            tip = "[IV] Disruptis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of yourself and the rest of\nthe group. It ishighly recommendedto use a Focus Kick macro for this.",
+            tip = "[IV] Consume Magicis Havoc's offensive dispel with a 10-second cooldown.\nThis has the advantage of a 30-yard range and can be used to remove buffs from\nenemy targets. Its cooldown does mean you have to be picky with what to dispel\nthough, especially if multiple enemies are buffed at once.",
         },
         {
             class = "DRUID",
@@ -7593,7 +7592,7 @@ D.contexts.dungeons[2805] = {
         {
             class = "EVOKER",
             spell = "",
-            tip = "[IV] Expunge/Cauterizing FlamePoison/Disease dispel is a source of dispel type for removingVoid Rift.",
+            tip = "[IV] Expunge's Poison dispel is a source of dispel type for removingVoid Rift.",
         },
         {
             class = "EVOKER",
@@ -7658,12 +7657,12 @@ D.contexts.dungeons[2805] = {
         {
             class = "SHAMAN",
             spell = "",
-            tip = "[IV] As Restoration Shamans has many situational talents, make sure to adapt\nyour general tree talents from dungeon to dungeon to include situational utility\nsuch asTremor Totemfor fears,Improved Purify Spirit(curse dispel)\nandPoison Cleansing Totem(poison dispel),Hex,Thunderous PawsandJet Streamto remov",
+            tip = "[IV] Poison Cleansing Totemimmediately dispels everything. Pretty strong!",
         },
         {
             class = "SHAMAN",
             spell = "",
-            tip = "[IV] Restoration Shaman provides support for the party through healing, damage,\nand other additional effects, such as dispels and crowd control, as detailed below:",
+            tip = "[IV] Wind Shearis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of the group and especially\nthe tank. It ishighly recommendedto use a Focus Kick macro for this.",
         },
         {
             class = "WARLOCK",
@@ -7931,7 +7930,7 @@ D.contexts.dungeons[2805] = {
                     id = "den_of_nalorakk_tip_4",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Disruptis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of yourself and the rest of\nthe group. It ishighly recommendedto use a Focus Kick macro for this.",
+                    body = "[IV] Consume Magicis Havoc's offensive dispel with a 10-second cooldown.\nThis has the advantage of a 30-yard range and can be used to remove buffs from\nenemy targets. Its cooldown does mean you have to be picky with what to dispel\nthough, especially if multiple enemies are buffed at once.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -7956,7 +7955,7 @@ D.contexts.dungeons[2805] = {
                     id = "den_of_nalorakk_tip_7",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Expunge/Cauterizing FlamePoison/Disease dispel is a source of dispel type for removingVoid Rift.",
+                    body = "[IV] Expunge's Poison dispel is a source of dispel type for removingVoid Rift.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -8061,7 +8060,7 @@ D.contexts.dungeons[2805] = {
                     id = "den_of_nalorakk_tip_20",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] As Restoration Shamans has many situational talents, make sure to adapt\nyour general tree talents from dungeon to dungeon to include situational utility\nsuch asTremor Totemfor fears,Improved Purify Spirit(curse dispel)\nandPoison Cleansing Totem(poison dispel),Hex,Thunderous PawsandJet Streamto remov",
+                    body = "[IV] Poison Cleansing Totemimmediately dispels everything. Pretty strong!",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -8069,7 +8068,7 @@ D.contexts.dungeons[2805] = {
                     id = "den_of_nalorakk_tip_21",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Restoration Shaman provides support for the party through healing, damage,\nand other additional effects, such as dispels and crowd control, as detailed below:",
+                    body = "[IV] Wind Shearis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of the group and especially\nthe tank. It ishighly recommendedto use a Focus Kick macro for this.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -8490,7 +8489,7 @@ D.contexts.dungeons[2806] = {
         {
             class = "DEMONHUNTER",
             spell = "",
-            tip = "[IV] Disruptis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of yourself and the rest of\nthe group. It ishighly recommendedto use a Focus Kick macro for this.",
+            tip = "[IV] Consume Magicis Havoc's offensive dispel with a 10-second cooldown.\nThis has the advantage of a 30-yard range and can be used to remove buffs from\nenemy targets. Its cooldown does mean you have to be picky with what to dispel\nthough, especially if multiple enemies are buffed at once.",
         },
         {
             class = "DRUID",
@@ -8505,7 +8504,7 @@ D.contexts.dungeons[2806] = {
         {
             class = "EVOKER",
             spell = "",
-            tip = "[IV] Expunge/Cauterizing FlamePoison/Disease dispel is a source of dispel type for removingVoid Rift.",
+            tip = "[IV] Expunge's Poison dispel is a source of dispel type for removingVoid Rift.",
         },
         {
             class = "EVOKER",
@@ -8570,12 +8569,12 @@ D.contexts.dungeons[2806] = {
         {
             class = "SHAMAN",
             spell = "",
-            tip = "[IV] As Restoration Shamans has many situational talents, make sure to adapt\nyour general tree talents from dungeon to dungeon to include situational utility\nsuch asTremor Totemfor fears,Improved Purify Spirit(curse dispel)\nandPoison Cleansing Totem(poison dispel),Hex,Thunderous PawsandJet Streamto remov",
+            tip = "[IV] Poison Cleansing Totemimmediately dispels everything. Pretty strong!",
         },
         {
             class = "SHAMAN",
             spell = "",
-            tip = "[IV] Restoration Shaman provides support for the party through healing, damage,\nand other additional effects, such as dispels and crowd control, as detailed below:",
+            tip = "[IV] Wind Shearis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of the group and especially\nthe tank. It ishighly recommendedto use a Focus Kick macro for this.",
         },
         {
             class = "WARLOCK",
@@ -8852,7 +8851,7 @@ D.contexts.dungeons[2806] = {
                     id = "maisara_caverns_tip_4",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Disruptis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of yourself and the rest of\nthe group. It ishighly recommendedto use a Focus Kick macro for this.",
+                    body = "[IV] Consume Magicis Havoc's offensive dispel with a 10-second cooldown.\nThis has the advantage of a 30-yard range and can be used to remove buffs from\nenemy targets. Its cooldown does mean you have to be picky with what to dispel\nthough, especially if multiple enemies are buffed at once.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -8876,7 +8875,7 @@ D.contexts.dungeons[2806] = {
                     id = "maisara_caverns_tip_7",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Expunge/Cauterizing FlamePoison/Disease dispel is a source of dispel type for removingVoid Rift.",
+                    body = "[IV] Expunge's Poison dispel is a source of dispel type for removingVoid Rift.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -8981,7 +8980,7 @@ D.contexts.dungeons[2806] = {
                     id = "maisara_caverns_tip_20",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] As Restoration Shamans has many situational talents, make sure to adapt\nyour general tree talents from dungeon to dungeon to include situational utility\nsuch asTremor Totemfor fears,Improved Purify Spirit(curse dispel)\nandPoison Cleansing Totem(poison dispel),Hex,Thunderous PawsandJet Streamto remov",
+                    body = "[IV] Poison Cleansing Totemimmediately dispels everything. Pretty strong!",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -8989,7 +8988,7 @@ D.contexts.dungeons[2806] = {
                     id = "maisara_caverns_tip_21",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Restoration Shaman provides support for the party through healing, damage,\nand other additional effects, such as dispels and crowd control, as detailed below:",
+                    body = "[IV] Wind Shearis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of the group and especially\nthe tank. It ishighly recommendedto use a Focus Kick macro for this.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -9427,7 +9426,7 @@ D.contexts.dungeons[2807] = {
         {
             class = "DEMONHUNTER",
             spell = "",
-            tip = "[IV] Disruptis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of yourself and the rest of\nthe group. It ishighly recommendedto use a Focus Kick macro for this.",
+            tip = "[IV] Consume Magicis Havoc's offensive dispel with a 10-second cooldown.\nThis has the advantage of a 30-yard range and can be used to remove buffs from\nenemy targets. Its cooldown does mean you have to be picky with what to dispel\nthough, especially if multiple enemies are buffed at once.",
         },
         {
             class = "DRUID",
@@ -9442,7 +9441,7 @@ D.contexts.dungeons[2807] = {
         {
             class = "EVOKER",
             spell = "",
-            tip = "[IV] Expunge/Cauterizing FlamePoison/Disease dispel is a source of dispel type for removingVoid Rift.",
+            tip = "[IV] Expunge's Poison dispel is a source of dispel type for removingVoid Rift.",
         },
         {
             class = "EVOKER",
@@ -9507,12 +9506,12 @@ D.contexts.dungeons[2807] = {
         {
             class = "SHAMAN",
             spell = "",
-            tip = "[IV] As Restoration Shamans has many situational talents, make sure to adapt\nyour general tree talents from dungeon to dungeon to include situational utility\nsuch asTremor Totemfor fears,Improved Purify Spirit(curse dispel)\nandPoison Cleansing Totem(poison dispel),Hex,Thunderous PawsandJet Streamto remov",
+            tip = "[IV] Poison Cleansing Totemimmediately dispels everything. Pretty strong!",
         },
         {
             class = "SHAMAN",
             spell = "",
-            tip = "[IV] Restoration Shaman provides support for the party through healing, damage,\nand other additional effects, such as dispels and crowd control, as detailed below:",
+            tip = "[IV] Wind Shearis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of the group and especially\nthe tank. It ishighly recommendedto use a Focus Kick macro for this.",
         },
         {
             class = "WARLOCK",
@@ -9808,7 +9807,7 @@ D.contexts.dungeons[2807] = {
                     id = "nexus_point_xenas_tip_4",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Disruptis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of yourself and the rest of\nthe group. It ishighly recommendedto use a Focus Kick macro for this.",
+                    body = "[IV] Consume Magicis Havoc's offensive dispel with a 10-second cooldown.\nThis has the advantage of a 30-yard range and can be used to remove buffs from\nenemy targets. Its cooldown does mean you have to be picky with what to dispel\nthough, especially if multiple enemies are buffed at once.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -9832,7 +9831,7 @@ D.contexts.dungeons[2807] = {
                     id = "nexus_point_xenas_tip_7",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Expunge/Cauterizing FlamePoison/Disease dispel is a source of dispel type for removingVoid Rift.",
+                    body = "[IV] Expunge's Poison dispel is a source of dispel type for removingVoid Rift.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -9936,7 +9935,7 @@ D.contexts.dungeons[2807] = {
                     id = "nexus_point_xenas_tip_20",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] As Restoration Shamans has many situational talents, make sure to adapt\nyour general tree talents from dungeon to dungeon to include situational utility\nsuch asTremor Totemfor fears,Improved Purify Spirit(curse dispel)\nandPoison Cleansing Totem(poison dispel),Hex,Thunderous PawsandJet Streamto remov",
+                    body = "[IV] Poison Cleansing Totemimmediately dispels everything. Pretty strong!",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -9944,7 +9943,7 @@ D.contexts.dungeons[2807] = {
                     id = "nexus_point_xenas_tip_21",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Restoration Shaman provides support for the party through healing, damage,\nand other additional effects, such as dispels and crowd control, as detailed below:",
+                    body = "[IV] Wind Shearis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of the group and especially\nthe tank. It ishighly recommendedto use a Focus Kick macro for this.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -10380,7 +10379,7 @@ D.contexts.dungeons[2808] = {
         {
             class = "DEMONHUNTER",
             spell = "",
-            tip = "[IV] Disruptis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of yourself and the rest of\nthe group. It ishighly recommendedto use a Focus Kick macro for this.",
+            tip = "[IV] Consume Magicis Havoc's offensive dispel with a 10-second cooldown.\nThis has the advantage of a 30-yard range and can be used to remove buffs from\nenemy targets. Its cooldown does mean you have to be picky with what to dispel\nthough, especially if multiple enemies are buffed at once.",
         },
         {
             class = "DRUID",
@@ -10395,7 +10394,7 @@ D.contexts.dungeons[2808] = {
         {
             class = "EVOKER",
             spell = "",
-            tip = "[IV] Expunge/Cauterizing FlamePoison/Disease dispel is a source of dispel type for removingVoid Rift.",
+            tip = "[IV] Expunge's Poison dispel is a source of dispel type for removingVoid Rift.",
         },
         {
             class = "EVOKER",
@@ -10460,12 +10459,12 @@ D.contexts.dungeons[2808] = {
         {
             class = "SHAMAN",
             spell = "",
-            tip = "[IV] As Restoration Shamans has many situational talents, make sure to adapt\nyour general tree talents from dungeon to dungeon to include situational utility\nsuch asTremor Totemfor fears,Improved Purify Spirit(curse dispel)\nandPoison Cleansing Totem(poison dispel),Hex,Thunderous PawsandJet Streamto remov",
+            tip = "[IV] Poison Cleansing Totemimmediately dispels everything. Pretty strong!",
         },
         {
             class = "SHAMAN",
             spell = "",
-            tip = "[IV] Restoration Shaman provides support for the party through healing, damage,\nand other additional effects, such as dispels and crowd control, as detailed below:",
+            tip = "[IV] Wind Shearis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of the group and especially\nthe tank. It ishighly recommendedto use a Focus Kick macro for this.",
         },
         {
             class = "WARLOCK",
@@ -10685,7 +10684,7 @@ D.contexts.dungeons[2808] = {
                     id = "voidscar_arena_tip_4",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Disruptis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of yourself and the rest of\nthe group. It ishighly recommendedto use a Focus Kick macro for this.",
+                    body = "[IV] Consume Magicis Havoc's offensive dispel with a 10-second cooldown.\nThis has the advantage of a 30-yard range and can be used to remove buffs from\nenemy targets. Its cooldown does mean you have to be picky with what to dispel\nthough, especially if multiple enemies are buffed at once.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -10709,7 +10708,7 @@ D.contexts.dungeons[2808] = {
                     id = "voidscar_arena_tip_7",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Expunge/Cauterizing FlamePoison/Disease dispel is a source of dispel type for removingVoid Rift.",
+                    body = "[IV] Expunge's Poison dispel is a source of dispel type for removingVoid Rift.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -10813,7 +10812,7 @@ D.contexts.dungeons[2808] = {
                     id = "voidscar_arena_tip_20",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] As Restoration Shamans has many situational talents, make sure to adapt\nyour general tree talents from dungeon to dungeon to include situational utility\nsuch asTremor Totemfor fears,Improved Purify Spirit(curse dispel)\nandPoison Cleansing Totem(poison dispel),Hex,Thunderous PawsandJet Streamto remov",
+                    body = "[IV] Poison Cleansing Totemimmediately dispels everything. Pretty strong!",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -10821,7 +10820,7 @@ D.contexts.dungeons[2808] = {
                     id = "voidscar_arena_tip_21",
                     kind = "helper",
                     title = "Class Tip",
-                    body = "[IV] Restoration Shaman provides support for the party through healing, damage,\nand other additional effects, such as dispels and crowd control, as detailed below:",
+                    body = "[IV] Wind Shearis your \"kick\" and your most important bit of utility in\nMythic+, used to stop enemy casts for the benefit of the group and especially\nthe tank. It ishighly recommendedto use a Focus Kick macro for this.",
                     tone = "info",
                     source = "icyveins",
                 },
@@ -13789,12 +13788,25 @@ D.contexts.raids["march_on_queldanas"] = {
         guideUrl = "https://www.wowhead.com/guide/midnight/raids/march-on-quel-danas-overview-location-rewards-bosses",
         location = "The March on Quel'Danas raid is located in the Isle of Quel'Danas, towards the south.",
         releaseSchedule = {
-            "Week of March 31:",
-            "Mythic",
-            "Week of April 7:",
-            "Raid Finder",
-            "Story Mode",
+            {
+                label = "Week of March 31",
+                dateLabel = "March 31, 2026",
+                unlocks = {
+                    "Normal",
+                    "Heroic",
+                    "Mythic",
+                },
+            },
+            {
+                label = "Week of April 7",
+                dateLabel = "April 7, 2026",
+                unlocks = {
+                    "Raid Finder",
+                    "Story Mode",
+                },
+            },
         },
+        unlockNote = "Unlocks occur with each region's weekly maintenance reset.",
         bosses = {
             "Belo'ren, Child of Al'ar",
             "Midnight Falls",
@@ -13829,6 +13841,14 @@ D.contexts.raids["march_on_queldanas"] = {
                     tone = "info",
                     source = "wowhead",
                 },
+                {
+                    id = "march_on_queldanas_you_unlocks",
+                    kind = "callout",
+                    title = "Launch & Unlocks",
+                    body = "Unlocks occur with each region's weekly maintenance reset.\nMarch 31, 2026: Normal, Heroic, Mythic\nApril 7, 2026: Raid Finder, Story Mode",
+                    tone = "info",
+                    source = "wowhead",
+                },
             },
             helpers = {
                 {
@@ -13844,14 +13864,6 @@ D.contexts.raids["march_on_queldanas"] = {
                     kind = "helper",
                     title = "Raid Location",
                     body = "The March on Quel'Danas raid is located in the Isle of Quel'Danas, towards the south.",
-                    tone = "info",
-                    source = "wowhead",
-                },
-                {
-                    id = "march_on_queldanas_you_bosses",
-                    kind = "helper",
-                    title = "Bosses",
-                    body = "Belo'ren, Child of Al'ar, Midnight Falls",
                     tone = "info",
                     source = "wowhead",
                 },
@@ -13900,8 +13912,8 @@ D.contexts.raids["march_on_queldanas"] = {
                 {
                     id = "march_on_queldanas_raid_release",
                     kind = "callout",
-                    title = "Release Schedule",
-                    body = "Week of March 31: | Mythic | Week of April 7: | Raid Finder | Story Mode",
+                    title = "Launch & Unlocks",
+                    body = "Unlocks occur with each region's weekly maintenance reset.\nMarch 31, 2026: Normal, Heroic, Mythic\nApril 7, 2026: Raid Finder, Story Mode",
                     tone = "info",
                     source = "wowhead",
                 },
@@ -13930,11 +13942,24 @@ D.contexts.raids["the_dreamrift"] = {
         guideUrl = "https://www.wowhead.com/guide/midnight/raids/the-dreamrift-overview-location-rewards-boss",
         location = "The Root Cause",
         releaseSchedule = {
-            "Week of March 17:",
-            "Raid Finder",
-            "Week of March 24:",
-            "Mythic",
+            {
+                label = "Week of March 17",
+                dateLabel = "March 17, 2026",
+                unlocks = {
+                    "Normal",
+                    "Heroic",
+                    "Raid Finder",
+                },
+            },
+            {
+                label = "Week of March 24",
+                dateLabel = "March 24, 2026",
+                unlocks = {
+                    "Mythic",
+                },
+            },
         },
+        unlockNote = "Unlocks occur with each region's weekly maintenance reset.",
         bosses = {
             "Chimaerus",
         },
@@ -13965,6 +13990,14 @@ D.contexts.raids["the_dreamrift"] = {
                     kind = "callout",
                     title = "Single-Boss Prep",
                     body = "Play for repeatability: stable damage, disciplined movement, and defensives that line up the same way every pull.",
+                    tone = "info",
+                    source = "wowhead",
+                },
+                {
+                    id = "the_dreamrift_you_unlocks",
+                    kind = "callout",
+                    title = "Launch & Unlocks",
+                    body = "Unlocks occur with each region's weekly maintenance reset.\nMarch 17, 2026: Normal, Heroic, Raid Finder\nMarch 24, 2026: Mythic",
                     tone = "info",
                     source = "wowhead",
                 },
@@ -14039,8 +14072,8 @@ D.contexts.raids["the_dreamrift"] = {
                 {
                     id = "the_dreamrift_raid_release",
                     kind = "callout",
-                    title = "Release Schedule",
-                    body = "Week of March 17: | Raid Finder | Week of March 24: | Mythic",
+                    title = "Launch & Unlocks",
+                    body = "Unlocks occur with each region's weekly maintenance reset.\nMarch 17, 2026: Normal, Heroic, Raid Finder\nMarch 24, 2026: Mythic",
                     tone = "info",
                     source = "wowhead",
                 },
@@ -14069,15 +14102,33 @@ D.contexts.raids["the_voidspire"] = {
         guideUrl = "https://www.wowhead.com/guide/midnight/raids/the-voidspire-overview-location-rewards-bosses",
         location = "The Voidspire raid is located in the Voidstorm, towards the center of the zone.",
         releaseSchedule = {
-            "Week of March 17:",
-            "Raid Finder Wing 1",
-            "Week of March 24:",
-            "Raid Finder Wing 2",
-            "Story Mode",
-            "Mythic",
-            "Week of March 31:",
-            "Raid Finder Wing 3",
+            {
+                label = "Week of March 17",
+                dateLabel = "March 17, 2026",
+                unlocks = {
+                    "Normal",
+                    "Heroic",
+                    "Raid Finder Wing 1",
+                },
+            },
+            {
+                label = "Week of March 24",
+                dateLabel = "March 24, 2026",
+                unlocks = {
+                    "Mythic",
+                    "Raid Finder Wing 2",
+                    "Story Mode",
+                },
+            },
+            {
+                label = "Week of March 31",
+                dateLabel = "March 31, 2026",
+                unlocks = {
+                    "Raid Finder Wing 3",
+                },
+            },
         },
+        unlockNote = "Unlocks occur with each region's weekly maintenance reset.",
         bosses = {
             "Imperator Averzian",
             "Vorasius",
@@ -14113,6 +14164,14 @@ D.contexts.raids["the_voidspire"] = {
                     kind = "callout",
                     title = "Early Progression Focus",
                     body = "Start with stable raid throughput, preserve movement for mechanics, and treat personals as assignment tools instead of flexible padding.",
+                    tone = "info",
+                    source = "wowhead",
+                },
+                {
+                    id = "the_voidspire_you_unlocks",
+                    kind = "callout",
+                    title = "Launch & Unlocks",
+                    body = "Unlocks occur with each region's weekly maintenance reset.\nMarch 17, 2026: Normal, Heroic, Raid Finder Wing 1\nMarch 24, 2026: Mythic, Raid Finder Wing 2, Story Mode\nMarch 31, 2026: Raid Finder Wing 3",
                     tone = "info",
                     source = "wowhead",
                 },
@@ -14187,8 +14246,8 @@ D.contexts.raids["the_voidspire"] = {
                 {
                     id = "the_voidspire_raid_release",
                     kind = "callout",
-                    title = "Release Schedule",
-                    body = "Week of March 17: | Raid Finder Wing 1 | Week of March 24: | Raid Finder Wing 2 | Story Mode | Mythic | Week of March 31: | Raid Finder Wing 3",
+                    title = "Launch & Unlocks",
+                    body = "Unlocks occur with each region's weekly maintenance reset.\nMarch 17, 2026: Normal, Heroic, Raid Finder Wing 1\nMarch 24, 2026: Mythic, Raid Finder Wing 2, Story Mode\nMarch 31, 2026: Raid Finder Wing 3",
                     tone = "info",
                     source = "wowhead",
                 },
