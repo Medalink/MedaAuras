@@ -9,8 +9,8 @@ local MedaUI = LibStub("MedaUI-1.0")
 local MODULE_NAME      = "Reminders"
 local MODULE_VERSION   = "1.1"
 local MODULE_STABILITY = "beta"   -- "experimental" | "beta" | "stable"
-local MIN_DATA_VERSION = 2
-local MAX_DATA_VERSION = 10
+local MIN_DATA_VERSION = 1
+local MAX_DATA_VERSION = 1
 
 local SEVERITY_PRIORITY = { critical = 3, warning = 2, info = 1 }
 local SEVERITY_COLORS = {
@@ -54,6 +54,7 @@ local uiState = {
         specID = nil,
     },
     toolbar = {},
+    suppressToolbarCallbacks = false,
     navExpanded = {
         delves = true,
         dungeons = true,
@@ -96,6 +97,13 @@ local ResolveInstanceContext
 local GetActivityKey
 local IsCurrentPartyFull
 local GetFullGroupWorkaround
+local ROLE_LABELS
+local GetClassLabel
+local EnsurePersonalSchema
+local EnsureSpecRegistry
+local GetViewerProfile
+local BuildStructuredCapabilityOutput
+local BuildPerspectiveSummary
 
 -- ============================================================================
 -- Logging
@@ -133,82 +141,9 @@ end
 -- Helpers
 -- ============================================================================
 
-local function FormatRelativeTime(unixTimestamp)
-    if not unixTimestamp or unixTimestamp == 0 then return nil end
-    local now = time()
-    local diff = now - unixTimestamp
-    if diff < 0 then return "just now" end
-    local days = math.floor(diff / 86400)
-    local hours = math.floor((diff % 86400) / 3600)
-    local mins = math.floor((diff % 3600) / 60)
-    if days > 0 then
-        if hours > 0 then
-            return format("%dd %dh ago", days, hours)
-        end
-        return format("%dd ago", days)
-    end
-    if hours > 0 then
-        if mins > 0 then
-            return format("%dh %dm ago", hours, mins)
-        end
-        return format("%dh ago", hours)
-    end
-    if mins > 0 then return format("%dm ago", mins) end
-    return "just now"
-end
-
-local function BuildSourceFreshnessLine()
-    local data = GetData()
-    if not data or not data.sources then return nil end
-    local hasTimestamp = false
-    local parts = {}
-    for key, src in pairs(data.sources) do
-        local c = src.color or { 0.7, 0.7, 0.7 }
-        local hex = format("%02x%02x%02x",
-            math.floor(c[1] * 255), math.floor(c[2] * 255), math.floor(c[3] * 255))
-        if src.lastFetched then
-            local rel = FormatRelativeTime(src.lastFetched)
-            if rel then
-                hasTimestamp = true
-                parts[#parts + 1] = format("|cff%s%s|r %s", hex, src.label, rel)
-            else
-                parts[#parts + 1] = format("|cff%s%s|r", hex, src.label)
-            end
-        else
-            parts[#parts + 1] = format("|cff%s%s|r", hex, src.label)
-        end
-    end
-    if #parts == 0 then return nil end
-    local prefix = hasTimestamp and "Updated: " or "Sources: "
-    return prefix .. table.concat(parts, "  |  ")
-end
-
 -- ============================================================================
 -- Content-type filtering
 -- ============================================================================
-
-local CONTENT_TAG_MAP = {
-    delve = { "delve" },
-    party = { "mplus", "key" },
-    raid  = { "raid" },
-}
-
-local function GetContentTags(ctx)
-    if ctx.isDelve then return CONTENT_TAG_MAP.delve end
-    if ctx.instanceType then return CONTENT_TAG_MAP[ctx.instanceType] end
-    return nil
-end
-
-local function RecMatchesContentTags(rec, tags)
-    if not tags then return true end
-    if not rec.notes then return true end
-    local lower = rec.notes:lower()
-    if lower:find("general") then return true end
-    for _, tag in ipairs(tags) do
-        if lower:find(tag) then return true end
-    end
-    return false
-end
 
 local CONTENT_CATEGORIES = {
     { key = "raid",  label = "Raid" },
@@ -451,13 +386,12 @@ end
 local function GetLiveRoster()
     local roster = {}
     local GroupInspector = ns.Services.GroupInspector
-    if not GroupInspector then return roster end
 
     if IsInRaid() then
         for i = 1, GetNumGroupMembers() do
             local unit = "raid" .. i
             if UnitExists(unit) then
-                local info = GroupInspector:GetUnitInfo(unit)
+                local info = GroupInspector and GroupInspector:GetUnitInfo(unit) or nil
                 local _, classToken = UnitClass(unit)
                 roster[#roster + 1] = {
                     unit = unit,
@@ -482,7 +416,7 @@ local function GetLiveRoster()
         for i = 1, 4 do
             local unit = "party" .. i
             if UnitExists(unit) then
-                local info = GroupInspector:GetUnitInfo(unit)
+                local info = GroupInspector and GroupInspector:GetUnitInfo(unit) or nil
                 local _, classToken = UnitClass(unit)
                 roster[#roster + 1] = {
                     unit = unit,
@@ -827,9 +761,124 @@ local function ParseContextSelection(value)
     return nil
 end
 
-local function BuildStructuredCapabilityOutput(result, ctx)
+local function GetSupportedRolesForClass(classToken)
+    local data = GetData()
+    EnsureSpecRegistry(data)
+
+    local roleMap = {}
+    local specs = data and data.specRegistry and data.specRegistry.byClass and data.specRegistry.byClass[classToken] or nil
+    for _, spec in ipairs(specs or {}) do
+        roleMap[spec.role] = true
+    end
+
+    local roles = {}
+    for _, role in ipairs({ "tank", "healer", "dps" }) do
+        if roleMap[role] then
+            roles[#roles + 1] = role
+        end
+    end
+    return roles
+end
+
+local function GetSpecsForRole(classToken, role)
+    local data = GetData()
+    EnsureSpecRegistry(data)
+    local specs = {}
+    for _, spec in ipairs(data and data.specRegistry and data.specRegistry.byClass and data.specRegistry.byClass[classToken] or {}) do
+        if not role or spec.role == role then
+            specs[#specs + 1] = spec
+        end
+    end
+    table.sort(specs, function(a, b) return (a.specName or "") < (b.specName or "") end)
+    return specs
+end
+
+function GetDefaultSpecForClassRole(classToken, role)
+    local specs = GetSpecsForRole(classToken, role)
+    return specs[1]
+end
+
+function BuildRoleDropdownItems(classToken)
+    local roles = GetSupportedRolesForClass(classToken)
+    local items = {}
+    for _, role in ipairs(roles) do
+        items[#items + 1] = {
+            value = role,
+            label = ROLE_LABELS[role] or role,
+        }
+    end
+    return items
+end
+
+function BuildClassDropdownItems()
+    local data = GetData()
+    EnsureSpecRegistry(data)
+
+    local items = {}
+    for _, classToken in ipairs(ALL_CLASSES or {}) do
+        if data and data.specRegistry and data.specRegistry.byClass and data.specRegistry.byClass[classToken] then
+            items[#items + 1] = {
+                value = classToken,
+                label = GetClassLabel(classToken),
+            }
+        end
+    end
+    table.sort(items, function(a, b) return (a.label or "") < (b.label or "") end)
+    return items
+end
+
+function BuildSpecDropdownItems(classToken, role)
+    local items = {}
+    for _, spec in ipairs(GetSpecsForRole(classToken, role)) do
+        items[#items + 1] = {
+            value = spec.specID,
+            label = spec.specName,
+        }
+    end
+    return items
+end
+
+function SyncViewerToolbar()
+    local toolbar = uiState.toolbar or {}
+    local viewer = GetViewerProfile()
+    if not viewer or not toolbar.classDropdown or not toolbar.roleDropdown or not toolbar.specDropdown then
+        return
+    end
+
+    uiState.suppressToolbarCallbacks = true
+
+    local roleItems = BuildRoleDropdownItems(viewer.classToken)
+    toolbar.roleDropdown:SetOptions(roleItems)
+    toolbar.roleDropdown:SetEnabled(#roleItems > 1)
+    toolbar.roleDropdown:SetSelected(viewer.role)
+
+    local classItems = BuildClassDropdownItems()
+    toolbar.classDropdown:SetOptions(classItems)
+    toolbar.classDropdown:SetSelected(viewer.classToken)
+
+    local specItems = BuildSpecDropdownItems(viewer.classToken, viewer.role)
+    toolbar.specDropdown:SetOptions(specItems)
+    if #specItems > 1 then
+        toolbar.specDropdown:Show()
+        toolbar.specDropdown:SetEnabled(true)
+        toolbar.specDropdown:SetSelected(viewer.specID)
+    else
+        toolbar.specDropdown:Hide()
+    end
+
+    uiState.suppressToolbarCallbacks = false
+end
+
+BuildStructuredCapabilityOutput = function(result, ctx)
     local output = result and result.output or {}
-    local tone = output.severity or (result and result.matchCount > 0 and "info" or "warning")
+    local tone
+    if output.severity == "critical" or output.severity == "high" then
+        tone = "critical"
+    elseif output.severity == "warning" or output.severity == "medium" then
+        tone = "warning"
+    else
+        tone = result and result.matchCount > 0 and "info" or "warning"
+    end
     local summary = output.detail or output.banner or "Coverage available."
     local missingAction = output.suggestion
     local fullGroupWorkaround = GetFullGroupWorkaround(result and result.capabilityID)
@@ -947,74 +996,6 @@ local function GetEnabledSources(usedSet)
     return sources
 end
 
-local function GetFreshnessTone(lastFetched)
-    if not lastFetched or lastFetched == 0 then return "warning" end
-    local age = time() - lastFetched
-    if age >= (86400 * 3) then return "warning" end
-    return nil
-end
-
-local function BuildFreshnessSummary(usedSet)
-    local sources = GetEnabledSources(usedSet)
-    if #sources == 0 then
-        return "No active data sources enabled.", "warning"
-    end
-
-    local summarySources = {}
-    for _, source in ipairs(sources) do
-        if source.usedByCurrentView then
-            summarySources[#summarySources + 1] = source
-        end
-    end
-    if #summarySources == 0 then
-        summarySources = sources
-    end
-
-    local usedNames = {}
-    local oldestAgeText = nil
-    local oldestTimestamp = nil
-    local unknown = 0
-    local tone = nil
-
-    for _, source in ipairs(summarySources) do
-        if source.usedByCurrentView then
-            usedNames[#usedNames + 1] = source.label
-        end
-        if source.lastFetched and source.lastFetched > 0 then
-            if not oldestTimestamp or source.lastFetched < oldestTimestamp then
-                oldestTimestamp = source.lastFetched
-            end
-        else
-            unknown = unknown + 1
-            tone = tone or "warning"
-        end
-        tone = tone or GetFreshnessTone(source.lastFetched)
-    end
-
-    if oldestTimestamp then
-        oldestAgeText = FormatRelativeTime(oldestTimestamp)
-    end
-
-    local prefix
-    if #usedNames > 0 then
-        prefix = "This page uses " .. table.concat(usedNames, ", ")
-    else
-        prefix = "This page can draw from " .. table.concat((function()
-            local labels = {}
-            for _, src in ipairs(sources) do labels[#labels + 1] = src.label end
-            return labels
-        end)(), ", ")
-    end
-
-    if oldestAgeText then
-        return prefix .. "; oldest update " .. oldestAgeText .. ".", tone
-    end
-    if unknown > 0 then
-        return prefix .. "; freshness is unknown for some sources.", "warning"
-    end
-    return prefix .. ".", tone
-end
-
 IsCurrentPartyFull = function(ctx)
     if not ctx or ctx.instanceType ~= "party" then return false end
     if IsInRaid() then return false end
@@ -1034,18 +1015,6 @@ GetFullGroupWorkaround = function(capabilityID)
     }
     return fallback[capabilityID]
         or "No in-group coverage. Adjust your own build, spec, pet, consumables, and routing to compensate with the current roster."
-end
-
-local function GetActionableSuggestion(result, ctx)
-    local output = result and result.output or {}
-    local suggestion = output.suggestion or output.detail or ""
-    if result and result.matchCount == 0 and IsCurrentPartyFull(ctx) then
-        local lowered = suggestion:lower()
-        if lowered:find("invite ", 1, true) or lowered:find("bring ", 1, true) then
-            return GetFullGroupWorkaround(result.capabilityID)
-        end
-    end
-    return suggestion
 end
 
 -- ============================================================================
@@ -3162,38 +3131,6 @@ local function RenderPrepTab(content)
 end
 
 -- ============================================================================
--- UI: Notification Banner
--- ============================================================================
-
-local function ShowBannerIfNeeded(results)
-    if not db or not db.alertEnabled then return end
-    if coveragePanel and coveragePanel:IsShown() then return end
-
-    local threshold = SEVERITY_PRIORITY[db.alertSeverityThreshold or "warning"] or 2
-
-    for _, r in ipairs(results) do
-        local output = r.output or {}
-        if output.banner and output.severity then
-            local pri = SEVERITY_PRIORITY[output.severity] or 0
-            if pri >= threshold then
-                if alertBanner then
-                    alertBanner:Show(output.banner, db.alertDuration or 5)
-                end
-                Log(format("Banner shown: %s", output.banner))
-                return
-            end
-        end
-    end
-end
-
-
-local function RefreshFreshnessBar()
-    if not coveragePanel then return end
-    local text = BuildSourceFreshnessLine()
-    coveragePanel:SetFooter(text)
-end
-
--- ============================================================================
 -- Reminders 2.0 workspace rendering
 -- ============================================================================
 
@@ -3257,7 +3194,7 @@ SPEC_META_BY_ID = {
     [1473] = { classToken = "EVOKER", specName = "Augmentation", role = "dps" },
 }
 
-local ROLE_LABELS = {
+ROLE_LABELS = {
     tank = "Tank",
     healer = "Healer",
     dps = "DPS",
@@ -3285,7 +3222,7 @@ local PERSONAL_KIND_BY_BUILD = {
 
 local PAGE_SECTION_ORDER = { "overview", "mechanics", "loadout", "utility", "assignments", "helpers", "workarounds" }
 
-local function SafeText(value)
+function SafeText(value)
     if value == nil then return nil end
     if type(value) == "string" then
         local trimmed = value:match("^%s*(.-)%s*$")
@@ -3295,7 +3232,7 @@ local function SafeText(value)
     return tostring(value)
 end
 
-local function AppendLines(target, value)
+function AppendLines(target, value)
     if type(value) == "table" then
         for _, line in ipairs(value) do
             local text = SafeText(line)
@@ -3311,14 +3248,14 @@ local function AppendLines(target, value)
     end
 end
 
-local function GetClassLabel(classToken)
+GetClassLabel = function(classToken)
     return (LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[classToken])
         or (LOCALIZED_CLASS_NAMES_FEMALE and LOCALIZED_CLASS_NAMES_FEMALE[classToken])
         or classToken
         or "Unknown"
 end
 
-local function GetSpecMeta(specID, classToken)
+function GetSpecMeta(specID, classToken)
     local meta = specID and SPEC_META_BY_ID[specID]
     if meta then
         return meta
@@ -3331,11 +3268,11 @@ local function GetSpecMeta(specID, classToken)
     }
 end
 
-local function GetRoleFromSpec(specID, classToken)
+function GetRoleFromSpec(specID, classToken)
     return GetSpecMeta(specID, classToken).role or "dps"
 end
 
-local function NormalizeLegacyActivityTag(tag)
+function NormalizeLegacyActivityTag(tag)
     if not tag or tag == "" or tag == "general" then return "all" end
     if tag == "mplus" then return "dungeon" end
     if tag == "delve" then return "delve" end
@@ -3343,7 +3280,7 @@ local function NormalizeLegacyActivityTag(tag)
     return tag
 end
 
-local function GetContextSelector(activity, ctx, rec)
+function GetContextSelector(activity, ctx, rec)
     if activity == "dungeon" then
         local dungeonID = rec and rec.dungeonID or (ctx and ctx.instanceID)
         if dungeonID then
@@ -3363,7 +3300,7 @@ local function GetContextSelector(activity, ctx, rec)
     return nil
 end
 
-local function BuildContextAwareSummary(rec)
+function BuildContextAwareSummary(rec)
     local parts = {}
     if rec.heroTree and rec.heroTree ~= "" then
         parts[#parts + 1] = rec.heroTree
@@ -3380,7 +3317,7 @@ local function BuildContextAwareSummary(rec)
     return table.concat(parts, " | ")
 end
 
-local function BuildPersonalEntryTitle(rec)
+function BuildPersonalEntryTitle(rec)
     local titles = {
         talent = "Recommended Talent Build",
         hero_talent = "Hero Tree",
@@ -3426,7 +3363,7 @@ local function NormalizeRecommendationEntry(specKey, rec, index)
     }
 end
 
-local function EnsurePersonalSchema(data)
+EnsurePersonalSchema = function(data)
     if not data then return end
     data.personal = data.personal or { bySpec = {} }
     data.personal.bySpec = data.personal.bySpec or {}
@@ -3442,7 +3379,7 @@ local function EnsurePersonalSchema(data)
     end
 end
 
-local function EnsureSpecRegistry(data)
+EnsureSpecRegistry = function(data)
     if not data then return end
     data.specRegistry = data.specRegistry or { byClass = {}, bySpecID = {} }
     data.specRegistry.byClass = {}
@@ -3478,7 +3415,7 @@ local function EnsureSpecRegistry(data)
     end
 end
 
-local function GetLivePlayerProfile()
+function GetLivePlayerProfile()
     local _, classToken = UnitClass("player")
     local specIndex = GetSpecialization()
     local specID = specIndex and GetSpecializationInfo(specIndex)
@@ -3499,7 +3436,7 @@ local function GetLivePlayerProfile()
     }
 end
 
-local function PersistViewerState()
+function PersistViewerState()
     if not db then return end
     local viewer = uiState.viewer or {}
     if viewer.mode == "browse" and viewer.classToken and viewer.specID then
@@ -3514,7 +3451,7 @@ local function PersistViewerState()
     end
 end
 
-local function SetViewerState(classToken, role, specID, modeOverride)
+function SetViewerState(classToken, role, specID, modeOverride)
     local live = GetLivePlayerProfile()
     local selectedClass = classToken or (live and live.classToken)
     local selectedSpec = specID or (live and live.specID)
@@ -3550,7 +3487,7 @@ local function EnsureViewerState()
     end
 end
 
-local function GetViewerProfile()
+GetViewerProfile = function()
     EnsureViewerState()
 
     local live = GetLivePlayerProfile()
@@ -3573,7 +3510,7 @@ local function GetViewerProfile()
     }
 end
 
-local function BuildPerspectiveSummary()
+BuildPerspectiveSummary = function()
     local profile = GetViewerProfile()
     if not profile then return nil end
 
@@ -3584,7 +3521,7 @@ local function BuildPerspectiveSummary()
     return base
 end
 
-local function EntryMatchesView(entry, ctx, activityKey)
+function EntryMatchesView(entry, ctx, activityKey)
     local entryActivity = entry.activity or "all"
     local currentActivity = activityKey or "world"
 
@@ -3600,7 +3537,7 @@ local function EntryMatchesView(entry, ctx, activityKey)
     return selectedContextKey == entry.contextKey
 end
 
-local function BuildPersonalViewModel(ctx, profile)
+function BuildPersonalViewModel(ctx, profile)
     local data = GetData()
     if not data or not profile or not profile.specKey then
         return {
@@ -3695,13 +3632,13 @@ local function BuildPersonalViewModel(ctx, profile)
     return view
 end
 
-local function SeverityToTone(severity)
+function SeverityToTone(severity)
     if severity == "critical" or severity == "high" then return "critical" end
     if severity == "warning" or severity == "medium" then return "warning" end
     return "info"
 end
 
-local function CreatePageEntry(id, kind, title, body, tone, extra)
+function CreatePageEntry(id, kind, title, body, tone, extra)
     local entry = {
         id = id,
         kind = kind,
@@ -3717,7 +3654,7 @@ local function CreatePageEntry(id, kind, title, body, tone, extra)
     return entry
 end
 
-local function EnsureContextPages(context, scopeKey)
+function EnsureContextPages(context, scopeKey)
     if not context then return nil end
     if context.pages then return context.pages end
 
@@ -3875,7 +3812,7 @@ local function EnsureContextPages(context, scopeKey)
     return pages
 end
 
-local function GetContextPage(scope, ctx)
+function GetContextPage(scope, ctx)
     local context = ResolveInstanceContext(GetData(), ctx)
     if not context then return nil, nil end
     local scopeKey = GetContextKey(ctx)
@@ -3883,7 +3820,7 @@ local function GetContextPage(scope, ctx)
     return pages and pages[scope], context
 end
 
-local function GetPageTitle(pageId)
+function GetPageTitle(pageId)
     local titles = {
         personal = "Personal",
         delve_you = "Delves / You",
@@ -3897,16 +3834,28 @@ local function GetPageTitle(pageId)
     return titles[pageId] or "Reminders"
 end
 
-local function GetSubtitleText(ctx)
+function GetSubtitleText(ctx)
     local detected = GetDetectedLabel(GetCurrentContext())
     local selected = GetDetectedLabel(ctx)
+    local viewer = GetViewerProfile()
+    local viewerText = viewer and format("%s %s", viewer.specName or "Spec", viewer.classLabel or "Unknown") or nil
+    if overrideContext and viewerText then
+        return format("Detected: %s  |  Viewing: %s  |  Perspective: %s", detected, selected, viewerText)
+    end
     if overrideContext then
         return format("Detected: %s  |  Viewing: %s", detected, selected)
     end
-    return "Detected: " .. detected
+    if viewer and viewer.mode == "browse" then
+        return format("Detected: %s  |  Perspective: %s", detected, viewerText)
+    end
+    if viewerText then
+        return format("Detected: %s  |  Perspective: %s", detected, viewerText)
+    else
+        return "Detected: " .. detected
+    end
 end
 
-local function EnsureSelectedPage(activityKey)
+function EnsureSelectedPage(activityKey)
     if uiState.selectedPage == "personal" then return end
 
     if activityKey == "delve" and uiState.selectedPage:find("^delve_") then return end
@@ -3916,7 +3865,7 @@ local function EnsureSelectedPage(activityKey)
     uiState.selectedPage = "personal"
 end
 
-local function BuildNavigationModel(activityKey)
+function BuildNavigationModel(activityKey)
     local delveEnabled = activityKey == "delve"
     local dungeonEnabled = activityKey == "dungeon"
     local raidEnabled = activityKey == "raid"
@@ -4719,6 +4668,8 @@ local function RenderPersonalPage(ctx)
     local usedSet = {}
     local viewer = GetViewerProfile()
     local _, _, buckets = GetSpecRecommendations(ctx)
+    local hasPersonalData = (#(buckets.talent or {}) + #(buckets.stats or {}) + #(buckets.gear or {})
+        + #(buckets.enchants or {}) + #(buckets.consumables or {}) + #(buckets.trinkets or {})) > 0
 
     local personalTabBar = MedaUI:CreateTabBar(content, {
         { id = "overview", label = "Overview" },
@@ -4759,7 +4710,7 @@ local function RenderPersonalPage(ctx)
         yOff = RenderStatsCard(content, yOff, buckets.stats, usedSet)
     end
 
-    if yOff == -40 then
+    if not hasPersonalData then
         yOff = AddCard(content, yOff, "No Data Yet", "No recommendations are available for this specialization and activity.", SEVERITY_COLORS.info)
     end
 
@@ -4916,10 +4867,12 @@ local function RenderGroupCoverageSection(content, yOff, ctx, results, noteLines
     end
 
     if totalChecks > 0 then
+        local viewer = GetViewerProfile()
         local color = coveredChecks == totalChecks and COVERED_COLOR
             or (coveredChecks == 0 and SEVERITY_COLORS.critical or SEVERITY_COLORS.warning)
         yOff = AddCard(content, yOff, "Coverage Summary",
-            format("%d of %d tracked checks are covered by the current roster.", coveredChecks, totalChecks),
+            format("%d of %d tracked checks are covered by the %s roster.", coveredChecks, totalChecks,
+                viewer and viewer.mode == "browse" and "simulated" or "current"),
             color)
     end
 
@@ -5025,11 +4978,39 @@ local function RenderCurrentPage()
 
     local ctx = GetEffectiveContext()
     local activityKey = GetActivityKey(ctx)
+    local viewer = GetViewerProfile()
     EnsureSelectedPage(activityKey)
 
     uiState.workspaceShell:SetNavigation(BuildNavigationModel(activityKey))
     uiState.workspaceShell:SetActivePage(uiState.selectedPage)
     uiState.workspaceShell:SetPageTitle(GetPageTitle(uiState.selectedPage), GetSubtitleText(ctx))
+    SyncViewerToolbar()
+    if uiState.toolbar and uiState.toolbar.contextDropdown then
+        uiState.suppressToolbarCallbacks = true
+        uiState.toolbar.contextDropdown:SetOptions(BuildContextDropdownItems())
+        if overrideContext then
+            local activity = GetActivityKey(overrideContext)
+            local selection = "auto"
+            if activity == "dungeon" and overrideContext.instanceID then
+                selection = "dungeon:" .. overrideContext.instanceID
+            elseif activity == "raid" and overrideContext.raidKey then
+                selection = "raid:" .. overrideContext.raidKey
+            elseif activity == "delve" and overrideContext.instanceName then
+                for i, delve in ipairs((GetData() and GetData().contexts and GetData().contexts.delves) or {}) do
+                    if delve.name == overrideContext.instanceName then
+                        selection = "delve:" .. i
+                        break
+                    end
+                end
+            elseif overrideContext.instanceType then
+                selection = "type:" .. overrideContext.instanceType
+            end
+            uiState.toolbar.contextDropdown:SetSelected(selection)
+        else
+            uiState.toolbar.contextDropdown:SetSelected("auto")
+        end
+        uiState.suppressToolbarCallbacks = false
+    end
 
     local usedSet
     if uiState.selectedPage == "personal" then
@@ -5042,7 +5023,7 @@ local function RenderCurrentPage()
         usedSet = RenderGroupPage(ctx, "group")
     end
 
-    uiState.workspaceShell:SetPageSummary(nil)
+    uiState.workspaceShell:SetPageSummary(BuildPerspectiveSummary(), viewer and viewer.mode == "browse" and "warning" or nil)
     uiState.workspaceShell:SetFreshnessSources(GetEnabledSources(usedSet))
 end
 
@@ -5055,6 +5036,16 @@ RunPipeline = function(clearDismiss)
 
     local ok, reason = IsDataCompatible()
     if not ok then return end
+
+    EnsureSpecRegistry(GetData())
+    EnsurePersonalSchema(GetData())
+    EnsureViewerState()
+    if uiState.viewer.mode == "live" then
+        local live = GetLivePlayerProfile()
+        if live then
+            SetViewerState(live.classToken, live.role, live.specID, "live")
+        end
+    end
 
     if clearDismiss then
         local currentKey = GetContextKey(overrideContext or GetCurrentContext())
@@ -5203,7 +5194,10 @@ local function CreateUI()
     if coveragePanel.footer then coveragePanel.footer:Hide() end
     if coveragePanel.statusBar then coveragePanel.statusBar:Hide() end
 
-    uiState.workspaceShell = MedaUI:CreateWorkspaceShell(coveragePanel)
+    uiState.workspaceShell = MedaUI:CreateWorkspaceShell(coveragePanel, {
+        toolbarWidth = 760,
+        headerTextRightGap = 780,
+    })
     uiState.workspaceShell:SetPoint("TOPLEFT", coveragePanel, "TOPLEFT", 8, -38)
     uiState.workspaceShell:SetPoint("BOTTOMRIGHT", coveragePanel, "BOTTOMRIGHT", -8, 8)
     uiState.workspaceShell.OnNavigate = function(_, pageId)
@@ -5221,16 +5215,84 @@ local function CreateUI()
     end
 
     local toolbar = uiState.workspaceShell:GetToolbar()
-    local ddItems = BuildContextDropdownItems()
-    local contextDropdown = MedaUI:CreateDropdown(toolbar, 250, ddItems)
-    contextDropdown:SetSelected("auto")
+    uiState.toolbar = {}
+
+    local contextDropdown = MedaUI:CreateDropdown(toolbar, 220, BuildContextDropdownItems())
     contextDropdown:SetPoint("TOPRIGHT", toolbar, "TOPRIGHT", 0, 0)
     contextDropdown.OnValueChanged = function(_, val)
+        if uiState.suppressToolbarCallbacks then return end
         if val and val:match("^_hdr_") then return end
         overrideContext = ParseContextSelection(val)
         uiState.selectedPage = "personal"
         RunPipeline(false)
     end
+    uiState.toolbar.contextDropdown = contextDropdown
+
+    local classDropdown = MedaUI:CreateDropdown(toolbar, 150, BuildClassDropdownItems())
+    classDropdown:SetPoint("RIGHT", contextDropdown, "LEFT", -8, 0)
+    classDropdown.OnValueChanged = function(_, classToken)
+        if uiState.suppressToolbarCallbacks then return end
+        if not classToken then return end
+        local currentRole = uiState.viewer.role
+        local spec = GetDefaultSpecForClassRole(classToken, currentRole) or GetDefaultSpecForClassRole(classToken)
+        if not spec then return end
+        SetViewerState(classToken, spec.role, spec.specID)
+        SyncViewerToolbar()
+        RunPipeline(false)
+    end
+    uiState.toolbar.classDropdown = classDropdown
+
+    local roleDropdown = MedaUI:CreateDropdown(toolbar, 110, BuildRoleDropdownItems((GetLivePlayerProfile() or {}).classToken))
+    roleDropdown:SetPoint("RIGHT", classDropdown, "LEFT", -8, 0)
+    roleDropdown.OnValueChanged = function(_, role)
+        if uiState.suppressToolbarCallbacks then return end
+        if not role then return end
+        local viewer = GetViewerProfile()
+        local spec = GetDefaultSpecForClassRole(viewer and viewer.classToken, role)
+        if not spec then return end
+        SetViewerState(spec.classToken, role, spec.specID)
+        SyncViewerToolbar()
+        RunPipeline(false)
+    end
+    uiState.toolbar.roleDropdown = roleDropdown
+
+    local specDropdown = MedaUI:CreateDropdown(toolbar, 140, {})
+    specDropdown:SetPoint("RIGHT", roleDropdown, "LEFT", -8, 0)
+    specDropdown.OnValueChanged = function(_, specID)
+        if uiState.suppressToolbarCallbacks then return end
+        if not specID then return end
+        local viewer = GetViewerProfile()
+        local specMeta = GetSpecMeta(specID, viewer and viewer.classToken)
+        SetViewerState(viewer and viewer.classToken, specMeta.role, specID)
+        SyncViewerToolbar()
+        RunPipeline(false)
+    end
+    uiState.toolbar.specDropdown = specDropdown
+
+    uiState.suppressToolbarCallbacks = true
+    if overrideContext then
+        local ctxSelection = nil
+        local activity = GetActivityKey(overrideContext)
+        if activity == "dungeon" and overrideContext.instanceID then
+            ctxSelection = "dungeon:" .. overrideContext.instanceID
+        elseif activity == "raid" and overrideContext.raidKey then
+            ctxSelection = "raid:" .. overrideContext.raidKey
+        elseif activity == "delve" and overrideContext.instanceName then
+            for i, delve in ipairs((GetData() and GetData().contexts and GetData().contexts.delves) or {}) do
+                if delve.name == overrideContext.instanceName then
+                    ctxSelection = "delve:" .. i
+                    break
+                end
+            end
+        elseif overrideContext.instanceType then
+            ctxSelection = "type:" .. overrideContext.instanceType
+        end
+        contextDropdown:SetSelected(ctxSelection or "auto")
+    else
+        contextDropdown:SetSelected("auto")
+    end
+    SyncViewerToolbar()
+    uiState.suppressToolbarCallbacks = false
 
     -- Minimap button
     minimapButton = MedaUI:CreateMinimapButton(
