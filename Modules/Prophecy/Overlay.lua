@@ -56,7 +56,7 @@ local function ApplyRowFontSize(row, sizeKey)
     if row.text then row.text:SetFontObject(fontObject) end
     if row.timer then row.timer:SetFontObject(fontObject) end
     if row.delta then row.delta:SetFontObject(fontObject) end
-    if row.stateMarker then row.stateMarker:SetFontObject(fontObject) end
+    if row.stateMarker and row.stateMarker.SetFontObject then row.stateMarker:SetFontObject(fontObject) end
 end
 
 local function ApplyOverlayState()

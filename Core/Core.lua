@@ -2,6 +2,11 @@ local ADDON_NAME, ns = ...
 
 local MedaUI = LibStub("MedaUI-1.0")
 local Pixel = MedaUI.Pixel
+local debugstack = debugstack
+local format = format
+local geterrorhandler = geterrorhandler
+local pcall = pcall
+local tostring = tostring
 
 MedaAuras = {}
 MedaAuras.ns = ns
@@ -34,6 +39,37 @@ local function MergeDefaults(saved, defaults)
 end
 
 MedaAuras.DeepCopy = DeepCopy
+
+local function SafeStr(value, fallback)
+    local ok, str = pcall(tostring, value)
+    if not ok or str == nil then
+        return fallback or "<unprintable>"
+    end
+
+    local clean = pcall(function()
+        return str == str
+    end)
+    if not clean then
+        return fallback or "<secret>"
+    end
+
+    return str
+end
+
+local function SafeDebugStack(level)
+    local ok, stack = pcall(debugstack, (level or 1) + 1)
+    if ok and stack and stack ~= "" then
+        return stack
+    end
+    return "<stack unavailable>"
+end
+
+local function BuildErrorMessage(err, stackLevel)
+    return format("%s\n%s", SafeStr(err, "Unknown MedaAuras error"), SafeDebugStack((stackLevel or 1) + 1))
+end
+
+ns.SafeStr = SafeStr
+MedaAuras.SafeStr = SafeStr
 
 -- ============================================================================
 -- Logging (routes to MedaDebug when available)
@@ -92,13 +128,25 @@ MedaAuras.LogTable = LogTable
 -- Error Isolation
 -- ============================================================================
 
+local function ForwardError(err)
+    local safeErr = SafeStr(err, "Unknown MedaAuras error")
+    LogError(safeErr)
+
+    local handler = geterrorhandler()
+    if handler then
+        local ok, handlerErr = pcall(handler, safeErr)
+        if not ok then
+            LogError(format("[MedaAuras] Error handler failed: %s", SafeStr(handlerErr)))
+        end
+    end
+end
+
 local function SafeCall(moduleName, func, ...)
     local ok, err = xpcall(func, function(e)
-        return format("[MedaAuras:%s] %s\n%s", moduleName, e, debugstack(2))
+        return format("[MedaAuras:%s] %s", moduleName, BuildErrorMessage(e, 2))
     end, ...)
     if not ok then
-        LogError(err)
-        geterrorhandler()(err)
+        ForwardError(err)
     end
     return ok
 end
@@ -746,11 +794,10 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
             if service.Initialize then
                 LogDebug(format("Initializing service: %s", serviceName))
                 local ok, err = xpcall(service.Initialize, function(e)
-                    return format("[MedaAuras:Service:%s] %s\n%s", serviceName, e, debugstack(2))
+                    return format("[MedaAuras:Service:%s] %s", serviceName, BuildErrorMessage(e, 2))
                 end, service)
                 if not ok then
-                    LogError(err)
-                    geterrorhandler()(err)
+                    ForwardError(err)
                 else
                     LogDebug(format("Service initialized: %s", serviceName))
                 end

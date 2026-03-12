@@ -85,15 +85,26 @@ local function BuildTimelineTab(parent, db)
                     fontObject = "GameFontNormal",
                     tone = "text",
                 })
-                Pixel.SetPoint(row._label, "LEFT", 28, 0)
                 row._label:SetJustifyH("LEFT")
+                row._label:SetWordWrap(false)
             end
             if not row._badge then
                 row._badge = MedaUI:CreateBadge(row)
                 Pixel.SetPoint(row._badge, "LEFT", 4, 0)
             end
             row._label:SetText(data.text or "")
-            row._badge:SetText(data.type or "")
+            local badgeText = data.type or ""
+            Pixel.ClearPoints(row._label)
+            if badgeText ~= "" then
+                row._badge.text:SetText(badgeText)
+                Pixel.SetWidth(row._badge, math.max(18, math.floor(row._badge.text:GetStringWidth() + 10)))
+                row._badge:Show()
+                Pixel.SetPoint(row._label, "LEFT", row._badge, "RIGHT", 8, 0)
+            else
+                row._badge:Hide()
+                Pixel.SetPoint(row._label, "LEFT", 8, 0)
+            end
+            Pixel.SetPoint(row._label, "RIGHT", row, "RIGHT", -8, 0)
         end,
         onReorder = function(data, from, to)
             -- Save reordered custom template

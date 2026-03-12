@@ -1,14 +1,21 @@
 local _, ns = ...
 
 ns.RemindersData = {
-    dataVersion   = 1,
-    lastUpdated   = "2026-03-11",
+    dataVersion   = 2,
+    lastUpdated   = "2026-03-12",
 
     sources       = {},
     capabilities  = {},
-    contexts      = { dungeons = {}, delves = {}, instanceTypes = {}, affixes = {} },
+    contexts      = { dungeons = {}, delves = {}, raids = {}, instanceTypes = {}, affixes = {} },
     rules         = {},
     groupCompDisplay = {},
+    specRegistry  = {
+        byClass = {},
+        bySpecID = {},
+    },
+    personal      = {
+        bySpec = {},
+    },
     recommendations = {},
 }
 
@@ -20,7 +27,7 @@ S.archon = {
     badge = "|cff00ccff[A]|r",
     color = { 0, 0.8, 1.0 },
     url   = "archon.gg",
-    lastFetched = 1773275719,
+    lastFetched = 1773333704,
 }
 
 S.wowhead = {
@@ -28,7 +35,7 @@ S.wowhead = {
     badge = "|cffff8800[W]|r",
     color = { 1.0, 0.53, 0 },
     url   = "wowhead.com",
-    lastFetched = 1773275719,
+    lastFetched = 1773333704,
 }
 
 S.icyveins = {
@@ -36,13 +43,5 @@ S.icyveins = {
     badge = "|cff33cc33[IV]|r",
     color = { 0.2, 0.8, 0.2 },
     url   = "icy-veins.com",
-    lastFetched = 1773275719,
+    lastFetched = 1773333704,
 }
-
-S.raiderio = {
-    label = "Raider.IO",
-    badge = "|cffc8c8ff[R]|r",
-    color = { 0.78, 0.78, 1.0 },
-    url   = "raider.io",
-}
-

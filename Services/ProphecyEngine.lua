@@ -13,12 +13,13 @@ local _GetWorldElapsedTime = GetWorldElapsedTime
 local _worldTimerAvailable = nil
 local GetWorldElapsedTimeSafe = function(id)
     if _worldTimerAvailable == nil then
-        local ok, elapsed = pcall(_GetWorldElapsedTime, id)
+        local ok, _, elapsed = pcall(_GetWorldElapsedTime, id)
         _worldTimerAvailable = ok
         return ok and elapsed or 0
     end
     if _worldTimerAvailable then
-        return _GetWorldElapsedTime(id)
+        local _, elapsed = _GetWorldElapsedTime(id)
+        return elapsed or 0
     end
     return 0
 end
@@ -631,22 +632,20 @@ function RunRecorder:_AggregatePersonalTemplate(runs, instanceID, acctDB)
     local buckets = {}  -- [key] = { timestamps }
     local durations = {}
     for _, run in ipairs(runs) do
-        if not run.completed then goto continue end
-        tinsert(durations, run.duration)
-        for _, ev in ipairs(run.events or {}) do
-            if ev.type ~= "key_start" and ev.type ~= "session_resume" then
-                if excludeWipes and (ev.type == "wipe_start" or ev.type == "wipe_end") then
-                    goto skip
+        if run.completed then
+            tinsert(durations, run.duration)
+            for _, ev in ipairs(run.events or {}) do
+                local isSessionMarker = (ev.type == "key_start" or ev.type == "session_resume")
+                local isExcludedWipe = excludeWipes and (ev.type == "wipe_start" or ev.type == "wipe_end")
+                if not isSessionMarker and not isExcludedWipe then
+                    local key = ev.type
+                    if ev.encounterId then key = key .. "_" .. ev.encounterId end
+                    if ev.spellId then key = key .. "_" .. ev.spellId end
+                    buckets[key] = buckets[key] or { type = ev.type, encounterId = ev.encounterId, spellId = ev.spellId, timestamps = {} }
+                    tinsert(buckets[key].timestamps, ev.t)
                 end
-                local key = ev.type
-                if ev.encounterId then key = key .. "_" .. ev.encounterId end
-                if ev.spellId then key = key .. "_" .. ev.spellId end
-                buckets[key] = buckets[key] or { type = ev.type, encounterId = ev.encounterId, spellId = ev.spellId, timestamps = {} }
-                tinsert(buckets[key].timestamps, ev.t)
             end
-            ::skip::
         end
-        ::continue::
     end
 
     local avgDuration = #durations > 0 and (function()
@@ -670,47 +669,46 @@ function RunRecorder:_AggregatePersonalTemplate(runs, instanceID, acctDB)
     for key, bucket in pairs(buckets) do
         local sorted = bucket.timestamps
         table.sort(sorted)
-        if #sorted == 0 then goto nextbucket end
+        if #sorted > 0 then
+            -- Simple clustering: take median of all timestamps
+            local median = sorted[math_floor(#sorted / 2) + 1]
+            idx = idx + 1
 
-        -- Simple clustering: take median of all timestamps
-        local median = sorted[math_floor(#sorted / 2) + 1]
-        idx = idx + 1
+            local nodeType = "AWARENESS"
+            local text = bucket.type
+            local triggers = { { type = "manual" } }
 
-        local nodeType = "AWARENESS"
-        local text = bucket.type
-        local triggers = { { type = "manual" } }
+            if bucket.type == "encounter_start" then
+                nodeType = "BOSS"
+                text = "Boss Engage"
+                triggers = { { type = "encounter_start", encounterId = bucket.encounterId } }
+            elseif bucket.type == "encounter_end" then
+                nodeType = "BOSS"
+                text = "Boss Kill"
+                triggers = { { type = "encounter_end", encounterId = bucket.encounterId } }
+            elseif bucket.type == "lust" then
+                nodeType = "LUST"
+                text = "Bloodlust"
+                triggers = {
+                    mode = "any",
+                    { type = "cleu_spell", spellIds = { 80353, 32182, 2825, 390386, 264667 } },
+                    { type = "manual" },
+                }
+            end
 
-        if bucket.type == "encounter_start" then
-            nodeType = "BOSS"
-            text = "Boss Engage"
-            triggers = { { type = "encounter_start", encounterId = bucket.encounterId } }
-        elseif bucket.type == "encounter_end" then
-            nodeType = "BOSS"
-            text = "Boss Kill"
-            triggers = { { type = "encounter_end", encounterId = bucket.encounterId } }
-        elseif bucket.type == "lust" then
-            nodeType = "LUST"
-            text = "Bloodlust"
-            triggers = {
-                mode = "any",
-                { type = "cleu_spell", spellIds = { 80353, 32182, 2825, 390386, 264667 } },
-                { type = "manual" },
-            }
+            local isAnchor = (nodeType == "BOSS" or nodeType == "LUST")
+
+            tinsert(templateNodes, {
+                id = "personal_" .. idx,
+                text = text,
+                type = nodeType,
+                isAnchor = isAnchor,
+                anchorWeight = isAnchor and 1.0 or nil,
+                expectedTime = median,
+                triggers = triggers,
+                actions = { { type = "fulfill" } },
+            })
         end
-
-        local isAnchor = (nodeType == "BOSS" or nodeType == "LUST")
-
-        tinsert(templateNodes, {
-            id = "personal_" .. idx,
-            text = text,
-            type = nodeType,
-            isAnchor = isAnchor,
-            anchorWeight = isAnchor and 1.0 or nil,
-            expectedTime = median,
-            triggers = triggers,
-            actions = { { type = "fulfill" } },
-        })
-        ::nextbucket::
     end
 
     -- Sort by expectedTime
@@ -729,19 +727,40 @@ function ProphecyEngine:Initialize()
     if eventFrame then return end
 
     eventFrame = CreateFrame("Frame")
-    eventFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
-    eventFrame:RegisterEvent("ENCOUNTER_START")
-    eventFrame:RegisterEvent("ENCOUNTER_END")
-    eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
-    eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
-    eventFrame:RegisterEvent("CHALLENGE_MODE_START")
-    eventFrame:RegisterEvent("CHALLENGE_MODE_COMPLETED")
-    eventFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
-    eventFrame:RegisterEvent("ZONE_CHANGED_INDOORS")
-    eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-    eventFrame:RegisterEvent("PLAYER_LOGOUT")
-    eventFrame:RegisterEvent("PLAYER_LEAVING_WORLD")
-    eventFrame:RegisterEvent("PLAYER_DEAD")
+
+    local function TraceInfo(msg)
+        if MedaAuras and MedaAuras.Log then
+            MedaAuras.Log(msg)
+        elseif print then
+            print(msg)
+        end
+    end
+
+    local function TraceError(msg)
+        if MedaAuras and MedaAuras.LogError then
+            MedaAuras.LogError(msg)
+        else
+            TraceInfo(msg)
+        end
+    end
+
+    local function RegisterTrackedEvent(eventName)
+        TraceInfo(format("[ProphecyEngine] About to register event '%s'", eventName))
+        local ok, err = pcall(eventFrame.RegisterEvent, eventFrame, eventName)
+        if ok then
+            TraceInfo(format("[ProphecyEngine] Registered event '%s'", eventName))
+        else
+            TraceError(format("[ProphecyEngine] Failed to register event '%s': %s", eventName, tostring(err)))
+        end
+        return ok
+    end
+
+    RegisterTrackedEvent("COMBAT_LOG_EVENT_UNFILTERED")
+    RegisterTrackedEvent("ENCOUNTER_START")
+    RegisterTrackedEvent("ENCOUNTER_END")
+    RegisterTrackedEvent("CHALLENGE_MODE_START")
+    RegisterTrackedEvent("CHALLENGE_MODE_COMPLETED")
+    RegisterTrackedEvent("PLAYER_ENTERING_WORLD")
 
     eventFrame:SetScript("OnEvent", function(_, event, ...)
         ProphecyEngine:OnEvent(event, ...)
@@ -774,7 +793,7 @@ end
 
 function ProphecyEngine:OnEvent(event, ...)
     -- Only process game events if the module is enabled (PLAYER_ENTERING_WORLD and logout always run for recovery)
-    local isRecoveryEvent = (event == "PLAYER_ENTERING_WORLD" or event == "PLAYER_LOGOUT" or event == "PLAYER_LEAVING_WORLD")
+    local isRecoveryEvent = (event == "PLAYER_ENTERING_WORLD")
     if not isRecoveryEvent then
         local acctDB = MedaAurasDB and MedaAurasDB.modules and MedaAurasDB.modules.Prophecy
         if not acctDB or not acctDB.enabled then return end
@@ -788,27 +807,12 @@ function ProphecyEngine:OnEvent(event, ...)
     elseif event == "ENCOUNTER_END" then
         local encounterID, encounterName, _, _, success = ...
         self:OnEncounterEnd(encounterID, encounterName, success == 1)
-    elseif event == "PLAYER_REGEN_DISABLED" then
-        self:OnEventTrigger("combat_start")
-    elseif event == "PLAYER_REGEN_ENABLED" then
-        self:OnEventTrigger("combat_end")
-        if DriftTracker.wipeActive then
-            DriftTracker:OnWipeRecovery()
-        end
     elseif event == "CHALLENGE_MODE_START" then
         self:OnKeyStart()
     elseif event == "CHALLENGE_MODE_COMPLETED" then
         self:OnKeyComplete()
-    elseif event == "ZONE_CHANGED_NEW_AREA" or event == "ZONE_CHANGED_INDOORS" then
-        self:OnEventTrigger("zone_changed", { subZone = GetSubZoneText() })
     elseif event == "PLAYER_ENTERING_WORLD" then
         self:OnPlayerEnteringWorld()
-    elseif event == "PLAYER_LOGOUT" or event == "PLAYER_LEAVING_WORLD" then
-        Checkpoint:Write()
-    elseif event == "PLAYER_DEAD" then
-        if engineActive and not IsEncounterInProgress() then
-            RunRecorder:RecordEvent("player_death")
-        end
     end
 end
 
@@ -1271,7 +1275,7 @@ function ProphecyEngine:_FireCallback(name, ...)
         local ok, err = pcall(callbacks[name], ...)
         if not ok then
             local SafeStr = ns.SafeStr or tostring
-            MedaAuras.LogDebug("[ProphecyEngine] Callback error (%s): %s", name, SafeStr(err))
+            MedaAuras.LogDebug(format("[ProphecyEngine] Callback error (%s): %s", tostring(name), SafeStr(err)))
         end
     end
 end

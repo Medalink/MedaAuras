@@ -20,6 +20,47 @@ local PROPHECY_TYPES = {
     AWARENESS = "AWARENESS",
 }
 
+local function IsBossEncounterLabel(encounterName, dungeonName)
+    if not encounterName or encounterName == "" then return false end
+
+    local lower = encounterName:lower()
+    local genericPatterns = {
+        "^throughout$",
+        "^final boss$",
+        "^all bosses$",
+        "^trial encounters$",
+        "^mini%-boss encounters$",
+        "^mid%-dungeon$",
+        "^2nd half of dungeon$",
+        "^throughout lower floors$",
+        "^below %d+%% hp$",
+        "^%d+[a-z][a-z]? boss$",
+        "^%d+[a-z][a-z]? and %d+[a-z][a-z]? boss$",
+        "^%d+[a-z][a-z]? boss area$",
+        "^before .+ boss$",
+    }
+
+    for _, pattern in ipairs(genericPatterns) do
+        if lower:match(pattern) then
+            return false
+        end
+    end
+
+    if lower:find(" area", 1, true)
+        or lower:find(" phase", 1, true)
+        or lower:find(" gauntlet", 1, true)
+        or lower:find(" corridors", 1, true)
+        or lower:find(" trash", 1, true) then
+        return false
+    end
+
+    if dungeonName and lower == dungeonName:lower() then
+        return false
+    end
+
+    return true
+end
+
 local function BuildLustNode(lustTiming, index)
     return {
         id           = "lust_" .. index,
@@ -82,11 +123,11 @@ local function BuildDangerNode(danger, index)
     }
 end
 
-local function BuildBossNodes(dangers)
+local function BuildBossNodes(dangers, dungeonName)
     local bossDangers = {}
     local bossOrder = {}
     for _, d in ipairs(dangers) do
-        if d.encounter and d.encounter ~= "" then
+        if IsBossEncounterLabel(d.encounter, dungeonName) then
             if not bossDangers[d.encounter] then
                 bossDangers[d.encounter] = {}
                 bossOrder[#bossOrder + 1] = d.encounter
@@ -191,14 +232,14 @@ function ProphecyTemplates:Generate(instanceID)
 
     -- Phase: bosses -- encounter-specific dangers
     if dungeon.dangers then
-        local bossNodes = BuildBossNodes(dungeon.dangers)
+        local bossNodes = BuildBossNodes(dungeon.dangers, dungeon.name)
         for _, node in ipairs(bossNodes) do
             table.insert(nodeList, node)
         end
 
         -- Non-boss dangers (trash awareness)
         for _, d in ipairs(dungeon.dangers) do
-            if (not d.encounter or d.encounter == "") and d.severity ~= "info" then
+            if not IsBossEncounterLabel(d.encounter, dungeon.name) and d.severity ~= "info" then
                 idx = idx + 1
                 table.insert(nodeList, BuildDangerNode(d, idx))
             end

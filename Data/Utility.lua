@@ -177,7 +177,7 @@ D.capabilities.offensive_dispel = {
             specID    = nil,
             spellID   = 19801,
             spellName = "Tranquilizing Shot",
-            note      = "Removes 1 Enrage and 1 Magic effect from an enemy. [Wowhead: Clear Unnatural Bloodlust from Bloodstained Assistant s with Tranquilizing Shot .]",
+            note      = "Removes 1 Enrage and 1 Magic effect from an enemy. [Wowhead: Use Tranquilizing Shot to remove Loyal Beasts from several enemies buffed by Depraved Houndmaster .]",
         },
         {
             class     = "WARLOCK",
@@ -244,7 +244,7 @@ D.capabilities.soothe = {
             specID    = nil,
             spellID   = 19801,
             spellName = "Tranquilizing Shot",
-            note      = "Removes 1 Enrage and 1 Magic effect. 10 sec CD. [Wowhead: Clear Unnatural Bloodlust from Bloodstained Assistant s with Tranquilizing Shot .]",
+            note      = "Removes 1 Enrage and 1 Magic effect. 10 sec CD. [Wowhead: Use Tranquilizing Shot to remove Loyal Beasts from several enemies buffed by Depraved Houndmaster .]",
         },
         {
             class     = "ROGUE",
