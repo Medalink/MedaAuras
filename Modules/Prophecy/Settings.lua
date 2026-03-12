@@ -168,37 +168,39 @@ function ns.Prophecy.BuildConfig(parent, db)
     Pixel.SetPoint(contentFrame, "TOPLEFT", 0, -34)
     Pixel.SetPoint(contentFrame, "BOTTOMRIGHT", 0, 0)
 
+    local tabFrames = {}
     local currentContent = nil
 
     local function ClearContent()
         if currentContent then
-            for _, child in ipairs({ currentContent:GetChildren() }) do
-                child:Hide()
-            end
             currentContent:Hide()
         end
     end
 
     local function ShowTab(tabId)
         ClearContent()
-        local frame = CreateFrame("Frame", nil, contentFrame)
-        frame:SetAllPoints()
-        currentContent = frame
+        local frame = tabFrames[tabId]
+        if not frame then
+            frame = CreateFrame("Frame", nil, contentFrame)
+            frame:SetAllPoints()
+            tabFrames[tabId] = frame
 
-        if tabId == "timeline" then
-            ns.Prophecy.BuildBuilderTabs(parent, db, frame)
-        elseif tabId == "editor" then
-            ns.Prophecy.BuildEditorTab(frame, db)
-        elseif tabId == "history" then
-            ns.Prophecy.BuildHistoryTab(frame, db)
-        elseif tabId == "appearance" then
-            BuildAppearanceTab(frame, db)
+            if tabId == "timeline" then
+                ns.Prophecy.BuildBuilderTabs(parent, db, frame)
+            elseif tabId == "editor" then
+                ns.Prophecy.BuildEditorTab(frame, db)
+            elseif tabId == "history" then
+                ns.Prophecy.BuildHistoryTab(frame, db)
+            elseif tabId == "appearance" then
+                BuildAppearanceTab(frame, db)
+            end
         end
 
+        currentContent = frame
         frame:Show()
     end
 
-    tabBar.OnTabSelected = function(_, tabId)
+    tabBar.OnTabChanged = function(_, tabId)
         ShowTab(tabId)
     end
 

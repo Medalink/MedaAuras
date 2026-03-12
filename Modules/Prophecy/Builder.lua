@@ -327,6 +327,7 @@ local function BuildHistoryTab(parent, db)
                 end
             end
         end
+        LoadRecordings()
     end)
     yOff = yOff + 30
 
@@ -359,6 +360,7 @@ local function BuildHistoryTab(parent, db)
                         acctDB.customTemplates[instanceID] = data
                     end
                 end
+                LoadRecordings()
             end,
         })
         dialog:Show()

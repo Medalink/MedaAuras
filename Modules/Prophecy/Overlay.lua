@@ -30,6 +30,7 @@ local overflowText
 local wipeIndicator
 local isPreviewMode = false
 local previewTemplateLoaded = false
+local Refresh
 
 local function FormatTimer(seconds)
     if not seconds or seconds <= 0 then return "" end
@@ -177,7 +178,7 @@ end
 -- Refresh / render
 -- ----------------------------------------------------------------
 
-local function Refresh()
+Refresh = function()
     if not overlayFrame then return end
     local db = GetDB()
     if not db then return end
