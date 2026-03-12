@@ -70,6 +70,9 @@ local playerHeaders = {}
 local playerToolkit = nil
 local playerSectionExpanded = {}
 local playerSectionLastCtxKey = nil
+local talentSectionExpanded = {}
+local talentSectionLastCtxKey = nil
+local prepSectionExpanded = {}
 local GetPreferredStats
 local FindPlayerBuff
 local IsStatRecommended
@@ -180,6 +183,24 @@ local function RecMatchesContentTags(rec, tags)
         if lower:find(tag) then return true end
     end
     return false
+end
+
+local CONTENT_CATEGORIES = {
+    { key = "raid",  label = "Raid" },
+    { key = "mplus", label = "Mythic+" },
+    { key = "delve", label = "Delves / Open World" },
+}
+
+local function ClassifyBuildContentType(rec)
+    if rec.contentType and rec.contentType ~= "" then
+        return rec.contentType
+    end
+    if not rec.notes then return "general" end
+    local lower = rec.notes:lower()
+    if lower:find("raid") or lower:find("single.target") then return "raid" end
+    if lower:find("mythic") or lower:find("m%+") or lower:find("mplus") or lower:find("dungeon") or lower:find("aoe") then return "mplus" end
+    if lower:find("delve") then return "delve" end
+    return "general"
 end
 
 local function GetContextKey(ctx)
@@ -1932,6 +1953,14 @@ local function RenderTalentsTab(content)
     local yOff = -4
     local ctx = lastContext or {}
     local Theme = MedaUI.Theme
+    local MAX_VISIBLE_BUILDS = 2
+
+    -- Reset expand state when context changes
+    local ctxKey = tostring(ctx.instanceID or "") .. "_" .. tostring(ctx.instanceType or "")
+    if ctxKey ~= talentSectionLastCtxKey then
+        wipe(talentSectionExpanded)
+        talentSectionLastCtxKey = ctxKey
+    end
 
     -- Dungeon talent notes
     local talentNote = GetDungeonTalentNotes(data, ctx)
@@ -1988,24 +2017,10 @@ local function RenderTalentsTab(content)
         end
     end
 
-    -- Use dungeon-specific recs if available, otherwise fall back to general
     local displayRecs = #dungeonRecs > 0 and dungeonRecs or generalRecs
 
-    -- Filter talent builds by content type (delve/mplus/raid)
-    local contentTags = GetContentTags(ctx)
-    if contentTags then
-        local filtered = {}
-        for _, rec in ipairs(displayRecs) do
-            if rec.buildType ~= "talent" or RecMatchesContentTags(rec, contentTags) then
-                filtered[#filtered + 1] = rec
-            end
-        end
-        if #filtered > 0 then displayRecs = filtered end
-    end
-
-    -- Sort recommendations by buildType
+    -- Bucket recommendations by buildType
     local talentBuilds = {}
-    local heroTalents = {}
     local statRecs = {}
     local gearRecs = {}
     local enchantRecs = {}
@@ -2014,8 +2029,6 @@ local function RenderTalentsTab(content)
     for _, rec in ipairs(displayRecs) do
         if rec.buildType == "talent" then
             talentBuilds[#talentBuilds + 1] = rec
-        elseif rec.buildType == "hero_talent" then
-            heroTalents[#heroTalents + 1] = rec
         elseif rec.buildType == "stats" then
             statRecs[#statRecs + 1] = rec
         elseif rec.buildType == "gear" then
@@ -2029,17 +2042,17 @@ local function RenderTalentsTab(content)
         end
     end
 
-    -- Talent Builds section
-    if #talentBuilds > 0 then
-        local hdrContainer = MedaUI:CreateSectionHeader(content, "Talent Builds", content:GetWidth() - 8)
-        hdrContainer:SetPoint("TOPLEFT", 4, yOff)
-        talentHeaders[#talentHeaders + 1] = hdrContainer
-        yOff = yOff - 32
+    -- Helper: render a single talent build card
+    local function RenderBuildCard(rec)
+        local badge = FormatSourceBadge(rec.source)
+        local heroStr = ""
+        if rec.heroTree and rec.heroTree ~= "" then
+            heroStr = format("  |cffffcc00%s|r", rec.heroTree)
+        end
 
-        for _, rec in ipairs(talentBuilds) do
-            local badge = FormatSourceBadge(rec.source)
-            local line = badge
+        local line = badge .. heroStr
 
+        if rec.source == "archon" then
             if rec.popularity then
                 line = line .. format("  |cffffffff%.0f%% pop|r", rec.popularity)
             end
@@ -2049,93 +2062,132 @@ local function RenderTalentsTab(content)
             if rec.content and rec.content.dps then
                 line = line .. format("  |cffaaddaa%s DPS|r", rec.content.dps)
             end
-
-            local recFrame = CreateFrame("Frame", nil, content)
-            recFrame:SetHeight(38)
-            recFrame:SetPoint("TOPLEFT", 4, yOff)
-            recFrame:SetPoint("RIGHT", content, "RIGHT", -4, 0)
-            talentRows[#talentRows + 1] = recFrame
-
-            local infoFS = recFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            infoFS:SetPoint("TOPLEFT", 4, -2)
-            infoFS:SetPoint("RIGHT", recFrame, "RIGHT", -70, 0)
-            infoFS:SetJustifyH("LEFT")
-            infoFS:SetWordWrap(false)
-            infoFS:SetText(line)
-
-            local noteFS = recFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            noteFS:SetPoint("TOPLEFT", infoFS, "BOTTOMLEFT", 0, -2)
-            noteFS:SetPoint("RIGHT", recFrame, "RIGHT", -70, 0)
-            noteFS:SetJustifyH("LEFT")
-            noteFS:SetWordWrap(false)
-            noteFS:SetTextColor(unpack(Theme.textDim or { 0.6, 0.6, 0.6 }))
-            noteFS:SetText(rec.notes or "")
-
-            if rec.content and rec.content.exportString then
-                local copyBtn = MedaUI:CreateButton(recFrame, "Copy", 56)
-                copyBtn:SetPoint("RIGHT", recFrame, "RIGHT", 0, 0)
-                copyBtn:SetHeight(22)
-                copyBtn.OnClick = function()
-                    ShowCopyPopup(rec.content.exportString)
-                end
-            end
-
-            recFrame:Show()
-            yOff = yOff - 40
-        end
-
-        yOff = yOff - 8
-    end
-
-    -- Hero Talents section
-    if #heroTalents > 0 then
-        local hdrContainer = MedaUI:CreateSectionHeader(content, "Hero Talents", content:GetWidth() - 8)
-        hdrContainer:SetPoint("TOPLEFT", 4, yOff)
-        talentHeaders[#talentHeaders + 1] = hdrContainer
-        yOff = yOff - 32
-
-        for _, rec in ipairs(heroTalents) do
-            local badge = FormatSourceBadge(rec.source)
-
-            if rec.content then
-                local sorted = {}
-                for treeName, info in pairs(rec.content) do
-                    sorted[#sorted + 1] = { name = treeName, rank = info.rank or 99, metric = info.metric, usage = info.usage }
-                end
-                table.sort(sorted, function(a, b) return a.rank < b.rank end)
-
-                for _, tree in ipairs(sorted) do
-                    local text = format("%s  |cffffffff#%d %s|r", badge, tree.rank, tree.name)
-                    if tree.metric then
-                        text = text .. format("  |cffaaddaa%s|r", tree.metric)
-                    end
-                    if tree.usage and tree.usage > 0 then
-                        text = text .. format("  |cff888888%.0f%% usage|r", tree.usage * 100)
-                    end
-
-                    local treeFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-                    treeFS:SetPoint("TOPLEFT", 8, yOff)
-                    treeFS:SetPoint("RIGHT", content, "RIGHT", -8, 0)
-                    treeFS:SetJustifyH("LEFT")
-                    treeFS:SetWordWrap(false)
-                    treeFS:SetText(text)
-                    yOff = yOff - 22
-                end
-            elseif rec.notes then
-                local noteFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-                noteFS:SetPoint("TOPLEFT", 8, yOff)
-                noteFS:SetPoint("RIGHT", content, "RIGHT", -8, 0)
-                noteFS:SetJustifyH("LEFT")
-                noteFS:SetWordWrap(true)
-                noteFS:SetText(badge .. " " .. rec.notes)
-                yOff = yOff - noteFS:GetStringHeight() - 4
+        else
+            -- Wowhead / Icy Veins: show label from notes
+            local label = rec.notes or ""
+            -- Strip the content_type and hero_talent from notes to get just the label
+            local parts = { strsplit(",", label) }
+            local cleanLabel = strtrim(parts[1] or "")
+            if cleanLabel ~= "" then
+                line = line .. "  |cffbbbbbb" .. cleanLabel .. "|r"
             end
         end
 
-        yOff = yOff - 8
+        local recFrame = CreateFrame("Frame", nil, content)
+        recFrame:SetHeight(28)
+        recFrame:SetPoint("TOPLEFT", 8, yOff)
+        recFrame:SetPoint("RIGHT", content, "RIGHT", -4, 0)
+        talentRows[#talentRows + 1] = recFrame
+
+        local infoFS = recFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        infoFS:SetPoint("LEFT", 0, 0)
+        infoFS:SetPoint("RIGHT", recFrame, "RIGHT", -64, 0)
+        infoFS:SetJustifyH("LEFT")
+        infoFS:SetWordWrap(false)
+        infoFS:SetText(line)
+
+        if rec.content and rec.content.exportString then
+            local copyBtn = MedaUI:CreateButton(recFrame, "Copy", 56)
+            copyBtn:SetPoint("RIGHT", recFrame, "RIGHT", 0, 0)
+            copyBtn:SetHeight(22)
+            copyBtn.OnClick = function()
+                ShowCopyPopup(rec.content.exportString)
+            end
+        end
+
+        recFrame:Show()
+        yOff = yOff - 30
     end
 
-    -- Stat Priority section
+    -- Group talent builds by content category
+    if #talentBuilds > 0 then
+        local catBuckets = { raid = {}, mplus = {}, delve = {} }
+        for _, rec in ipairs(talentBuilds) do
+            local ct = ClassifyBuildContentType(rec)
+            if ct == "raid" then
+                catBuckets.raid[#catBuckets.raid + 1] = rec
+            elseif ct == "mplus" then
+                catBuckets.mplus[#catBuckets.mplus + 1] = rec
+            else
+                catBuckets.delve[#catBuckets.delve + 1] = rec
+            end
+        end
+
+        local anyRendered = false
+        for _, cat in ipairs(CONTENT_CATEGORIES) do
+            local builds = catBuckets[cat.key]
+            if builds and #builds > 0 then
+                anyRendered = true
+
+                -- Pick top builds: up to MAX_VISIBLE_BUILDS per source
+                local sourceCount = {}
+                local topBuilds = {}
+                local overflowBuilds = {}
+                for _, rec in ipairs(builds) do
+                    local src = rec.source or "unknown"
+                    sourceCount[src] = (sourceCount[src] or 0) + 1
+                    if sourceCount[src] <= MAX_VISIBLE_BUILDS then
+                        topBuilds[#topBuilds + 1] = rec
+                    else
+                        overflowBuilds[#overflowBuilds + 1] = rec
+                    end
+                end
+
+                local sectionKey = "talent_" .. cat.key
+                local sectionExpanded = talentSectionExpanded[sectionKey] or false
+
+                local hdr = MedaUI:CreateCollapsibleSectionHeader(content, {
+                    text = cat.label,
+                    width = content:GetWidth() - 8,
+                    count = #builds,
+                    expanded = sectionExpanded,
+                    onToggle = function(exp)
+                        talentSectionExpanded[sectionKey] = exp
+                        RenderTalentsTab(content)
+                    end,
+                })
+                hdr:SetPoint("TOPLEFT", 4, yOff)
+                talentHeaders[#talentHeaders + 1] = hdr
+                yOff = yOff - 32
+
+                for _, rec in ipairs(topBuilds) do
+                    RenderBuildCard(rec)
+                end
+
+                if #overflowBuilds > 0 then
+                    if sectionExpanded then
+                        for _, rec in ipairs(overflowBuilds) do
+                            RenderBuildCard(rec)
+                        end
+                    end
+
+                    local toggle = MedaUI:CreateExpandToggle(content, {
+                        hiddenCount = #overflowBuilds,
+                        expanded = sectionExpanded,
+                        onToggle = function(exp)
+                            talentSectionExpanded[sectionKey] = exp
+                            RenderTalentsTab(content)
+                        end,
+                    })
+                    toggle:SetPoint("TOPLEFT", 8, yOff)
+                    toggle:SetPoint("RIGHT", content, "RIGHT", 0, 0)
+                    yOff = yOff - toggle:GetHeight() - 2
+                end
+
+                yOff = yOff - 6
+            end
+        end
+
+        if not anyRendered then
+            local noMatch = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            noMatch:SetPoint("TOPLEFT", 8, yOff)
+            noMatch:SetText("No talent builds match your current context.")
+            noMatch:SetTextColor(unpack(Theme.textDim or { 0.6, 0.6, 0.6 }))
+            yOff = yOff - 20
+        end
+    end
+
+    -- Stat Priority section (kept compact)
     if #statRecs > 0 then
         local rec = statRecs[1]
         if rec.content then
@@ -2169,20 +2221,32 @@ local function RenderTalentsTab(content)
         end
     end
 
-    -- Helper to render an item-list section (gear, enchants, consumables, trinkets)
-    local function RenderItemSection(recs, title, maxItems)
+    -- Helper to render an item-list section with collapsible overflow
+    local function RenderItemSection(recs, title, sectionKey)
         if #recs == 0 then return end
         local rec = recs[1]
         if not rec.content or not rec.content.items or #rec.content.items == 0 then return end
 
-        local hdrContainer = MedaUI:CreateSectionHeader(content, title, content:GetWidth() - 8)
-        hdrContainer:SetPoint("TOPLEFT", 4, yOff)
-        talentHeaders[#talentHeaders + 1] = hdrContainer
+        local items = rec.content.items
+        local totalItems = #items
+        local sectionExpanded = talentSectionExpanded[sectionKey] or false
+        local shown = sectionExpanded and totalItems or math.min(totalItems, 2)
+
+        local hdr = MedaUI:CreateCollapsibleSectionHeader(content, {
+            text = title,
+            width = content:GetWidth() - 8,
+            count = totalItems,
+            expanded = sectionExpanded,
+            onToggle = function(exp)
+                talentSectionExpanded[sectionKey] = exp
+                RenderTalentsTab(content)
+            end,
+        })
+        hdr:SetPoint("TOPLEFT", 4, yOff)
+        talentHeaders[#talentHeaders + 1] = hdr
         yOff = yOff - 32
 
         local badge = FormatSourceBadge(rec.source)
-        local items = rec.content.items
-        local shown = math.min(#items, maxItems or 5)
 
         for i = 1, shown do
             local item = items[i]
@@ -2198,23 +2262,29 @@ local function RenderTalentsTab(content)
             yOff = yOff - 16
         end
 
-        if #items > shown then
-            local moreFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            moreFS:SetPoint("TOPLEFT", 8, yOff)
-            moreFS:SetTextColor(unpack(Theme.textDim or { 0.6, 0.6, 0.6 }))
-            moreFS:SetText(format("  +%d more", #items - shown))
-            yOff = yOff - 16
+        if totalItems > 2 then
+            local toggle = MedaUI:CreateExpandToggle(content, {
+                hiddenCount = totalItems - 2,
+                expanded = sectionExpanded,
+                onToggle = function(exp)
+                    talentSectionExpanded[sectionKey] = exp
+                    RenderTalentsTab(content)
+                end,
+            })
+            toggle:SetPoint("TOPLEFT", 8, yOff)
+            toggle:SetPoint("RIGHT", content, "RIGHT", 0, 0)
+            yOff = yOff - toggle:GetHeight() - 2
         end
 
         yOff = yOff - 8
     end
 
-    RenderItemSection(trinketRecs,    "Top Trinkets", 5)
-    RenderItemSection(gearRecs,       "Popular Gear", 5)
-    RenderItemSection(enchantRecs,    "Enchants & Gems", 6)
-    RenderItemSection(consumableRecs, "Consumables", 6)
+    RenderItemSection(trinketRecs,    "Top Trinkets",   "items_trinkets")
+    RenderItemSection(gearRecs,       "Popular Gear",   "items_gear")
+    RenderItemSection(enchantRecs,    "Enchants & Gems", "items_enchants")
+    RenderItemSection(consumableRecs, "Consumables",    "items_consumables")
 
-    if #talentBuilds == 0 and #heroTalents == 0 and #statRecs == 0
+    if #talentBuilds == 0 and #statRecs == 0
        and #gearRecs == 0 and #enchantRecs == 0 and #consumableRecs == 0 and #trinketRecs == 0 then
         local noRec = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         noRec:SetPoint("TOPLEFT", 8, yOff)
@@ -2281,7 +2351,7 @@ GetPreferredStats = function()
     return {}
 end
 
-local function IsStatRecommended(statType, preferredStats, topN)
+IsStatRecommended = function(statType, preferredStats, topN)
     if not statType or #preferredStats == 0 then return false end
     topN = topN or 2
     for i = 1, math.min(topN, #preferredStats) do
@@ -2329,6 +2399,13 @@ local PREP_CHECKS = {
     },
 }
 
+local PREP_CHECK_ICONS = {
+    ["Flask Active"]        = 136243,
+    ["Food Buff Active"]    = 134062,
+    ["Weapon Enhancement"]  = 135225,
+    ["Augment Rune"]        = 237446,
+}
+
 local function RenderPrepTab(content)
     if not content then return end
 
@@ -2367,7 +2444,7 @@ local function RenderPrepTab(content)
         end
     end
 
-    -- Pre-Key Checklist
+    -- Pre-Key Checklist (StatusRow widgets)
     local checkHdr = MedaUI:CreateSectionHeader(content, "Pre-Key Checklist", content:GetWidth() - 8)
     checkHdr:SetPoint("TOPLEFT", 4, yOff)
     prepHeaders[#prepHeaders + 1] = checkHdr
@@ -2375,126 +2452,158 @@ local function RenderPrepTab(content)
 
     for _, check in ipairs(PREP_CHECKS) do
         local ok, detail = check.check()
-        local statusColor, statusText
+        local accentColor, statusText
         if ok then
-            statusColor = COVERED_COLOR
+            accentColor = COVERED_COLOR
             statusText = detail or "OK"
         else
-            statusColor = SEVERITY_COLORS.warning
+            accentColor = SEVERITY_COLORS.warning
             statusText = "Missing"
         end
 
-        local checkFrame = CreateFrame("Frame", nil, content)
-        checkFrame:SetHeight(24)
-        checkFrame:SetPoint("TOPLEFT", 8, yOff)
-        checkFrame:SetPoint("RIGHT", content, "RIGHT", -8, 0)
-        prepRows[#prepRows + 1] = checkFrame
+        local row = MedaUI:CreateStatusRow(content, {
+            width = content:GetWidth() - 16,
+            iconSize = 18,
+            showNote = false,
+        })
+        row:SetPoint("TOPLEFT", 8, yOff)
+        prepRows[#prepRows + 1] = row
 
-        local labelFS = checkFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        labelFS:SetPoint("LEFT", 0, 0)
-        labelFS:SetText(check.label)
-
-        local statusFS = checkFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        statusFS:SetPoint("RIGHT", 0, 0)
-        statusFS:SetTextColor(statusColor[1], statusColor[2], statusColor[3])
-        statusFS:SetText(statusText)
+        row:SetIcon(PREP_CHECK_ICONS[check.label])
+        row:SetLabel(check.label)
+        row:SetStatus(statusText, accentColor[1], accentColor[2], accentColor[3])
+        row:SetAccentColor(accentColor[1], accentColor[2], accentColor[3])
+        if not ok then row:SetHighlight(true) end
 
         if check.tip then
-            checkFrame:EnableMouse(true)
-            checkFrame:SetScript("OnEnter", function(self)
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:AddLine(check.label, 1, 0.82, 0)
-                GameTooltip:AddLine(check.tip, 1, 1, 1, true)
-                GameTooltip:Show()
+            row:SetTooltipFunc(function(_, tooltip)
+                tooltip:AddLine(check.label, 1, 0.82, 0)
+                tooltip:AddLine(check.tip, 1, 1, 1, true)
             end)
-            checkFrame:SetScript("OnLeave", function() GameTooltip:Hide() end)
         end
 
-        checkFrame:Show()
-        yOff = yOff - 26
+        row:Show()
+        yOff = yOff - 28
     end
 
     yOff = yOff - 8
 
-    -- Dungeon Interactive Buffs
+    -- Dungeon Interactive Buffs (active/recommended shown, rest collapsed)
     local dungeonCtx = ResolveInstanceContext(data, ctx)
     local interactiveBuffs = dungeonCtx and dungeonCtx.interactiveBuffs
     if interactiveBuffs and #interactiveBuffs > 0 then
         local preferredStats = GetPreferredStats()
-        local buffHdr = MedaUI:CreateSectionHeader(content, "Dungeon Buffs", content:GetWidth() - 8)
+
+        -- Partition into prominent (active/recommended) and other
+        local prominentBuffs = {}
+        local otherBuffs = {}
+        for _, ib in ipairs(interactiveBuffs) do
+            local ok = FindPlayerBuff(ib.pattern)
+            local recommended = IsStatRecommended(ib.statType, preferredStats)
+            if ok or recommended then
+                prominentBuffs[#prominentBuffs + 1] = ib
+            else
+                otherBuffs[#otherBuffs + 1] = ib
+            end
+        end
+
+        local totalBuffs = #interactiveBuffs
+        local buffsExpanded = prepSectionExpanded["buffs"] or false
+
+        local buffHdr = MedaUI:CreateCollapsibleSectionHeader(content, {
+            text = "Dungeon Buffs",
+            width = content:GetWidth() - 8,
+            count = totalBuffs,
+            expanded = buffsExpanded,
+            onToggle = function(exp)
+                prepSectionExpanded["buffs"] = exp
+                RenderPrepTab(content)
+            end,
+        })
         buffHdr:SetPoint("TOPLEFT", 4, yOff)
         prepHeaders[#prepHeaders + 1] = buffHdr
         yOff = yOff - 32
 
-        for _, ib in ipairs(interactiveBuffs) do
+        local function RenderBuffRow(ib)
             local ok, detail = FindPlayerBuff(ib.pattern)
             local recommended = IsStatRecommended(ib.statType, preferredStats)
-            local statusColor, statusText
+            local accentColor, statusText
 
             if ok then
-                statusColor = COVERED_COLOR
+                accentColor = COVERED_COLOR
                 statusText = detail or "Active"
             elseif recommended then
-                statusColor = RECOMMEND_COLOR
+                accentColor = RECOMMEND_COLOR
                 statusText = "Recommended"
             else
-                statusColor = SEVERITY_COLORS.info
+                accentColor = SEVERITY_COLORS.info
                 statusText = ib.effect or ""
             end
 
-            local buffFrame = CreateFrame("Frame", nil, content)
-            buffFrame:SetHeight(24)
-            buffFrame:SetPoint("TOPLEFT", 8, yOff)
-            buffFrame:SetPoint("RIGHT", content, "RIGHT", -8, 0)
-            prepRows[#prepRows + 1] = buffFrame
+            local row = MedaUI:CreateStatusRow(content, {
+                width = content:GetWidth() - 16,
+                iconSize = 18,
+                showNote = false,
+            })
+            row:SetPoint("TOPLEFT", 8, yOff)
+            prepRows[#prepRows + 1] = row
 
-            local labelText = ib.buff
-            if recommended and not ok then
-                labelText = "\226\152\133 " .. labelText
-            end
-            local labelFS = buffFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            labelFS:SetPoint("LEFT", 0, 0)
-            labelFS:SetText(labelText)
-            if recommended and not ok then
-                labelFS:SetTextColor(RECOMMEND_COLOR[1], RECOMMEND_COLOR[2], RECOMMEND_COLOR[3])
-            end
+            row:SetLabel(ib.buff)
+            row:SetStatus(statusText, accentColor[1], accentColor[2], accentColor[3])
+            row:SetAccentColor(accentColor[1], accentColor[2], accentColor[3])
+            if recommended and not ok then row:SetHighlight(true) end
 
-            local statusFS = buffFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            statusFS:SetPoint("RIGHT", 0, 0)
-            statusFS:SetTextColor(statusColor[1], statusColor[2], statusColor[3])
-            statusFS:SetText(statusText)
-
-            buffFrame:EnableMouse(true)
-            buffFrame:SetScript("OnEnter", function(self)
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                GameTooltip:AddLine(ib.buff, 1, 0.82, 0)
-                GameTooltip:AddLine(ib.effect, 1, 1, 1, true)
+            row:SetTooltipFunc(function(_, tooltip)
+                tooltip:AddLine(ib.buff, 1, 0.82, 0)
+                tooltip:AddLine(ib.effect, 1, 1, 1, true)
                 if ib.location and ib.location ~= "" then
-                    GameTooltip:AddLine("Location: " .. ib.location, 0.7, 0.7, 0.7, true)
+                    tooltip:AddLine("Location: " .. ib.location, 0.7, 0.7, 0.7, true)
                 end
                 if ib.requires then
-                    GameTooltip:AddLine("Requires: " .. ib.requires, 0.9, 0.5, 0.5, true)
+                    tooltip:AddLine("Requires: " .. ib.requires, 0.9, 0.5, 0.5, true)
                 end
                 if recommended then
-                    GameTooltip:AddLine(" ")
-                    GameTooltip:AddLine("Matches your spec's preferred stats", RECOMMEND_COLOR[1], RECOMMEND_COLOR[2], RECOMMEND_COLOR[3])
+                    tooltip:AddLine(" ")
+                    tooltip:AddLine("Matches your spec's preferred stats", RECOMMEND_COLOR[1], RECOMMEND_COLOR[2], RECOMMEND_COLOR[3])
                 end
                 if ib.tip and ib.tip ~= "" then
-                    GameTooltip:AddLine(" ")
-                    GameTooltip:AddLine(ib.tip, 1, 1, 1, true)
+                    tooltip:AddLine(" ")
+                    tooltip:AddLine(ib.tip, 1, 1, 1, true)
                 end
-                GameTooltip:Show()
             end)
-            buffFrame:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-            buffFrame:Show()
-            yOff = yOff - 26
+            row:Show()
+            yOff = yOff - 28
+        end
+
+        for _, ib in ipairs(prominentBuffs) do
+            RenderBuffRow(ib)
+        end
+
+        if #otherBuffs > 0 then
+            if buffsExpanded then
+                for _, ib in ipairs(otherBuffs) do
+                    RenderBuffRow(ib)
+                end
+            end
+
+            local toggle = MedaUI:CreateExpandToggle(content, {
+                hiddenCount = #otherBuffs,
+                expanded = buffsExpanded,
+                onToggle = function(exp)
+                    prepSectionExpanded["buffs"] = exp
+                    RenderPrepTab(content)
+                end,
+            })
+            toggle:SetPoint("TOPLEFT", 8, yOff)
+            toggle:SetPoint("RIGHT", content, "RIGHT", 0, 0)
+            yOff = yOff - toggle:GetHeight() - 2
         end
 
         yOff = yOff - 8
     end
 
-    -- Recommended consumables from data
+    -- Recommended consumables & enchants from data
     local _, playerClass = UnitClass("player")
     local specIdx = GetSpecialization()
     local playerSpec = specIdx and GetSpecializationInfo(specIdx)
@@ -2523,17 +2632,30 @@ local function RenderPrepTab(content)
                 return dungeonRec or generalRec
             end
 
-            local consRec = FindBestRec("consumables")
-            if consRec then
-                local badge = FormatSourceBadge(consRec.source)
-                local consHdr = MedaUI:CreateSectionHeader(content, "Recommended Consumables", content:GetWidth() - 8)
-                consHdr:SetPoint("TOPLEFT", 4, yOff)
-                prepHeaders[#prepHeaders + 1] = consHdr
+            local function RenderPrepItemSection(rec, title, sectionKey)
+                if not rec then return end
+                local items = rec.content.items
+                local totalItems = #items
+                local sectionExpanded = prepSectionExpanded[sectionKey] or false
+                local shown = sectionExpanded and totalItems or math.min(totalItems, 2)
+
+                local hdr = MedaUI:CreateCollapsibleSectionHeader(content, {
+                    text = title,
+                    width = content:GetWidth() - 8,
+                    count = totalItems,
+                    expanded = sectionExpanded,
+                    onToggle = function(exp)
+                        prepSectionExpanded[sectionKey] = exp
+                        RenderPrepTab(content)
+                    end,
+                })
+                hdr:SetPoint("TOPLEFT", 4, yOff)
+                prepHeaders[#prepHeaders + 1] = hdr
                 yOff = yOff - 32
 
-                local shown = math.min(#consRec.content.items, 6)
+                local badge = FormatSourceBadge(rec.source)
                 for i = 1, shown do
-                    local item = consRec.content.items[i]
+                    local item = items[i]
                     local text = format("%s  |cffffffff%s|r  |cff888888%.0f%%|r", badge, item.name, item.popularity or 0)
                     local itemFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
                     itemFS:SetPoint("TOPLEFT", 8, yOff)
@@ -2543,31 +2665,26 @@ local function RenderPrepTab(content)
                     itemFS:SetText(text)
                     yOff = yOff - 16
                 end
-                yOff = yOff - 8
-            end
 
-            local enchRec = FindBestRec("enchants")
-            if enchRec then
-                local badge = FormatSourceBadge(enchRec.source)
-                local enchHdr = MedaUI:CreateSectionHeader(content, "Recommended Enchants", content:GetWidth() - 8)
-                enchHdr:SetPoint("TOPLEFT", 4, yOff)
-                prepHeaders[#prepHeaders + 1] = enchHdr
-                yOff = yOff - 32
-
-                local shown = math.min(#enchRec.content.items, 5)
-                for i = 1, shown do
-                    local item = enchRec.content.items[i]
-                    local text = format("%s  |cffffffff%s|r  |cff888888%.0f%%|r", badge, item.name, item.popularity or 0)
-                    local itemFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-                    itemFS:SetPoint("TOPLEFT", 8, yOff)
-                    itemFS:SetPoint("RIGHT", content, "RIGHT", -8, 0)
-                    itemFS:SetJustifyH("LEFT")
-                    itemFS:SetWordWrap(false)
-                    itemFS:SetText(text)
-                    yOff = yOff - 16
+                if totalItems > 2 then
+                    local toggle = MedaUI:CreateExpandToggle(content, {
+                        hiddenCount = totalItems - 2,
+                        expanded = sectionExpanded,
+                        onToggle = function(exp)
+                            prepSectionExpanded[sectionKey] = exp
+                            RenderPrepTab(content)
+                        end,
+                    })
+                    toggle:SetPoint("TOPLEFT", 8, yOff)
+                    toggle:SetPoint("RIGHT", content, "RIGHT", 0, 0)
+                    yOff = yOff - toggle:GetHeight() - 2
                 end
+
                 yOff = yOff - 8
             end
+
+            RenderPrepItemSection(FindBestRec("consumables"), "Recommended Consumables", "prep_consumables")
+            RenderPrepItemSection(FindBestRec("enchants"),    "Recommended Enchants",    "prep_enchants")
         end
     end
 
