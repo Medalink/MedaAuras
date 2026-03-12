@@ -32,6 +32,14 @@ local isPreviewMode = false
 local previewTemplateLoaded = false
 local Refresh
 
+local FONT_OBJECTS = {
+    xs = "GameFontNormalSmall",
+    sm = "GameFontHighlightSmall",
+    md = "GameFontNormal",
+    lg = "GameFontHighlight",
+    xl = "GameFontNormalLarge",
+}
+
 local function FormatTimer(seconds)
     if not seconds or seconds <= 0 then return "" end
     return format("~%d:%02d", math_floor(seconds / 60), seconds % 60)
@@ -39,6 +47,16 @@ end
 
 local function GetDB()
     return MedaAuras:GetModuleDB("Prophecy")
+end
+
+local function ApplyRowFontSize(row, sizeKey)
+    if not row then return end
+
+    local fontObject = FONT_OBJECTS[sizeKey] or FONT_OBJECTS.md
+    if row.text then row.text:SetFontObject(fontObject) end
+    if row.timer then row.timer:SetFontObject(fontObject) end
+    if row.delta then row.delta:SetFontObject(fontObject) end
+    if row.stateMarker then row.stateMarker:SetFontObject(fontObject) end
 end
 
 local function ApplyOverlayState()
@@ -62,6 +80,18 @@ local function ApplyOverlayState()
     overlayFrame:SetMovable(true)
     overlayFrame:EnableMouse(true)
     overlayFrame:RegisterForDrag("LeftButton")
+
+    local fontObject = FONT_OBJECTS[db.fontSize] or FONT_OBJECTS.md
+    if headerText then headerText:SetFontObject(fontObject) end
+    if wipeIndicator then wipeIndicator:SetFontObject(fontObject) end
+    if overflowText then overflowText:SetFontObject(fontObject) end
+
+    for _, row in ipairs(rows) do
+        ApplyRowFontSize(row, db.fontSize)
+    end
+    for _, row in ipairs(fulfilledRows) do
+        ApplyRowFontSize(row, db.fontSize)
+    end
 end
 
 -- ----------------------------------------------------------------
@@ -170,6 +200,10 @@ local function GetRow(index)
         showDelta = true,
         interactive = true,
     })
+    local db = GetDB()
+    if db then
+        ApplyRowFontSize(row, db.fontSize)
+    end
     rows[index] = row
     return row
 end
@@ -304,6 +338,7 @@ Refresh = function()
                     fulfilledRows[fi] = MedaUI:CreateHUDRow(overlayFrame, {
                         width = 270, showTimer = false, showDelta = true, interactive = false,
                     })
+                    ApplyRowFontSize(fulfilledRows[fi], db.fontSize)
                 end
                 local fr = fulfilledRows[fi]
                 fr:ClearAllPoints()
