@@ -4,6 +4,7 @@
 ## Author: Medalink
 ## Version: @project-version@
 ## SavedVariables: MedaAurasDB
+## SavedVariablesPerCharacter: MedaAurasCharDB
 ## OptionalDeps: MedaDebug
 ## X-Curse-Project-ID: 1472556
 ## X-Wago-ID: mKODAEGx
@@ -32,6 +33,8 @@ Data\GoneFishinFish.lua
 Data\CreatureVO.lua
 Data\Interrupts.lua
 Data\Defensives.lua
+Data\ProphecyData.lua
+Data\ProphecyTemplates.lua
 
 # Shared Services (load before modules)
 Services\SpellCastTracker.lua
@@ -40,6 +43,7 @@ Services\UnitPriority.lua
 Services\GroupInspector.lua
 Services\MapPinProvider.lua
 Services\PartySpellWatcher.lua
+Services\ProphecyEngine.lua
 
 # Modules
 Modules\FocusInterruptHelper.lua
@@ -51,3 +55,9 @@ Modules\ShutIt.lua
 Modules\LazyCast.lua
 Modules\Interrupted.lua
 Modules\Cracked.lua
+
+# Prophecy Module
+Modules\Prophecy\Init.lua
+Modules\Prophecy\Settings.lua
+Modules\Prophecy\Overlay.lua
+Modules\Prophecy\Builder.lua

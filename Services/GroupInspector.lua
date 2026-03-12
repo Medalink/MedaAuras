@@ -33,7 +33,8 @@ ns.Services.GroupInspector = GroupInspector
 
 local eventFrame
 local cache = {}           -- [guid] = { unit, name, class, specID, inspected, timestamp }
-local inspectQueue = {}    -- FIFO of unitIDs awaiting inspect
+local inspectQueue = {}    -- FIFO of { unit, guid } awaiting inspect
+local queuedInspects = {}  -- [guid] = true while queued
 local inspectBusy = false
 local callbacks = {}       -- [key] = func
 local inspectCompleteCallbacks = {} -- [key] = func(unit, name, class, specID)
@@ -143,7 +144,12 @@ local function ProcessInspectQueue()
     if inspectBusy or #inspectQueue == 0 then return end
     if not next(callbacks) and not next(inspectCompleteCallbacks) then return end
 
-    local unit = table.remove(inspectQueue, 1)
+    local request = table.remove(inspectQueue, 1)
+    local unit = request and request.unit
+    local guid = request and request.guid
+    if guid then
+        queuedInspects[guid] = nil
+    end
 
     if not UnitExists(unit) or UnitIsUnit(unit, "player") then
         ProcessInspectQueue()
@@ -208,8 +214,13 @@ local function ScanRoster()
             currentGUIDs[guid] = true
             local entry = cache[guid]
             if not entry.inspected and not UnitIsUnit(unit, "player") then
-                inspectQueue[#inspectQueue + 1] = unit
-                newCount = newCount + 1
+                if not queuedInspects[guid] then
+                    inspectQueue[#inspectQueue + 1] = { unit = unit, guid = guid }
+                    queuedInspects[guid] = true
+                    newCount = newCount + 1
+                else
+                    cachedCount = cachedCount + 1
+                end
             else
                 cachedCount = cachedCount + 1
             end
@@ -329,6 +340,7 @@ end
 
 function GroupInspector:RequestRefresh()
     wipe(inspectQueue)
+    wipe(queuedInspects)
     inspectBusy = false
     ScanRoster()
 end
@@ -340,6 +352,7 @@ function GroupInspector:RequestReinspectAll()
         end
     end
     wipe(inspectQueue)
+    wipe(queuedInspects)
     inspectBusy = false
     ScanRoster()
 end

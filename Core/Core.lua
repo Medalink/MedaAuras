@@ -694,6 +694,12 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
 
         MedaAurasDB = MergeDefaults(MedaAurasDB or {}, DEFAULT_DB)
 
+        MedaAurasCharDB = MedaAurasCharDB or {}
+        MedaAurasCharDB.prophecy = MedaAurasCharDB.prophecy or {
+            recordings = {},
+            _checkpoint = nil,
+        }
+
         -- Migrate SavedVariables: TalentReminder -> Reminders
         if MedaAurasDB.modules and MedaAurasDB.modules.TalentReminder and not MedaAurasDB.modules.Reminders then
             MedaAurasDB.modules.Reminders = MedaAurasDB.modules.TalentReminder

@@ -279,6 +279,15 @@ local mobKickCallbacks = {}     -- [handle] = func(name)
 local anySpellCallbacks = {}    -- [handle] = func(name, spellID, unit)
 local spellMatchEntries = {}   -- [handle] = { knownIDs, lookupTable, callback, candidateResolver, label, entryToID }
 local handleCounter = 0
+local interruptKnownIDs
+
+local function GetInterruptKnownIDs(data)
+    if not data then return nil end
+    if not interruptKnownIDs then
+        interruptKnownIDs = BuildKnownIDs(data)
+    end
+    return interruptKnownIDs
+end
 
 -- ============================================================================
 -- Callback dispatch
@@ -332,12 +341,8 @@ local function FireSpellMatches(name, taintedID, unit, cleanID, launderInfo, cas
             candidate and candidate.lookupTable or nil,
             entry.entryToID
         )
-        local fullEquality = MatchTaintedAgainstTable(taintedID, entry.knownIDs, entry.lookupTable)
-        local candidateEquality = MatchTaintedAgainstTable(
-            taintedID,
-            candidate and candidate.knownIDs or nil,
-            candidate and candidate.lookupTable or nil
-        )
+        local fullEquality
+        local candidateEquality
 
         local chosenID, chosenData
         local confidence = "blocked"
@@ -349,33 +354,49 @@ local function FireSpellMatches(name, taintedID, unit, cleanID, launderInfo, cas
                 chosenData = candidateDirect.data
                 confidence = "exact"
                 chosenBy = "candidate-clean"
-            elseif candidateEquality.matchID and candidateEquality.matchData then
-                chosenID = candidateEquality.matchID
-                chosenData = candidateEquality.matchData
-                confidence = "exact"
-                chosenBy = "candidate-equality"
-            elseif #candidate.knownIDs == 1 then
-                chosenID = candidate.knownIDs[1]
-                chosenData = candidate.lookupTable[chosenID]
-                confidence = "likely"
-                chosenBy = "single-candidate"
-            elseif fullDirect.hit or fullEquality.matchID then
-                confidence = "rejected"
-                chosenBy = "full-table-conflict"
-            else
-                confidence = "ambiguous"
-                chosenBy = "candidate-miss"
+            elseif not fullDirect.hit then
+                candidateEquality = MatchTaintedAgainstTable(
+                    taintedID,
+                    candidate.knownIDs,
+                    candidate.lookupTable
+                )
+                if candidateEquality.matchID and candidateEquality.matchData then
+                    chosenID = candidateEquality.matchID
+                    chosenData = candidateEquality.matchData
+                    confidence = "exact"
+                    chosenBy = "candidate-equality"
+                elseif #candidate.knownIDs == 1 then
+                    chosenID = candidate.knownIDs[1]
+                    chosenData = candidate.lookupTable[chosenID]
+                    confidence = "likely"
+                    chosenBy = "single-candidate"
+                elseif not fullEquality then
+                    fullEquality = MatchTaintedAgainstTable(taintedID, entry.knownIDs, entry.lookupTable)
+                end
+            end
+
+            if not chosenID and not candidateDirect.hit then
+                if fullDirect.hit or (fullEquality and fullEquality.matchID) then
+                    confidence = "rejected"
+                    chosenBy = "full-table-conflict"
+                elseif confidence == "blocked" then
+                    confidence = "ambiguous"
+                    chosenBy = "candidate-miss"
+                end
             end
         elseif fullDirect.hit then
             chosenID = fullDirect.spellID
             chosenData = fullDirect.data
             confidence = "exact"
             chosenBy = "full-clean"
-        elseif fullEquality.matchID and fullEquality.matchData then
-            chosenID = fullEquality.matchID
-            chosenData = fullEquality.matchData
-            confidence = "exact"
-            chosenBy = "full-equality"
+        else
+            fullEquality = MatchTaintedAgainstTable(taintedID, entry.knownIDs, entry.lookupTable)
+            if fullEquality.matchID and fullEquality.matchData then
+                chosenID = fullEquality.matchID
+                chosenData = fullEquality.matchData
+                confidence = "exact"
+                chosenBy = "full-equality"
+            end
         end
 
         LogDebug(format(
@@ -473,7 +494,7 @@ local function OnPartyCast(partyIndex, isOwnerOfPet)
                         isOwnerOfPet and "pet" or "self"))
                     FireInterrupt(cleanName, cleanID, ownerUnit)
                 else
-                    local interruptIDs = BuildKnownIDs(data)
+                    local interruptIDs = GetInterruptKnownIDs(data)
                     local result = MatchTaintedAgainstTable(eSpellID, interruptIDs, data)
                     if result.matchID and result.matchData then
                         Log(format("PARTY KICK: %s cast %s (ID %d) via %s [equality]",
