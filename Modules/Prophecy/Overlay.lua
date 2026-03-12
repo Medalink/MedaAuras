@@ -73,6 +73,8 @@ local function ApplyOverlayState()
     if headerText then headerText:SetFontObject(fontObject) end
     if wipeIndicator then wipeIndicator:SetFontObject(fontObject) end
     if overflowText then overflowText:SetFontObject(fontObject) end
+    if fulfilledSection and fulfilledSection.header then fulfilledSection.header:SetFontObject(fontObject) end
+    if fulfilledSection and fulfilledSection.badge then fulfilledSection.badge:SetFontObject(fontObject) end
 
     for _, row in ipairs(rows) do
         ApplyRowFontSize(row, db.fontSize)
@@ -91,10 +93,9 @@ local function EnsureOverlay()
     local db = GetDB()
     if not db then return end
 
-    overlayFrame = MedaUI:CreateOverlayContainer("MedaAurasProphecyOverlay", {
+    overlayFrame = MedaUI:CreateHUDSection(UIParent, {
         width = 280,
         height = 300,
-        strata = "MEDIUM",
         title = "Prophecy",
         titleFont = "GameFontNormal",
         titleTone = "dim",
@@ -102,17 +103,18 @@ local function EnsureOverlay()
         showBackground = db.showBackground or false,
         backgroundOpacity = db.backgroundOpacity or 0.4,
         locked = db.locked or false,
-        point = db.overlayPoint and {
-            point = db.overlayPoint[1] or "CENTER",
-            relativePoint = db.overlayPoint[1] or "CENTER",
-            x = db.overlayPoint[2] or 0,
-            y = db.overlayPoint[3] or 0,
-        } or {
-            point = "RIGHT",
-            relativePoint = "RIGHT",
-            x = -200,
-            y = 100,
-        },
+    })
+    overlayFrame:SetFrameStrata("MEDIUM")
+    overlayFrame:RestorePosition(db.overlayPoint and {
+        point = db.overlayPoint[1] or "CENTER",
+        relativePoint = db.overlayPoint[1] or "CENTER",
+        x = db.overlayPoint[2] or 0,
+        y = db.overlayPoint[3] or 0,
+    } or nil, {
+        point = "RIGHT",
+        relativePoint = "RIGHT",
+        x = -200,
+        y = 100,
     })
     headerText = overlayFrame.title
 

@@ -60,6 +60,7 @@ local sessionCasts = 0
 local sessionJunk = 0
 local currentStreak = 0
 local hideTimer = nil
+local hideRequestId = 0
 
 local SESSION_TIMEOUT = 300
 local sessionTimer = nil
@@ -664,63 +665,39 @@ local endSessionBtn
 
 local LINE_SPACING = 18
 
-local function MakePanelDraggable(panel, dbKey)
-    panel:SetMovable(true)
-    panel:SetClampedToScreen(true)
-    panel:EnableMouse(not db.auraLockPanels)
-    panel:RegisterForDrag("LeftButton")
-    panel:SetScript("OnDragStart", function(self)
-        if not db.auraLockPanels then self:StartMoving() end
-    end)
-    panel:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        local cx, cy = self:GetCenter()
-        local hcx, hcy = hudFrame:GetCenter()
-        self:ClearAllPoints()
-        self:SetPoint("CENTER", hudFrame, "CENTER", cx - hcx, cy - hcy)
-        db[dbKey] = { x = cx - hcx, y = cy - hcy }
-    end)
+local function AttachPanelPosition(panel, dbKey)
+    panel.OnMove = function(_, state)
+        if db and state then
+            db[dbKey] = { x = state.x or 0, y = state.y or 0 }
+        end
+    end
 end
 
 local function SetPanelsLocked(locked)
-    if leftPanel then leftPanel:EnableMouse(not locked) end
-    if rightPanel then rightPanel:EnableMouse(not locked) end
-    if bottomPanel then bottomPanel:EnableMouse(not locked) end
+    if leftPanel then leftPanel:SetLocked(locked) end
+    if rightPanel then rightPanel:SetLocked(locked) end
+    if bottomPanel then bottomPanel:SetLocked(locked) end
 end
 
 local function RestorePanelPos(panel, dbKey, defX, defY)
-    panel:ClearAllPoints()
-    local pos = db[dbKey]
-    if pos then
-        panel:SetPoint("CENTER", hudFrame, "CENTER", pos.x, pos.y)
-    else
-        panel:SetPoint("CENTER", hudFrame, "CENTER", defX, defY)
-    end
+    panel:RestoreRelativePosition(db[dbKey], { x = defX, y = defY })
 end
 
 local function CreateRow(parent)
     local iconSz = db.auraIconSize or 20
     local textFont = GetFontObj(db.auraFont or "default", db.auraTextSize or 13, db.auraTextOutline or "outline")
 
-    local row = CreateFrame("Frame", nil, parent)
-    row:SetSize(250, CHECKLIST_ROW_HEIGHT)
-
-    local icon = CreateFrame("Frame", nil, row)
-    icon:SetSize(iconSz, iconSz)
-    icon:SetPoint("LEFT", row, "LEFT", 0, 0)
-    local tex = icon:CreateTexture(nil, "ARTWORK")
-    tex:SetAllPoints()
-    tex:SetTexCoord(unpack(ICON_TEXCOORD))
-    icon.tex = tex
-    row.icon = icon
-
-    local fs = row:CreateFontString(nil, "OVERLAY")
-    fs:SetFontObject(textFont)
-    fs:SetJustifyH("LEFT")
-    fs:SetWordWrap(false)
-    fs:SetPoint("LEFT", icon, "RIGHT", 4, 0)
-    fs:SetPoint("RIGHT", row, "RIGHT", 0, 0)
-    row.text = fs
+    local row = MedaUI:CreateHUDRow(parent, {
+        width = 280,
+        iconSize = iconSz,
+        showState = false,
+        showTimer = false,
+        showDelta = false,
+        interactive = false,
+    })
+    row.text:SetFontObject(textFont)
+    row.text:SetJustifyH("LEFT")
+    row.icon:SetTexCoord(unpack(ICON_TEXCOORD))
 
     return row
 end
@@ -742,36 +719,50 @@ end
 local function CreateHUD()
     if hudFrame then return end
 
-    hudFrame = CreateFrame("Frame", "MedaAuras_GoneFishinHUD", UIParent)
-    hudFrame:SetSize(1, 1)
-    hudFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-    hudFrame:SetFrameStrata("BACKGROUND")
-    hudFrame:SetFrameLevel(1)
-    hudFrame:Hide()
+    hudFrame = MedaUI:CreateHUDGroup("MedaAuras_GoneFishinHUD", {
+        strata = "BACKGROUND",
+        frameLevel = 1,
+        fadeInDuration = db.auraFadeIn or 0.4,
+        fadeOutDuration = db.auraFadeOut or 0.6,
+        opacity = db.auraOpacity or 0.92,
+        scale = db.auraScale or 1.0,
+    })
 
     local textFont = GetFontObj(db.auraFont or "default", db.auraTextSize or 13, db.auraTextOutline or "outline")
     local headerFont = GetFontObj(db.auraFont or "default", (db.auraTextSize or 13) + 2, "thick")
     local smallFont = GetFontObj(db.auraFont or "default", math_max((db.auraTextSize or 13) - 3, 8), db.auraTextOutline or "outline")
 
     -- ---- Left Panel (zone, session stats) ----
-    leftPanel = CreateFrame("Frame", nil, hudFrame)
-    leftPanel:SetSize(300, 8 * LINE_SPACING)
-    MakePanelDraggable(leftPanel, "leftPanelPos")
+    leftPanel = MedaUI:CreateHUDSection(hudFrame, {
+        width = 300,
+        height = 8 * LINE_SPACING,
+        locked = db.auraLockPanels ~= false,
+        positionMode = "relative",
+    })
+    AttachPanelPosition(leftPanel, "leftPanelPos")
+
+    local leftBlock = MedaUI:CreateHUDTextBlock(leftPanel, {
+        width = 300,
+        lineCount = 8,
+        lineHeight = LINE_SPACING,
+        fontObject = textFont,
+        justifyH = "RIGHT",
+    })
+    leftBlock:SetPoint("TOPLEFT", leftPanel, "TOPLEFT", 0, 0)
 
     for i = 1, 8 do
-        local fs = leftPanel:CreateFontString(nil, "OVERLAY")
-        local font = (i <= 2 and headerFont) or textFont
-        fs:SetFontObject(font)
-        fs:SetJustifyH("RIGHT")
-        fs:SetWordWrap(false)
-        fs:SetPoint("TOPRIGHT", leftPanel, "TOPRIGHT", 0, -(i - 1) * LINE_SPACING)
-        leftTexts[i] = fs
+        leftTexts[i] = leftBlock:GetLine(i)
+        leftTexts[i]:SetFontObject(i <= 2 and headerFont or textFont)
     end
 
     -- ---- Right Panel (zone fish checklist) ----
-    rightPanel = CreateFrame("Frame", nil, hudFrame)
-    rightPanel:SetSize(280, CHECKLIST_MAX_VISIBLE * CHECKLIST_ROW_HEIGHT)
-    MakePanelDraggable(rightPanel, "rightPanelPos")
+    rightPanel = MedaUI:CreateHUDSection(hudFrame, {
+        width = 280,
+        height = CHECKLIST_MAX_VISIBLE * CHECKLIST_ROW_HEIGHT,
+        locked = db.auraLockPanels ~= false,
+        positionMode = "relative",
+    })
+    AttachPanelPosition(rightPanel, "rightPanelPos")
 
     local scrollHeight = CHECKLIST_MAX_VISIBLE * CHECKLIST_ROW_HEIGHT
     checklistScroll = MedaUI:CreateScrollFrame(rightPanel, nil, 280, scrollHeight)
@@ -782,71 +773,79 @@ local function CreateHUD()
     Pixel.SetHeight(checklistContent, 1)
 
     -- Collapsible section headers (outside scroll area, in rightPanel)
-    junkHeaderBtn = CreateFrame("Button", nil, rightPanel)
-    junkHeaderBtn:SetSize(280, CHECKLIST_ROW_HEIGHT)
-    junkHeaderBtn.text = junkHeaderBtn:CreateFontString(nil, "OVERLAY")
-    junkHeaderBtn.text:SetFontObject(smallFont)
-    junkHeaderBtn.text:SetAllPoints()
-    junkHeaderBtn.text:SetJustifyH("LEFT")
-    junkHeaderBtn:SetScript("OnClick", function()
-        junkExpanded = not junkExpanded
+    junkHeaderBtn = MedaUI:CreateCollapsibleSectionHeader(rightPanel, {
+        text = "Junk",
+        width = 280,
+        height = CHECKLIST_ROW_HEIGHT,
+        fontObject = smallFont,
+        tone = "textDim",
+        showLine = false,
+        expanded = junkExpanded,
+    })
+    junkHeaderBtn:SetOnToggle(function(expanded)
+        junkExpanded = expanded
         arcDirty = true
     end)
 
-    missingHeaderBtn = CreateFrame("Button", nil, rightPanel)
-    missingHeaderBtn:SetSize(280, CHECKLIST_ROW_HEIGHT)
-    missingHeaderBtn.text = missingHeaderBtn:CreateFontString(nil, "OVERLAY")
-    missingHeaderBtn.text:SetFontObject(smallFont)
-    missingHeaderBtn.text:SetAllPoints()
-    missingHeaderBtn.text:SetJustifyH("LEFT")
-    missingHeaderBtn:SetScript("OnClick", function()
-        missingExpanded = not missingExpanded
+    missingHeaderBtn = MedaUI:CreateCollapsibleSectionHeader(rightPanel, {
+        text = "Missing",
+        width = 280,
+        height = CHECKLIST_ROW_HEIGHT,
+        fontObject = smallFont,
+        tone = "textDim",
+        showLine = false,
+        expanded = missingExpanded,
+    })
+    missingHeaderBtn:SetOnToggle(function(expanded)
+        missingExpanded = expanded
         arcDirty = true
     end)
 
     -- ---- Bottom Panel (fave, best spot, lure hint) ----
-    bottomPanel = CreateFrame("Frame", nil, hudFrame)
-    bottomPanel:SetSize(300, 70)
-    MakePanelDraggable(bottomPanel, "bottomPanelPos")
+    bottomPanel = MedaUI:CreateHUDSection(hudFrame, {
+        width = 300,
+        height = 70,
+        locked = db.auraLockPanels ~= false,
+        positionMode = "relative",
+    })
+    AttachPanelPosition(bottomPanel, "bottomPanelPos")
 
     for i = 1, 3 do
-        local fs = bottomPanel:CreateFontString(nil, "OVERLAY")
-        fs:SetFontObject(textFont)
-        fs:SetJustifyH("CENTER")
-        fs:SetWordWrap(false)
+        local fs = MedaUI:CreateLabel(bottomPanel, "", {
+            fontObject = textFont,
+            justifyH = "CENTER",
+            tone = "text",
+            shadow = true,
+            wrap = false,
+        })
         centerTexts[i] = fs
     end
     centerTexts[1]:SetPoint("TOP", bottomPanel, "TOP", 10, 0)
     centerTexts[2]:SetPoint("TOP", bottomPanel, "TOP", 0, -16)
     centerTexts[3]:SetPoint("TOP", bottomPanel, "TOP", 0, -32)
 
-    faveButton = CreateFrame("Button", nil, bottomPanel)
-    faveButton:SetSize(16, 16)
-    faveButton.tex = faveButton:CreateTexture(nil, "ARTWORK")
-    faveButton.tex:SetAllPoints()
-    faveButton.tex:SetAtlas("Waypoint-MapPin-Untracked")
-    faveButton:SetScript("OnClick", function()
+    faveButton = MedaUI:CreateIconButton(bottomPanel, {
+        size = 16,
+        atlas = "Waypoint-MapPin-Untracked",
+        flat = true,
+        tooltip = "Click to save as favorite",
+        tooltipActive = "Click to remove favorite",
+    })
+    faveButton.OnClick = function()
         ToggleFavorite()
         arcDirty = true
-    end)
-    faveButton:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        if IsCurrentSpotFaved() then
-            GameTooltip:AddLine("Click to remove favorite", 1, 1, 1)
-        else
-            GameTooltip:AddLine("Click to save as favorite", 1, 1, 1)
-        end
-        GameTooltip:Show()
-    end)
-    faveButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    end
     faveButton:SetPoint("RIGHT", centerTexts[1], "LEFT", -2, 0)
+    faveButton.tex = faveButton.icon
 
-    endSessionBtn = CreateFrame("Button", nil, bottomPanel)
-    endSessionBtn:SetSize(80, 16)
-    endSessionBtn.text = endSessionBtn:CreateFontString(nil, "OVERLAY")
-    endSessionBtn.text:SetFontObject(textFont)
-    endSessionBtn.text:SetAllPoints()
-    endSessionBtn.text:SetText("|cff888888End Session|r")
+    endSessionBtn = MedaUI:CreateHUDTextButton(bottomPanel, "End Session", {
+        width = 80,
+        height = 16,
+        fontObject = textFont,
+        tone = "dim",
+        hoverTone = "bright",
+        tooltip = "Click to end fishing session",
+    })
     endSessionBtn:SetScript("OnClick", function()
         if sessionActive then
             CancelSessionTimeout()
@@ -855,30 +854,18 @@ local function CreateHUD()
             print("|cff00ccffGone Fishin':|r Session ended.")
         end
     end)
-    endSessionBtn:SetScript("OnEnter", function(self)
-        self.text:SetText("|cffccccccEnd Session|r")
-        GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:AddLine("Click to end fishing session", 1, 1, 1)
-        GameTooltip:Show()
-    end)
-    endSessionBtn:SetScript("OnLeave", function(self)
-        self.text:SetText("|cff888888End Session|r")
-        GameTooltip:Hide()
-    end)
     endSessionBtn:SetPoint("TOP", bottomPanel, "TOP", 0, -52)
-
-    hudFadeCtrl = MedaUI:CreateFadeEffect(hudFrame, {
-        fadeInDuration = db.auraFadeIn or 0.4,
-        fadeOutDuration = db.auraFadeOut or 0.6,
-    })
+    endSessionBtn.text = endSessionBtn.label
+    hudFadeCtrl = hudFrame.fadeEffect
 end
 
 local function RecalcPositions()
     if not hudFrame then return end
 
     local scale = db.auraScale or 1.0
-    hudFrame:SetScale(scale)
-    hudFrame:SetAlpha(db.auraOpacity or 0.92)
+    hudFrame:SetHUDScale(scale)
+    hudFrame:SetHUDOpacity(db.auraOpacity or 0.92)
+    hudFrame:SetFadeDurations(db.auraFadeIn or 0.4, db.auraFadeOut or 0.6)
 
     local xOff = db.auraHOffset or 200
     local vOff = db.auraVerticalOffset or -20
@@ -920,8 +907,10 @@ local function RecalcPositions()
     for _, row in ipairs(expandRows) do
         if row.text then row.text:SetFontObject(textFont) end
     end
-    if junkHeaderBtn and junkHeaderBtn.text then junkHeaderBtn.text:SetFontObject(smallFont) end
-    if missingHeaderBtn and missingHeaderBtn.text then missingHeaderBtn.text:SetFontObject(smallFont) end
+    if junkHeaderBtn and junkHeaderBtn.header then junkHeaderBtn.header:SetFontObject(smallFont) end
+    if junkHeaderBtn and junkHeaderBtn.badge then junkHeaderBtn.badge:SetFontObject(smallFont) end
+    if missingHeaderBtn and missingHeaderBtn.header then missingHeaderBtn.header:SetFontObject(smallFont) end
+    if missingHeaderBtn and missingHeaderBtn.badge then missingHeaderBtn.badge:SetFontObject(smallFont) end
     if endSessionBtn and endSessionBtn.text then endSessionBtn.text:SetFontObject(textFont) end
 end
 
@@ -1153,9 +1142,8 @@ local function UpdateHUDContent()
             if type(iconPath) == "string" and not iconPath:find("\\") then
                 iconPath = "Interface\\Icons\\" .. iconPath
             end
-            row.icon:Show()
-            row.icon.tex:SetTexture(iconPath)
-            row.icon.tex:SetDesaturated(desaturate or false)
+            row:SetIcon(iconPath)
+            row:SetIconDesaturated(desaturate or false)
 
             local r, g, b = GetQualityColor(entry.quality or 1)
             if desaturate then
@@ -1193,8 +1181,9 @@ local function UpdateHUDContent()
             junkHeaderBtn:Show()
             junkHeaderBtn:ClearAllPoints()
             junkHeaderBtn:SetPoint("TOPLEFT", rightPanel, "TOPLEFT", 0, belowY)
-            local arrow = junkExpanded and "[-]" or "[+]"
-            junkHeaderBtn.text:SetText(format("|cff888888%s Junk (%d)|r", arrow, #junkList))
+            junkHeaderBtn:SetText("Junk")
+            junkHeaderBtn:SetCount(#junkList)
+            junkHeaderBtn:SetExpanded(junkExpanded)
             belowY = belowY - CHECKLIST_ROW_HEIGHT
             if junkExpanded then
                 for _, entry in ipairs(junkList) do
@@ -1215,8 +1204,9 @@ local function UpdateHUDContent()
             missingHeaderBtn:Show()
             missingHeaderBtn:ClearAllPoints()
             missingHeaderBtn:SetPoint("TOPLEFT", rightPanel, "TOPLEFT", 0, belowY)
-            local arrow = missingExpanded and "[-]" or "[+]"
-            missingHeaderBtn.text:SetText(format("|cff888888%s Missing (%d)|r", arrow, #missingList))
+            missingHeaderBtn:SetText("Missing")
+            missingHeaderBtn:SetCount(#missingList)
+            missingHeaderBtn:SetExpanded(missingExpanded)
             belowY = belowY - CHECKLIST_ROW_HEIGHT
             if missingExpanded then
                 for _, entry in ipairs(missingList) do
@@ -1245,17 +1235,20 @@ local function UpdateHUDContent()
     if db.auraShowFaves ~= false then
         faveButton:Show()
         if IsCurrentSpotFaved() then
+            faveButton:SetActive(true)
             faveButton.tex:SetAtlas("Waypoint-MapPin-Tracked")
             faveButton.tex:SetDesaturated(false)
             local subzone = GetCurrentArea()
             centerTexts[1]:SetText(format("|cffffd100Fave: %s|r", subzone))
         else
+            faveButton:SetActive(false)
             faveButton.tex:SetAtlas("Waypoint-MapPin-Untracked")
             faveButton.tex:SetDesaturated(true)
             centerTexts[1]:SetText("|cff666666No favorite set|r")
         end
     else
         faveButton:Hide()
+        faveButton:SetActive(false)
         centerTexts[1]:SetText("")
     end
 
@@ -1369,6 +1362,8 @@ local function ShowHUD()
     if not db or not db.auraEnabled then return end
     if not hudFrame then CreateHUD() end
 
+    hideRequestId = hideRequestId + 1
+
     if hideTimer then
         hideTimer:Cancel()
         hideTimer = nil
@@ -1389,13 +1384,21 @@ local function HideHUD()
     if not hudFrame or not hudVisible then return end
 
     local delay = db and db.auraHideDelay or 8
+    local requestId = hideRequestId + 1
+    hideRequestId = requestId
     if hideTimer then hideTimer:Cancel() end
     hideTimer = C_Timer.NewTimer(delay, function()
+        if requestId ~= hideRequestId then
+            return
+        end
         hideTimer = nil
         if hudFadeCtrl then
             hudFadeCtrl:FadeOut()
         end
         C_Timer.After((db and db.auraFadeOut or 0.6) + 0.1, function()
+            if requestId ~= hideRequestId then
+                return
+            end
             DisableHUDUpdates()
             hudVisible = false
         end)
@@ -2685,108 +2688,166 @@ local function BuildConfig(parent, moduleDB)
         local anchor = MedaAurasSettingsPanel or _G["MedaAurasSettingsPanel"]
         if not anchor then return end
 
-        local PV_PAD = 12
-        local PV_W = 280
-        local LINE_H = 15
-        local dim = { 0.55, 0.55, 0.55 }
-        local gold = { 1, 0.82, 0 }
-        local green = { 0.53, 0.80, 0.53 }
-        local blue = { 0.4, 0.78, 1 }
+        local dim = { 0.55, 0.55, 0.55, 1 }
+        local gold = { 1, 0.82, 0, 1 }
+        local green = { 0.53, 0.80, 0.53, 1 }
+        local blue = { 0.4, 0.78, 1, 1 }
 
-        local pvContainer = CreateFrame("Frame", nil, anchor)
-        pvContainer:SetFrameStrata("HIGH")
-        pvContainer:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 6, 0)
+        local pvContainer = MedaUI:CreateHUDGroup(nil, {
+            point = {
+                point = "TOPLEFT",
+                relativeTo = anchor,
+                relativePoint = "TOPRIGHT",
+                x = 6,
+                y = 0,
+            },
+            strata = "HIGH",
+            opacity = moduleDB.auraOpacity or 0.92,
+            scale = moduleDB.auraScale or 1,
+        })
         MedaAuras:RegisterConfigCleanup(pvContainer)
+        pvContainer:Show()
 
-        local pvHeaders = {}
-        local pvBodyLines = {}
-        local pvSections = { junk = {}, checklist = {}, fave = {}, best = {}, tips = {} }
+        local pvLeft = MedaUI:CreateHUDSection(pvContainer, {
+            width = 280,
+            height = 8 * LINE_SPACING,
+            locked = true,
+        })
+        pvLeft:SetPoint("TOPLEFT", pvContainer, "TOPLEFT", 0, 0)
 
-        local yOff = -PV_PAD
-
-        local function AddLine(text, color, section)
-            local fs = pvContainer:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            fs:SetPoint("TOPLEFT", PV_PAD, yOff)
-            fs:SetPoint("RIGHT", -PV_PAD, 0)
-            fs:SetJustifyH("LEFT")
-            fs:SetWordWrap(false)
-            fs:SetText(text)
-            if color then fs:SetTextColor(color[1], color[2], color[3]) end
-            yOff = yOff - LINE_H
-            pvBodyLines[#pvBodyLines + 1] = fs
-            if section then pvSections[section][#pvSections[section] + 1] = fs end
-            return fs
+        local pvLeftBlock = MedaUI:CreateHUDTextBlock(pvLeft, {
+            width = 280,
+            lineCount = 8,
+            lineHeight = LINE_SPACING,
+            justifyH = "RIGHT",
+        })
+        pvLeftBlock:SetPoint("TOPLEFT", pvLeft, "TOPLEFT", 0, 0)
+        local pvLeftLines = {}
+        for i = 1, 8 do
+            pvLeftLines[i] = pvLeftBlock:GetLine(i)
         end
 
-        local function AddHeader(text, color)
-            local fs = pvContainer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-            fs:SetPoint("TOPLEFT", PV_PAD, yOff)
-            fs:SetPoint("RIGHT", -PV_PAD, 0)
-            fs:SetJustifyH("LEFT")
-            fs:SetWordWrap(false)
-            fs:SetText(text)
-            if color then fs:SetTextColor(color[1], color[2], color[3]) end
-            yOff = yOff - LINE_H
-            pvHeaders[#pvHeaders + 1] = fs
-            return fs
-        end
+        local pvRight = MedaUI:CreateHUDSection(pvContainer, {
+            width = 280,
+            height = 170,
+            locked = true,
+        })
+        pvRight:SetPoint("TOPLEFT", pvLeft, "BOTTOMLEFT", 0, -14)
 
-        local function AddGap(h) yOff = yOff - (h or 6) end
+        local pvChecklistHeader = MedaUI:CreateLabel(pvRight, "Zone Fish", {
+            fontObject = "GameFontNormal",
+            tone = "gold",
+            shadow = true,
+            wrap = false,
+        })
+        pvChecklistHeader:SetPoint("TOPLEFT", pvRight, "TOPLEFT", 0, 0)
 
-        -- Left panel mock
-        AddHeader("Zone Stats", gold)
-        AddGap(2)
-        AddLine("Silvermoon Harbor", gold)
-        AddLine("The Moonwell", dim)
-        AddLine("", dim)
-        AddLine("Session: 24 fish | 3 junk", { 1, 1, 1 }, "junk")
-        AddLine("Casts: 31 | Rate: 77%", dim)
-        AddLine("Time: 12m 34s", dim)
-        AddLine("Streak: 8", green)
-        AddGap(10)
-
-        -- Right panel mock (checklist)
-        local checklistHdr = AddHeader("Zone Fish", gold)
-        pvSections.checklist[#pvSections.checklist + 1] = checklistHdr
-        AddGap(2)
-        local QUALITY_COLORS = {
-            [1] = { 0.62, 0.62, 0.62 },
-            [2] = { 0.12, 1.00, 0.00 },
-            [3] = { 0.00, 0.44, 0.87 },
-            [4] = { 0.64, 0.21, 0.93 },
-        }
-        for _, fish in ipairs({
+        local pvChecklistRows = {}
+        local previewFish = {
             { name = "Lunker Salmon",       q = 3, count = 7 },
             { name = "Moonpearl Trout",     q = 2, count = 12 },
             { name = "Midnight Anglerfish", q = 4, count = 2 },
             { name = "Duskwater Eel",       q = 1, count = 5 },
-        }) do
-            AddLine(format("  %s  x%d", fish.name, fish.count), QUALITY_COLORS[fish.q] or dim, "checklist")
+        }
+        for index, fish in ipairs(previewFish) do
+            local row = MedaUI:CreateHUDRow(pvRight, {
+                width = 280,
+                showState = false,
+                showTimer = false,
+                showDelta = false,
+                interactive = false,
+                iconSize = moduleDB.auraIconSize or 20,
+            })
+            row:SetPoint("TOPLEFT", pvRight, "TOPLEFT", 0, -(18 + ((index - 1) * CHECKLIST_ROW_HEIGHT)))
+            local r, g, b = GetQualityColor(fish.q)
+            row:SetIconColor(r, g, b)
+            row:SetText(format("|cff%02x%02x%02x%s|r |cff999999(x%d)|r", r * 255, g * 255, b * 255, fish.name, fish.count))
+            pvChecklistRows[index] = row
         end
-        AddLine("  [+] Junk (3)", dim, "checklist")
-        AddLine("  [+] Missing (2)", dim, "checklist")
-        AddGap(10)
 
-        -- Bottom panel mock
-        AddHeader("Info", gold)
-        AddGap(2)
-        AddLine("Favorite: The Moonwell", blue, "fave")
-        AddLine("Best Spot: Sunsail Anchorage (41)", dim, "best")
-        AddLine("Tip: Use Moonpearl Lure for rare fish", dim, "tips")
-        AddGap(PV_PAD)
+        local pvJunkHeader = MedaUI:CreateCollapsibleSectionHeader(pvRight, {
+            text = "Junk",
+            count = 3,
+            width = 280,
+            height = CHECKLIST_ROW_HEIGHT,
+            tone = "textDim",
+            showLine = false,
+            expanded = false,
+        })
+        pvJunkHeader:SetPoint("TOPLEFT", pvRight, "TOPLEFT", 0, -(18 + (#previewFish * CHECKLIST_ROW_HEIGHT)))
 
-        pvContainer:SetSize(PV_W, math_abs(yOff))
-        pvContainer:Show()
+        local pvMissingHeader = MedaUI:CreateCollapsibleSectionHeader(pvRight, {
+            text = "Missing",
+            count = 2,
+            width = 280,
+            height = CHECKLIST_ROW_HEIGHT,
+            tone = "textDim",
+            showLine = false,
+            expanded = false,
+        })
+        pvMissingHeader:SetPoint("TOPLEFT", pvJunkHeader, "BOTTOMLEFT", 0, 0)
+
+        local pvBottom = MedaUI:CreateHUDSection(pvContainer, {
+            width = 280,
+            height = 70,
+            locked = true,
+        })
+        pvBottom:SetPoint("TOPLEFT", pvRight, "BOTTOMLEFT", 0, -14)
+
+        local pvCenterTexts = {}
+        for i = 1, 3 do
+            pvCenterTexts[i] = MedaUI:CreateLabel(pvBottom, "", {
+                justifyH = "CENTER",
+                tone = "text",
+                shadow = true,
+                wrap = false,
+            })
+        end
+        pvCenterTexts[1]:SetPoint("TOP", pvBottom, "TOP", 10, 0)
+        pvCenterTexts[2]:SetPoint("TOP", pvBottom, "TOP", 0, -16)
+        pvCenterTexts[3]:SetPoint("TOP", pvBottom, "TOP", 0, -32)
+
+        local pvFaveButton = MedaUI:CreateIconButton(pvBottom, {
+            size = 16,
+            atlas = "Waypoint-MapPin-Tracked",
+            flat = true,
+        })
+        pvFaveButton:SetPoint("RIGHT", pvCenterTexts[1], "LEFT", -2, 0)
+        pvFaveButton:Disable()
+
+        local pvEndSessionBtn = MedaUI:CreateHUDTextButton(pvBottom, "End Session", {
+            width = 80,
+            height = 16,
+            tone = "dim",
+            hoverTone = "dim",
+        })
+        pvEndSessionBtn:SetPoint("TOP", pvBottom, "TOP", 0, -52)
+        pvEndSessionBtn:Disable()
 
         UpdatePreview = function()
             local textFont = GetFontObj(moduleDB.auraFont or "default", moduleDB.auraTextSize or 13, moduleDB.auraTextOutline or "outline")
             local headerFont = GetFontObj(moduleDB.auraFont or "default", (moduleDB.auraTextSize or 13) + 2, "thick")
+            local smallFont = GetFontObj(moduleDB.auraFont or "default", math_max((moduleDB.auraTextSize or 13) - 3, 8), moduleDB.auraTextOutline or "outline")
 
-            for _, fs in ipairs(pvHeaders) do fs:SetFontObject(headerFont) end
-            for _, fs in ipairs(pvBodyLines) do fs:SetFontObject(textFont) end
+            pvContainer:SetHUDScale(moduleDB.auraScale or 1)
+            pvContainer:SetHUDOpacity(moduleDB.auraOpacity or 0.92)
 
-            pvContainer:SetScale(moduleDB.auraScale or 1)
-            pvContainer:SetAlpha(moduleDB.auraOpacity or 0.92)
+            for i = 1, 8 do
+                pvLeftLines[i]:SetFontObject(i <= 2 and headerFont or textFont)
+            end
+            pvChecklistHeader:SetFontObject(headerFont)
+            for _, row in ipairs(pvChecklistRows) do
+                row.text:SetFontObject(textFont)
+                if row.icon then row.icon:SetSize(moduleDB.auraIconSize or 20, moduleDB.auraIconSize or 20) end
+            end
+            pvJunkHeader.header:SetFontObject(smallFont)
+            pvJunkHeader.badge:SetFontObject(smallFont)
+            pvMissingHeader.header:SetFontObject(smallFont)
+            pvMissingHeader.badge:SetFontObject(smallFont)
+            for _, fs in ipairs(pvCenterTexts) do
+                fs:SetFontObject(textFont)
+            end
+            pvEndSessionBtn:SetFontObject(textFont)
 
             local showJunk = moduleDB.auraShowSessionJunk ~= false
             local showChecklist = moduleDB.auraShowChecklist ~= false
@@ -2794,24 +2855,48 @@ local function BuildConfig(parent, moduleDB)
             local showBest = moduleDB.auraShowBestSpot ~= false
             local showTips = moduleDB.auraShowTips ~= false
 
-            for _, fs in ipairs(pvSections.junk) do
-                if showJunk then
-                    fs:SetText("Session: 24 fish | 3 junk")
-                else
-                    fs:SetText("Session: 24 fish")
-                end
+            pvLeftLines[1]:SetText("Silvermoon Harbor")
+            pvLeftLines[1]:SetColorOverride(gold[1], gold[2], gold[3], gold[4])
+            pvLeftLines[2]:SetText("The Moonwell")
+            pvLeftLines[2]:SetColorOverride(dim[1], dim[2], dim[3], dim[4])
+            pvLeftLines[3]:SetText("")
+            pvLeftLines[4]:SetText(showJunk and "Session: 24 fish | 3 junk" or "Session: 24 fish")
+            pvLeftLines[4]:SetColorOverride(1, 1, 1, 1)
+            pvLeftLines[5]:SetText("Casts: 31 | Rate: 77%")
+            pvLeftLines[5]:SetColorOverride(dim[1], dim[2], dim[3], dim[4])
+            pvLeftLines[6]:SetText("Time: 12m 34s")
+            pvLeftLines[6]:SetColorOverride(dim[1], dim[2], dim[3], dim[4])
+            pvLeftLines[7]:SetText("Streak: 8")
+            pvLeftLines[7]:SetColorOverride(green[1], green[2], green[3], green[4])
+            pvLeftLines[8]:SetText("Fishing: 179/225")
+            pvLeftLines[8]:SetColorOverride(dim[1], dim[2], dim[3], dim[4])
+
+            if showChecklist then pvRight:Show() else pvRight:Hide() end
+
+            if showFave then
+                pvFaveButton:Show()
+                pvCenterTexts[1]:Show()
+                pvCenterTexts[1]:SetText("Favorite: The Moonwell")
+                pvCenterTexts[1]:SetColorOverride(blue[1], blue[2], blue[3], blue[4])
+            else
+                pvFaveButton:Hide()
+                pvCenterTexts[1]:Hide()
             end
-            for _, fs in ipairs(pvSections.checklist) do
-                if showChecklist then fs:Show() else fs:Hide() end
+
+            if showBest then
+                pvCenterTexts[2]:Show()
+                pvCenterTexts[2]:SetText("Best Spot: Sunsail Anchorage (41)")
+                pvCenterTexts[2]:SetColorOverride(dim[1], dim[2], dim[3], dim[4])
+            else
+                pvCenterTexts[2]:Hide()
             end
-            for _, fs in ipairs(pvSections.fave) do
-                if showFave then fs:Show() else fs:Hide() end
-            end
-            for _, fs in ipairs(pvSections.best) do
-                if showBest then fs:Show() else fs:Hide() end
-            end
-            for _, fs in ipairs(pvSections.tips) do
-                if showTips then fs:Show() else fs:Hide() end
+
+            if showTips then
+                pvCenterTexts[3]:Show()
+                pvCenterTexts[3]:SetText("Tip: Use Moonpearl Lure for rare fish")
+                pvCenterTexts[3]:SetColorOverride(dim[1], dim[2], dim[3], dim[4])
+            else
+                pvCenterTexts[3]:Hide()
             end
         end
         UpdatePreview()
