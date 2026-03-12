@@ -140,22 +140,27 @@ end
 local function BuildSourceFreshnessLine()
     local data = GetData()
     if not data or not data.sources then return nil end
+    local hasTimestamp = false
     local parts = {}
     for key, src in pairs(data.sources) do
+        local c = src.color or { 0.7, 0.7, 0.7 }
+        local hex = format("%02x%02x%02x",
+            math.floor(c[1] * 255), math.floor(c[2] * 255), math.floor(c[3] * 255))
         if src.lastFetched then
             local rel = FormatRelativeTime(src.lastFetched)
             if rel then
-                local c = src.color or { 0.7, 0.7, 0.7 }
-                parts[#parts + 1] = format(
-                    "|cff%02x%02x%02x%s|r %s",
-                    math.floor(c[1] * 255), math.floor(c[2] * 255), math.floor(c[3] * 255),
-                    src.label, rel
-                )
+                hasTimestamp = true
+                parts[#parts + 1] = format("|cff%s%s|r %s", hex, src.label, rel)
+            else
+                parts[#parts + 1] = format("|cff%s%s|r", hex, src.label)
             end
+        else
+            parts[#parts + 1] = format("|cff%s%s|r", hex, src.label)
         end
     end
     if #parts == 0 then return nil end
-    return "Updated: " .. table.concat(parts, "  |  ")
+    local prefix = hasTimestamp and "Updated: " or "Sources: "
+    return prefix .. table.concat(parts, "  |  ")
 end
 
 -- ============================================================================
@@ -482,13 +487,14 @@ end
 local ICON_SIZE = 32
 local ICON_ZOOM = { 0.11, 0.89, 0.11, 0.89 }
 
-local function AcquireRow(parent)
+local function AcquireRow(parent, width)
     local row = table.remove(rowPool)
     if not row then
-        row = MedaUI:CreateStatusRow(parent, { width = nil, showNote = true, iconSize = ICON_SIZE })
+        row = MedaUI:CreateStatusRow(parent, { width = width, showNote = true, iconSize = ICON_SIZE })
     else
         row:SetParent(parent)
         row:Reset()
+        if width then row:SetWidth(width) end
     end
     row.icon:SetTexCoord(unpack(ICON_ZOOM))
     row:Show()
@@ -986,15 +992,16 @@ local DISPEL_COLORS = {
 }
 local SPELL_COLOR_DEFAULT = "00ccff" -- cyan fallback
 
--- Color [Spell Name] references, using dispel-type colors when a spellMap is provided
+-- Color [Spell Name] references, using dispel-type colors when a spellMap is provided.
+-- Only colors short bracket content (spell names); leaves long descriptions uncolored.
 local function ColorSpellNames(text, spellMap)
     if not text then return text end
     return text:gsub("%[([^%]]+)%]", function(name)
-        local color = SPELL_COLOR_DEFAULT
         if spellMap and spellMap[name] then
-            color = spellMap[name]
+            return "|cff" .. spellMap[name] .. "[" .. name .. "]|r"
         end
-        return "|cff" .. color .. "[" .. name .. "]|r"
+        if #name > 40 then return "[" .. name .. "]" end
+        return "|cff" .. SPELL_COLOR_DEFAULT .. "[" .. name .. "]|r"
     end)
 end
 
@@ -1110,7 +1117,7 @@ local function RenderPlayerTab(content)
                           "|cff888888Normal|r"
         local tierFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         tierFS:SetPoint("TOPLEFT", 8, yOff)
-        tierFS:SetTextColor(0.6, 0.6, 0.6)
+        tierFS:SetTextColor(0.78, 0.78, 0.78)
         tierFS:SetText("Difficulty: " .. tierLabel)
         yOff = yOff - 16
 
@@ -1123,7 +1130,7 @@ local function RenderPlayerTab(content)
                 noteFS:SetPoint("RIGHT", content, "RIGHT", -8, 0)
                 noteFS:SetJustifyH("LEFT")
                 noteFS:SetWordWrap(true)
-                noteFS:SetTextColor(0.7, 0.7, 0.7)
+                noteFS:SetTextColor(0.85, 0.85, 0.85)
                 noteFS:SetText("- " .. ColorText(note, mobSet, spellMap))
                 yOff = yOff - noteFS:GetStringHeight() - 2
             end
@@ -1202,7 +1209,7 @@ local function RenderPlayerTab(content)
             local isInterrupt = d.type == "interrupt"
             local isAwareness = d.type == "awareness"
 
-            local row = MedaUI:CreateStatusRow(content, { iconSize = 32, showNote = true })
+            local row = MedaUI:CreateStatusRow(content, { iconSize = 32, showNote = true, width = content:GetWidth() })
             playerRows[#playerRows + 1] = row
 
             row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, yOff)
@@ -1327,7 +1334,7 @@ local function RenderPlayerTab(content)
 
             local line
             if isOutlier then
-                line = format("|cff%s\226\151\134 ALT|r  ", pctColor)
+                line = format("|TInterface\\AddOns\\MedaUI\\Media\\Textures\\diamond.tga:10:10|t |cff%sALT|r  ", pctColor)
             else
                 line = format("|cff%s#%d|r  ", pctColor, lustNum)
             end
@@ -1352,7 +1359,7 @@ local function RenderPlayerTab(content)
                 noteFS:SetPoint("RIGHT", content, "RIGHT", -8, 0)
                 noteFS:SetJustifyH("LEFT")
                 noteFS:SetWordWrap(true)
-                noteFS:SetText("|cffaaaaaa" .. lt.note .. "|r")
+                noteFS:SetText("|cffcccccc" .. lt.note .. "|r")
                 yOff = yOff - noteFS:GetStringHeight() - 4
             end
         end
@@ -1435,14 +1442,14 @@ local function RenderPlayerTab(content)
             local ok, detail = FindPlayerBuff(ib.pattern)
             local recommended = IsStatRecommended(ib.statType, preferredStats)
 
-            local row = MedaUI:CreateStatusRow(content, { iconSize = 24, showNote = true })
+            local row = MedaUI:CreateStatusRow(content, { iconSize = 24, showNote = true, width = content:GetWidth() })
             playerRows[#playerRows + 1] = row
             row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, yOff)
             row:SetPoint("RIGHT", content, "RIGHT", 0, 0)
 
             local labelText = ib.buff
             if recommended and not ok then
-                labelText = "\226\152\133 " .. labelText
+                labelText = "|TInterface\\AddOns\\MedaUI\\Media\\Textures\\star-filled.tga:10:10|t " .. labelText
             end
             row:SetLabel(labelText)
 
@@ -1639,7 +1646,7 @@ local function RenderPanel(results)
                 local r = resultMap[capID]
                 if r then
                     local cap = r.capability
-                    local row = AcquireRow(content)
+                    local row = AcquireRow(content, content:GetWidth())
                     activeRows[#activeRows + 1] = row
 
                     row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, yOff)
@@ -1777,14 +1784,14 @@ local function RenderPanel(results)
             end
 
             local recommended = IsStatRecommended(ib.statType, preferredStats)
-            local row = AcquireRow(content)
+            local row = AcquireRow(content, content:GetWidth())
             activeRows[#activeRows + 1] = row
             row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, yOff)
             row:SetPoint("RIGHT", content, "RIGHT", 0, 0)
 
             local labelText = ib.buff
             if recommended then
-                labelText = "\226\152\133 " .. labelText
+                labelText = "|TInterface\\AddOns\\MedaUI\\Media\\Textures\\star-filled.tga:10:10|t " .. labelText
             end
             row:SetLabel(labelText)
 
@@ -1838,19 +1845,6 @@ local function RenderPanel(results)
             yOff = yOff - row:GetHeight() - 8
         end
         yOff = yOff - 8
-    end
-
-    -- Personal reminders footer
-    if #personalReminders > 0 and db and db.personalReminders ~= false then
-        local first = personalReminders[1]
-        local text = first.personal.detail or ""
-        if first.personal.banner then
-            text = first.personal.banner .. "\n" .. text
-        end
-        coveragePanel:SetFooter(text, 1.0, 0.82, 0.2)
-        yOff = yOff - 30
-    else
-        coveragePanel:SetFooter("")
     end
 
     coveragePanel:SetContentHeight(CHROME_HEIGHT + math.abs(yOff) + 8)
@@ -2042,61 +2036,81 @@ local function RenderTalentsTab(content)
         end
     end
 
-    -- Helper: render a single talent build card
-    local function RenderBuildCard(rec)
-        local badge = FormatSourceBadge(rec.source)
-        local heroStr = ""
+    local contentW = content:GetWidth()
+    local CARD_PAD = 6
+    local CARD_INNER = 8
+
+    -- Helper: render a single talent build row inside a card
+    local function RenderBuildRow(parent, rec, innerYOff, rowWidth)
+        local ROW_HEIGHT = 36
+        local row = CreateFrame("Frame", nil, parent)
+        row:SetHeight(ROW_HEIGHT)
+        row:SetPoint("TOPLEFT", CARD_INNER, innerYOff)
+        row:SetPoint("RIGHT", parent, "RIGHT", -CARD_INNER, 0)
+        talentRows[#talentRows + 1] = row
+
+        -- Hero tree on top line (gold, larger font)
+        local heroFS = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        heroFS:SetPoint("TOPLEFT", 0, -1)
+        heroFS:SetJustifyH("LEFT")
         if rec.heroTree and rec.heroTree ~= "" then
-            heroStr = format("  |cffffcc00%s|r", rec.heroTree)
+            heroFS:SetTextColor(unpack(Theme.gold or { 1, 0.82, 0 }))
+            heroFS:SetText(rec.heroTree)
+        else
+            heroFS:SetTextColor(unpack(Theme.textDim or { 0.6, 0.6, 0.6 }))
+            heroFS:SetText("Talent Build")
         end
 
-        local line = badge .. heroStr
+        -- Source badge + stats on second line
+        local badge = FormatSourceBadge(rec.source)
+        local detailLine = badge
 
         if rec.source == "archon" then
             if rec.popularity then
-                line = line .. format("  |cffffffff%.0f%% pop|r", rec.popularity)
+                detailLine = detailLine .. format("  |cffffffff%.0f%% pop|r", rec.popularity)
             end
             if rec.keyLevel then
-                line = line .. format("  |cff88bbff+%d key|r", rec.keyLevel)
+                detailLine = detailLine .. format("  |cff88bbff+%d key|r", rec.keyLevel)
             end
             if rec.content and rec.content.dps then
-                line = line .. format("  |cffaaddaa%s DPS|r", rec.content.dps)
+                detailLine = detailLine .. format("  |cffaaddaa%s DPS|r", rec.content.dps)
             end
         else
-            -- Wowhead / Icy Veins: show label from notes
             local label = rec.notes or ""
-            -- Strip the content_type and hero_talent from notes to get just the label
             local parts = { strsplit(",", label) }
             local cleanLabel = strtrim(parts[1] or "")
             if cleanLabel ~= "" then
-                line = line .. "  |cffbbbbbb" .. cleanLabel .. "|r"
+                detailLine = detailLine .. "  |cffbbbbbb" .. cleanLabel .. "|r"
             end
         end
 
-        local recFrame = CreateFrame("Frame", nil, content)
-        recFrame:SetHeight(28)
-        recFrame:SetPoint("TOPLEFT", 8, yOff)
-        recFrame:SetPoint("RIGHT", content, "RIGHT", -4, 0)
-        talentRows[#talentRows + 1] = recFrame
+        local detailFS = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        detailFS:SetPoint("TOPLEFT", heroFS, "BOTTOMLEFT", 0, -2)
+        detailFS:SetPoint("RIGHT", row, "RIGHT", -62, 0)
+        detailFS:SetJustifyH("LEFT")
+        detailFS:SetWordWrap(false)
+        detailFS:SetText(detailLine)
 
-        local infoFS = recFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        infoFS:SetPoint("LEFT", 0, 0)
-        infoFS:SetPoint("RIGHT", recFrame, "RIGHT", -64, 0)
-        infoFS:SetJustifyH("LEFT")
-        infoFS:SetWordWrap(false)
-        infoFS:SetText(line)
-
+        -- Copy button (right-aligned, vertically centered)
         if rec.content and rec.content.exportString then
-            local copyBtn = MedaUI:CreateButton(recFrame, "Copy", 56)
-            copyBtn:SetPoint("RIGHT", recFrame, "RIGHT", 0, 0)
+            local copyBtn = MedaUI:CreateButton(row, "Copy", 56)
+            copyBtn:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+            copyBtn:SetPoint("TOP", 0, -6)
             copyBtn:SetHeight(22)
             copyBtn.OnClick = function()
                 ShowCopyPopup(rec.content.exportString)
             end
         end
 
-        recFrame:Show()
-        yOff = yOff - 30
+        -- Separator line at the bottom
+        local sep = row:CreateTexture(nil, "ARTWORK")
+        sep:SetHeight(1)
+        sep:SetPoint("BOTTOMLEFT", 0, 0)
+        sep:SetPoint("BOTTOMRIGHT", 0, 0)
+        sep:SetColorTexture(1, 1, 1, 0.04)
+
+        row:Show()
+        return ROW_HEIGHT
     end
 
     -- Group talent builds by content category
@@ -2119,7 +2133,6 @@ local function RenderTalentsTab(content)
             if builds and #builds > 0 then
                 anyRendered = true
 
-                -- Pick top builds: up to MAX_VISIBLE_BUILDS per source
                 local sourceCount = {}
                 local topBuilds = {}
                 local overflowBuilds = {}
@@ -2136,32 +2149,71 @@ local function RenderTalentsTab(content)
                 local sectionKey = "talent_" .. cat.key
                 local sectionExpanded = talentSectionExpanded[sectionKey] or false
 
-                local hdr = MedaUI:CreateCollapsibleSectionHeader(content, {
-                    text = cat.label,
-                    width = content:GetWidth() - 8,
-                    count = #builds,
-                    expanded = sectionExpanded,
-                    onToggle = function(exp)
-                        talentSectionExpanded[sectionKey] = exp
-                        RenderTalentsTab(content)
-                    end,
-                })
-                hdr:SetPoint("TOPLEFT", 4, yOff)
-                talentHeaders[#talentHeaders + 1] = hdr
-                yOff = yOff - 32
+                -- Category card container with background
+                local card = CreateFrame("Frame", nil, content, "BackdropTemplate")
+                card:SetPoint("TOPLEFT", CARD_PAD, yOff)
+                card:SetPoint("RIGHT", content, "RIGHT", -CARD_PAD, 0)
+                card:SetBackdrop(MedaUI:CreateBackdrop(true))
+                card:SetBackdropColor(
+                    Theme.backgroundLight[1], Theme.backgroundLight[2], Theme.backgroundLight[3],
+                    (Theme.backgroundLight[4] or 1) * 0.5
+                )
+                card:SetBackdropBorderColor(
+                    Theme.border[1], Theme.border[2], Theme.border[3],
+                    (Theme.border[4] or 0.06) * 2
+                )
+                talentRows[#talentRows + 1] = card
 
-                for _, rec in ipairs(topBuilds) do
-                    RenderBuildCard(rec)
+                -- Category label inside the card
+                local catLabel = card:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                catLabel:SetPoint("TOPLEFT", CARD_INNER, -CARD_INNER)
+                catLabel:SetTextColor(unpack(Theme.gold or { 1, 0.82, 0 }))
+                catLabel:SetText(cat.label)
+
+                -- Build count badge
+                local countFS = card:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                countFS:SetPoint("LEFT", catLabel, "RIGHT", 6, 0)
+                countFS:SetTextColor(unpack(Theme.textDim or { 0.6, 0.6, 0.6 }))
+                countFS:SetText(format("(%d)", #builds))
+
+                -- Accent line under category label
+                local accentLine = card:CreateTexture(nil, "ARTWORK")
+                accentLine:SetHeight(1)
+                accentLine:SetPoint("TOPLEFT", CARD_INNER, -(CARD_INNER + 18))
+                accentLine:SetPoint("RIGHT", card, "RIGHT", -CARD_INNER, 0)
+                if Theme.sectionGradientStart and Theme.sectionGradientEnd and accentLine.SetGradient then
+                    accentLine:SetColorTexture(1, 1, 1, 1)
+                    pcall(function()
+                        accentLine:SetGradient("HORIZONTAL", {
+                            r = Theme.sectionGradientStart[1], g = Theme.sectionGradientStart[2],
+                            b = Theme.sectionGradientStart[3], a = Theme.sectionGradientStart[4],
+                        }, {
+                            r = Theme.sectionGradientEnd[1], g = Theme.sectionGradientEnd[2],
+                            b = Theme.sectionGradientEnd[3], a = Theme.sectionGradientEnd[4],
+                        })
+                    end)
+                else
+                    accentLine:SetColorTexture(unpack(Theme.goldDim or { 0.5, 0.4, 0.1, 0.5 }))
                 end
 
+                local innerY = -(CARD_INNER + 24)
+
+                -- Render top build rows inside card
+                for _, rec in ipairs(topBuilds) do
+                    local h = RenderBuildRow(card, rec, innerY, contentW - CARD_PAD * 2)
+                    innerY = innerY - h - 2
+                end
+
+                -- Overflow builds
                 if #overflowBuilds > 0 then
                     if sectionExpanded then
                         for _, rec in ipairs(overflowBuilds) do
-                            RenderBuildCard(rec)
+                            local h = RenderBuildRow(card, rec, innerY, contentW - CARD_PAD * 2)
+                            innerY = innerY - h - 2
                         end
                     end
 
-                    local toggle = MedaUI:CreateExpandToggle(content, {
+                    local toggle = MedaUI:CreateExpandToggle(card, {
                         hiddenCount = #overflowBuilds,
                         expanded = sectionExpanded,
                         onToggle = function(exp)
@@ -2169,12 +2221,17 @@ local function RenderTalentsTab(content)
                             RenderTalentsTab(content)
                         end,
                     })
-                    toggle:SetPoint("TOPLEFT", 8, yOff)
-                    toggle:SetPoint("RIGHT", content, "RIGHT", 0, 0)
-                    yOff = yOff - toggle:GetHeight() - 2
+                    toggle:SetPoint("TOPLEFT", CARD_INNER, innerY)
+                    toggle:SetPoint("RIGHT", card, "RIGHT", -CARD_INNER, 0)
+                    innerY = innerY - toggle:GetHeight()
                 end
 
-                yOff = yOff - 6
+                -- Finalize card height
+                local cardHeight = math.abs(innerY) + CARD_INNER
+                card:SetHeight(cardHeight)
+                card:Show()
+
+                yOff = yOff - cardHeight - 8
             end
         end
 
@@ -2187,15 +2244,10 @@ local function RenderTalentsTab(content)
         end
     end
 
-    -- Stat Priority section (kept compact)
+    -- Stat Priority section (compact, inside a card)
     if #statRecs > 0 then
         local rec = statRecs[1]
         if rec.content then
-            local hdrContainer = MedaUI:CreateSectionHeader(content, "Stat Priority", content:GetWidth() - 8)
-            hdrContainer:SetPoint("TOPLEFT", 4, yOff)
-            talentHeaders[#talentHeaders + 1] = hdrContainer
-            yOff = yOff - 32
-
             local badge = FormatSourceBadge(rec.source)
             local statPairs = {}
             for statName, val in pairs(rec.content) do
@@ -2209,19 +2261,42 @@ local function RenderTalentsTab(content)
             for _, sp in ipairs(statPairs) do
                 parts[#parts + 1] = format("%s (%d)", sp.name, sp.value)
             end
-            local statLine = badge .. "  " .. table.concat(parts, "  >  ")
 
-            local statFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            statFS:SetPoint("TOPLEFT", 8, yOff)
-            statFS:SetPoint("RIGHT", content, "RIGHT", -8, 0)
+            local statCard = CreateFrame("Frame", nil, content, "BackdropTemplate")
+            statCard:SetPoint("TOPLEFT", CARD_PAD, yOff)
+            statCard:SetPoint("RIGHT", content, "RIGHT", -CARD_PAD, 0)
+            statCard:SetBackdrop(MedaUI:CreateBackdrop(true))
+            statCard:SetBackdropColor(
+                Theme.backgroundLight[1], Theme.backgroundLight[2], Theme.backgroundLight[3],
+                (Theme.backgroundLight[4] or 1) * 0.5
+            )
+            statCard:SetBackdropBorderColor(
+                Theme.border[1], Theme.border[2], Theme.border[3],
+                (Theme.border[4] or 0.06) * 2
+            )
+            talentRows[#talentRows + 1] = statCard
+
+            local statTitle = statCard:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            statTitle:SetPoint("TOPLEFT", CARD_INNER, -CARD_INNER)
+            statTitle:SetTextColor(unpack(Theme.gold or { 1, 0.82, 0 }))
+            statTitle:SetText("Stat Priority")
+
+            local statFS = statCard:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            statFS:SetPoint("TOPLEFT", statTitle, "BOTTOMLEFT", 0, -4)
+            statFS:SetPoint("RIGHT", statCard, "RIGHT", -CARD_INNER, 0)
             statFS:SetJustifyH("LEFT")
             statFS:SetWordWrap(true)
-            statFS:SetText(statLine)
-            yOff = yOff - statFS:GetStringHeight() - 12
+            statFS:SetText(badge .. "  " .. table.concat(parts, "  >  "))
+
+            local statCardH = CARD_INNER + 18 + 4 + statFS:GetStringHeight() + CARD_INNER
+            statCard:SetHeight(statCardH)
+            statCard:Show()
+
+            yOff = yOff - statCardH - 8
         end
     end
 
-    -- Helper to render an item-list section with collapsible overflow
+    -- Helper to render an item-list section with collapsible overflow inside a card
     local function RenderItemSection(recs, title, sectionKey)
         if #recs == 0 then return end
         local rec = recs[1]
@@ -2232,20 +2307,31 @@ local function RenderTalentsTab(content)
         local sectionExpanded = talentSectionExpanded[sectionKey] or false
         local shown = sectionExpanded and totalItems or math.min(totalItems, 2)
 
-        local hdr = MedaUI:CreateCollapsibleSectionHeader(content, {
-            text = title,
-            width = content:GetWidth() - 8,
-            count = totalItems,
-            expanded = sectionExpanded,
-            onToggle = function(exp)
-                talentSectionExpanded[sectionKey] = exp
-                RenderTalentsTab(content)
-            end,
-        })
-        hdr:SetPoint("TOPLEFT", 4, yOff)
-        talentHeaders[#talentHeaders + 1] = hdr
-        yOff = yOff - 32
+        local itemCard = CreateFrame("Frame", nil, content, "BackdropTemplate")
+        itemCard:SetPoint("TOPLEFT", CARD_PAD, yOff)
+        itemCard:SetPoint("RIGHT", content, "RIGHT", -CARD_PAD, 0)
+        itemCard:SetBackdrop(MedaUI:CreateBackdrop(true))
+        itemCard:SetBackdropColor(
+            Theme.backgroundLight[1], Theme.backgroundLight[2], Theme.backgroundLight[3],
+            (Theme.backgroundLight[4] or 1) * 0.35
+        )
+        itemCard:SetBackdropBorderColor(
+            Theme.border[1], Theme.border[2], Theme.border[3],
+            (Theme.border[4] or 0.06) * 1.5
+        )
+        talentRows[#talentRows + 1] = itemCard
 
+        local titleFS = itemCard:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        titleFS:SetPoint("TOPLEFT", CARD_INNER, -CARD_INNER)
+        titleFS:SetTextColor(unpack(Theme.gold or { 1, 0.82, 0 }))
+        titleFS:SetText(title)
+
+        local countFS = itemCard:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        countFS:SetPoint("LEFT", titleFS, "RIGHT", 6, 0)
+        countFS:SetTextColor(unpack(Theme.textDim or { 0.6, 0.6, 0.6 }))
+        countFS:SetText(format("(%d)", totalItems))
+
+        local innerY = -(CARD_INNER + 20)
         local badge = FormatSourceBadge(rec.source)
 
         for i = 1, shown do
@@ -2253,17 +2339,17 @@ local function RenderTalentsTab(content)
             local pop = item.popularity or 0
             local text = format("%s  |cffffffff%s|r  |cff888888%.0f%%|r", badge, item.name, pop)
 
-            local itemFS = content:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            itemFS:SetPoint("TOPLEFT", 8, yOff)
-            itemFS:SetPoint("RIGHT", content, "RIGHT", -8, 0)
+            local itemFS = itemCard:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            itemFS:SetPoint("TOPLEFT", CARD_INNER, innerY)
+            itemFS:SetPoint("RIGHT", itemCard, "RIGHT", -CARD_INNER, 0)
             itemFS:SetJustifyH("LEFT")
             itemFS:SetWordWrap(false)
             itemFS:SetText(text)
-            yOff = yOff - 16
+            innerY = innerY - 16
         end
 
         if totalItems > 2 then
-            local toggle = MedaUI:CreateExpandToggle(content, {
+            local toggle = MedaUI:CreateExpandToggle(itemCard, {
                 hiddenCount = totalItems - 2,
                 expanded = sectionExpanded,
                 onToggle = function(exp)
@@ -2271,12 +2357,16 @@ local function RenderTalentsTab(content)
                     RenderTalentsTab(content)
                 end,
             })
-            toggle:SetPoint("TOPLEFT", 8, yOff)
-            toggle:SetPoint("RIGHT", content, "RIGHT", 0, 0)
-            yOff = yOff - toggle:GetHeight() - 2
+            toggle:SetPoint("TOPLEFT", CARD_INNER, innerY)
+            toggle:SetPoint("RIGHT", itemCard, "RIGHT", -CARD_INNER, 0)
+            innerY = innerY - toggle:GetHeight()
         end
 
-        yOff = yOff - 8
+        local cardH = math.abs(innerY) + CARD_INNER
+        itemCard:SetHeight(cardH)
+        itemCard:Show()
+
+        yOff = yOff - cardH - 6
     end
 
     RenderItemSection(trinketRecs,    "Top Trinkets",   "items_trinkets")
@@ -2534,7 +2624,7 @@ local function RenderPrepTab(content)
                 statusText = detail or "Active"
             elseif recommended then
                 accentColor = RECOMMEND_COLOR
-                statusText = "Recommended"
+                statusText = ib.effect or ""
             else
                 accentColor = SEVERITY_COLORS.info
                 statusText = ib.effect or ""
@@ -2544,14 +2634,24 @@ local function RenderPrepTab(content)
                 width = content:GetWidth() - 16,
                 iconSize = 18,
                 showNote = false,
+                accentWidth = (recommended and not ok) and 4 or 3,
             })
             row:SetPoint("TOPLEFT", 8, yOff)
             prepRows[#prepRows + 1] = row
 
-            row:SetLabel(ib.buff)
+            local labelText = ib.buff
+            if recommended and not ok then
+                labelText = "|TInterface\\AddOns\\MedaUI\\Media\\Textures\\star-filled.tga:10:10|t " .. labelText
+            end
+            row:SetLabel(labelText)
             row:SetStatus(statusText, accentColor[1], accentColor[2], accentColor[3])
             row:SetAccentColor(accentColor[1], accentColor[2], accentColor[3])
-            if recommended and not ok then row:SetHighlight(true) end
+            if recommended and not ok then
+                row.highlight:SetColorTexture(
+                    RECOMMEND_COLOR[1], RECOMMEND_COLOR[2], RECOMMEND_COLOR[3], 0.06
+                )
+                row:SetHighlight(true)
+            end
 
             row:SetTooltipFunc(function(_, tooltip)
                 tooltip:AddLine(ib.buff, 1, 0.82, 0)
@@ -2718,7 +2818,7 @@ end
 local function RefreshFreshnessBar()
     if not coveragePanel then return end
     local text = BuildSourceFreshnessLine()
-    coveragePanel:SetStatusBar(text or "", 0.5, 0.5, 0.5)
+    coveragePanel:SetFooter(text)
 end
 
 -- ============================================================================
@@ -2906,10 +3006,12 @@ local function CreateUI()
 
     -- Tab content frames start below tab bar + context selector area
     local TAB_CONTENT_TOP = -CHROME_HEIGHT
+    local tabWidth = content:GetWidth()
     for _, tabId in ipairs({ "player", "groupcomp", "talents", "prep" }) do
         local frame = CreateFrame("Frame", nil, content)
         frame:SetPoint("TOPLEFT", 0, TAB_CONTENT_TOP)
         frame:SetPoint("BOTTOMRIGHT", 0, 0)
+        if tabWidth > 0 then frame:SetWidth(tabWidth) end
         frame:Hide()
         tabFrames[tabId] = frame
     end
@@ -2983,6 +3085,8 @@ local function CreateUI()
     if minimapButton and db.showMinimapButton == false then
         minimapButton.HideButton()
     end
+
+    RefreshFreshnessBar()
 end
 
 -- ============================================================================
