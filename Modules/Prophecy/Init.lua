@@ -11,7 +11,7 @@ local MedaUI = LibStub("MedaUI-1.0")
 ns.Prophecy = {}
 
 local MODULE_NAME = "Prophecy"
-local MODULE_VERSION = "0.1.0"
+local MODULE_VERSION = "1.0"
 local MODULE_STABILITY = "alpha"
 
 local MODULE_DEFAULTS = {
