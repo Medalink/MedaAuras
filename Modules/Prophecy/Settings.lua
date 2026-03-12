@@ -21,6 +21,11 @@ local function BuildAppearanceTab(parent, db)
     local yOff = 0
     local LEFT_X = 0
     local RIGHT_X = 238
+    local function RefreshOverlay()
+        if ns.Prophecy.OnRefresh then
+            ns.Prophecy.OnRefresh()
+        end
+    end
 
     -- Overlay opacity
     local opacitySlider = MedaUI:CreateLabeledSlider(parent, "Overlay Opacity", 200, 0, 100, 1)
@@ -28,7 +33,7 @@ local function BuildAppearanceTab(parent, db)
     opacitySlider:SetValue((db.overlayOpacity or 0.8) * 100)
     opacitySlider.OnValueChanged = function(_, val)
         db.overlayOpacity = val / 100
-        if ns.Prophecy.OnRefresh then ns.Prophecy.OnRefresh() end
+        RefreshOverlay()
     end
 
     -- Max visible
@@ -49,36 +54,36 @@ local function BuildAppearanceTab(parent, db)
     local fontDropdown = MedaUI:CreateLabeledDropdown(parent, "Font Size", 200, fontOptions)
     Pixel.SetPoint(fontDropdown, "TOPLEFT", LEFT_X, -yOff)
     fontDropdown:SetSelected(db.fontSize or "md")
-    fontDropdown.OnValueChanged = function(_, val) db.fontSize = val end
+    fontDropdown.OnValueChanged = function(_, val) db.fontSize = val; RefreshOverlay() end
     yOff = yOff + 60
 
     -- Checkboxes
     local showBg = MedaUI:CreateCheckbox(parent, "Show Background")
     Pixel.SetPoint(showBg, "TOPLEFT", LEFT_X, -yOff)
     showBg:SetChecked(db.showBackground or false)
-    showBg.OnValueChanged = function(_, val) db.showBackground = val end
+    showBg.OnValueChanged = function(_, val) db.showBackground = val; RefreshOverlay() end
 
     local showDelta = MedaUI:CreateCheckbox(parent, "Show Delta Indicators")
     Pixel.SetPoint(showDelta, "TOPLEFT", RIGHT_X, -yOff)
     showDelta:SetChecked(db.showDelta ~= false)
-    showDelta.OnValueChanged = function(_, val) db.showDelta = val end
+    showDelta.OnValueChanged = function(_, val) db.showDelta = val; RefreshOverlay() end
     yOff = yOff + 24
 
     local showTimers = MedaUI:CreateCheckbox(parent, "Show Timer Countdowns")
     Pixel.SetPoint(showTimers, "TOPLEFT", LEFT_X, -yOff)
     showTimers:SetChecked(db.showTimers ~= false)
-    showTimers.OnValueChanged = function(_, val) db.showTimers = val end
+    showTimers.OnValueChanged = function(_, val) db.showTimers = val; RefreshOverlay() end
 
     local lockPos = MedaUI:CreateCheckbox(parent, "Lock Overlay Position")
     Pixel.SetPoint(lockPos, "TOPLEFT", RIGHT_X, -yOff)
     lockPos:SetChecked(db.locked or false)
-    lockPos.OnValueChanged = function(_, val) db.locked = val end
+    lockPos.OnValueChanged = function(_, val) db.locked = val; RefreshOverlay() end
     yOff = yOff + 24
 
     local dungeonOnly = MedaUI:CreateCheckbox(parent, "Show In Dungeon Only")
     Pixel.SetPoint(dungeonOnly, "TOPLEFT", LEFT_X, -yOff)
     dungeonOnly:SetChecked(db.showInDungeonOnly ~= false)
-    dungeonOnly.OnValueChanged = function(_, val) db.showInDungeonOnly = val end
+    dungeonOnly.OnValueChanged = function(_, val) db.showInDungeonOnly = val; RefreshOverlay() end
 
     local softSync = MedaUI:CreateCheckbox(parent, "Enable Soft Sync")
     Pixel.SetPoint(softSync, "TOPLEFT", RIGHT_X, -yOff)
@@ -96,19 +101,19 @@ local function BuildAppearanceTab(parent, db)
     local bgOpacity = MedaUI:CreateLabeledSlider(parent, "Background Opacity", 200, 0, 100, 1)
     Pixel.SetPoint(bgOpacity, "TOPLEFT", LEFT_X, -yOff)
     bgOpacity:SetValue((db.backgroundOpacity or 0.4) * 100)
-    bgOpacity.OnValueChanged = function(_, val) db.backgroundOpacity = val / 100 end
+    bgOpacity.OnValueChanged = function(_, val) db.backgroundOpacity = val / 100; RefreshOverlay() end
     yOff = yOff + 55
 
     -- Drift thresholds
     local neutralSlider = MedaUI:CreateLabeledSlider(parent, "Neutral Threshold (seconds)", 200, 5, 30, 1)
     Pixel.SetPoint(neutralSlider, "TOPLEFT", LEFT_X, -yOff)
     neutralSlider:SetValue(db.driftNeutralThreshold or 15)
-    neutralSlider.OnValueChanged = function(_, val) db.driftNeutralThreshold = val end
+    neutralSlider.OnValueChanged = function(_, val) db.driftNeutralThreshold = val; RefreshOverlay() end
 
     local warnSlider = MedaUI:CreateLabeledSlider(parent, "Warning Threshold (seconds)", 200, 30, 120, 1)
     Pixel.SetPoint(warnSlider, "TOPLEFT", RIGHT_X, -yOff)
     warnSlider:SetValue(db.driftMildThreshold or 60)
-    warnSlider.OnValueChanged = function(_, val) db.driftMildThreshold = val end
+    warnSlider.OnValueChanged = function(_, val) db.driftMildThreshold = val; RefreshOverlay() end
     yOff = yOff + 55
 
     -- Category filters
@@ -125,6 +130,7 @@ local function BuildAppearanceTab(parent, db)
         cb.OnValueChanged = function(_, val)
             db.categories = db.categories or {}
             db.categories[cat] = val
+            RefreshOverlay()
         end
         catX = catX + 80
         if catX > 400 then catX = LEFT_X; yOff = yOff + 24 end

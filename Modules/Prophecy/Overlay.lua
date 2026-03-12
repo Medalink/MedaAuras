@@ -29,6 +29,7 @@ local fulfilledExpanded = false
 local overflowText
 local wipeIndicator
 local isPreviewMode = false
+local previewTemplateLoaded = false
 
 local function FormatTimer(seconds)
     if not seconds or seconds <= 0 then return "" end
@@ -37,6 +38,29 @@ end
 
 local function GetDB()
     return MedaAuras:GetModuleDB("Prophecy")
+end
+
+local function ApplyOverlayState()
+    if not overlayFrame then return end
+
+    local db = GetDB()
+    if not db then return end
+
+    if db.showBackground then
+        if not overlayFrame._bg then
+            local bg = overlayFrame:CreateTexture(nil, "BACKGROUND")
+            bg:SetAllPoints()
+            overlayFrame._bg = bg
+        end
+        overlayFrame._bg:SetColorTexture(0, 0, 0, db.backgroundOpacity or 0.4)
+        overlayFrame._bg:Show()
+    elseif overlayFrame._bg then
+        overlayFrame._bg:Hide()
+    end
+
+    overlayFrame:SetMovable(true)
+    overlayFrame:EnableMouse(true)
+    overlayFrame:RegisterForDrag("LeftButton")
 end
 
 -- ----------------------------------------------------------------
@@ -59,14 +83,6 @@ local function EnsureOverlay()
         overlayFrame:SetPoint("RIGHT", UIParent, "RIGHT", -200, 100)
     end
 
-    -- Optional background
-    if db.showBackground then
-        local bg = overlayFrame:CreateTexture(nil, "BACKGROUND")
-        bg:SetAllPoints()
-        bg:SetColorTexture(0, 0, 0, db.backgroundOpacity or 0.4)
-        overlayFrame._bg = bg
-    end
-
     -- Draggable header
     local header = MedaUI:CreateAutoHideContainer("ProphecyHeader", {
         parent = overlayFrame,
@@ -80,18 +96,18 @@ local function EnsureOverlay()
     headerText:SetShadowOffset(1, -1)
     headerText:SetShadowColor(0, 0, 0, 0.8)
 
-    if not db.locked then
-        overlayFrame:SetMovable(true)
-        overlayFrame:EnableMouse(true)
-        overlayFrame:RegisterForDrag("LeftButton")
-        overlayFrame:SetScript("OnDragStart", function(self) self:StartMoving() end)
-        overlayFrame:SetScript("OnDragStop", function(self)
-            self:StopMovingOrSizing()
-            local point, _, _, x, y = self:GetPoint()
-            local d = GetDB()
-            if d then d.overlayPoint = { point, x, y } end
-        end)
-    end
+    overlayFrame:SetScript("OnDragStart", function(self)
+        local d = GetDB()
+        if d and not d.locked then
+            self:StartMoving()
+        end
+    end)
+    overlayFrame:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        local point, _, _, x, y = self:GetPoint()
+        local d = GetDB()
+        if d then d.overlayPoint = { point, x, y } end
+    end)
 
     -- Wipe re-sync indicator
     wipeIndicator = overlayFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -137,6 +153,8 @@ local function EnsureOverlay()
         elapsed = 0
         ns.Prophecy._UpdateTimers()
     end)
+
+    ApplyOverlayState()
 end
 
 -- ----------------------------------------------------------------
@@ -178,6 +196,7 @@ local function Refresh()
         end
     end
 
+    ApplyOverlayState()
     overlayFrame:Show()
     overlayFrame:SetAlpha(db.overlayOpacity or 0.8)
 
@@ -357,19 +376,28 @@ end
 
 function ns.Prophecy.TogglePreview()
     isPreviewMode = not isPreviewMode
+    local Engine = ns.Services.ProphecyEngine
+
     if isPreviewMode then
         EnsureOverlay()
-        local Engine = ns.Services.ProphecyEngine
         if Engine and not Engine:IsActive() then
             local Templates = ns.ProphecyTemplates
             if Templates then
                 local dungeons = Templates:GetAvailableDungeons()
                 if dungeons[1] then
                     local template = Templates:Generate(dungeons[1])
-                    if template then Engine:LoadTemplate(template) end
+                    if template then
+                        Engine:LoadTemplate(template)
+                        previewTemplateLoaded = true
+                    end
                 end
             end
         end
+    elseif previewTemplateLoaded and Engine and Engine:IsActive() then
+        Engine:Shutdown()
+        previewTemplateLoaded = false
+    else
+        previewTemplateLoaded = false
     end
     Refresh()
 end

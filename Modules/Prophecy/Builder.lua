@@ -44,6 +44,7 @@ end
 
 local function BuildTimelineTab(parent, db)
     local yOff = 0
+    local selectedDungeonID
 
     -- Dungeon selector
     local Templates = ns.ProphecyTemplates
@@ -102,13 +103,81 @@ local function BuildTimelineTab(parent, db)
     -- Chain arrows (for visualizing connections)
     local connector = MedaUI:CreateNodeConnector(parent)
 
-    -- Load template when dungeon changes
-    dungeonDropdown.OnValueChanged = function(_, instanceID)
-        if not Templates then return end
-        local template = Templates:Generate(instanceID)
+    local function GetSelectedSource(instanceID)
+        local sources = db and db.templateSource
+        return (sources and instanceID and sources[instanceID]) or "curated"
+    end
+
+    local function SetSelectedSource(source)
+        if not db or not selectedDungeonID then return end
+        db.templateSource = db.templateSource or {}
+        db.templateSource[selectedDungeonID] = source
+    end
+
+    local function ResolveTemplate(instanceID)
+        if not instanceID or not Templates then return nil end
+
+        local source = GetSelectedSource(instanceID)
+        if source == "personal" then
+            local charDB = MedaAurasCharDB and MedaAurasCharDB.prophecy
+            local recording = charDB and charDB.recordings and charDB.recordings[instanceID]
+            if recording and recording.personalTemplate then
+                return recording.personalTemplate
+            end
+        elseif source == "custom" then
+            local acctDB = MedaAurasDB and MedaAurasDB.modules and MedaAurasDB.modules.Prophecy
+            if acctDB and acctDB.customTemplates and acctDB.customTemplates[instanceID] then
+                return acctDB.customTemplates[instanceID]
+            end
+        end
+
+        return Templates:Generate(instanceID)
+    end
+
+    local function SyncSourceControls()
+        local source = GetSelectedSource(selectedDungeonID)
+        if sourceCurated.SetChecked then sourceCurated:SetChecked(source == "curated") end
+        if sourcePersonal.SetChecked then sourcePersonal:SetChecked(source == "personal") end
+        if sourceCustom.SetChecked then sourceCustom:SetChecked(source == "custom") end
+    end
+
+    local function LoadSelectedTemplate(instanceID)
+        selectedDungeonID = instanceID
+        SyncSourceControls()
+
+        local template = ResolveTemplate(instanceID)
         if template and template.nodes then
             nodeList:SetData(template.nodes)
+        else
+            nodeList:SetData({})
         end
+    end
+
+    -- Load template when dungeon changes
+    dungeonDropdown.OnValueChanged = function(_, instanceID)
+        LoadSelectedTemplate(instanceID)
+    end
+
+    local function BindSourceRadio(control, source)
+        control:SetScript("OnClick", function()
+            SetSelectedSource(source)
+            SyncSourceControls()
+            LoadSelectedTemplate(selectedDungeonID)
+        end)
+    end
+
+    BindSourceRadio(sourceCurated, "curated")
+    BindSourceRadio(sourcePersonal, "personal")
+    BindSourceRadio(sourceCustom, "custom")
+
+    if dungeonOptions[1] then
+        if dungeonDropdown.SetSelected then
+            dungeonDropdown:SetSelected(dungeonOptions[1].value)
+        end
+        LoadSelectedTemplate(dungeonOptions[1].value)
+    else
+        SyncSourceControls()
+        nodeList:SetData({})
     end
 
     return { dungeonDropdown = dungeonDropdown, nodeList = nodeList, connector = connector }
@@ -199,6 +268,7 @@ end
 
 local function BuildHistoryTab(parent, db)
     local yOff = 0
+    local LoadRecordings
 
     -- Run list using DataTable
     local runList = MedaUI:CreateDataTable(parent, 440, 200, {
@@ -319,7 +389,7 @@ local function BuildHistoryTab(parent, db)
     end)
 
     -- Load recordings
-    local function LoadRecordings()
+    LoadRecordings = function()
         if not runList then return end
         local charDB = MedaAurasCharDB and MedaAurasCharDB.prophecy
         if not charDB or not charDB.recordings then return end
