@@ -289,6 +289,14 @@ local nodeOrder = {}       -- ordered array of node ids
 local callbacks = {}       -- { onStateChange, onDriftUpdate, onWipeStateChange, onRefresh }
 local engineActive = false
 local eventFrame
+local TRACKED_EVENTS = {
+    "COMBAT_LOG_EVENT_UNFILTERED",
+    "ENCOUNTER_START",
+    "ENCOUNTER_END",
+    "CHALLENGE_MODE_START",
+    "CHALLENGE_MODE_COMPLETED",
+    "PLAYER_ENTERING_WORLD",
+}
 
 -- CLEU performance index: [spellId] = { {node, triggerIndex, subevent}, ... }
 local cleuSpellIndex = {}
@@ -723,8 +731,14 @@ end
 -- Engine Core Methods
 -- =====================================================================
 
+local function IsProphecyEnabled()
+    local acctDB = MedaAurasDB and MedaAurasDB.modules and MedaAurasDB.modules.Prophecy
+    return acctDB and acctDB.enabled
+end
+
 function ProphecyEngine:Initialize()
-    if eventFrame then return end
+    if eventFrame then return true end
+    if not IsProphecyEnabled() then return false end
 
     eventFrame = CreateFrame("Frame")
 
@@ -755,12 +769,9 @@ function ProphecyEngine:Initialize()
         return ok
     end
 
-    RegisterTrackedEvent("COMBAT_LOG_EVENT_UNFILTERED")
-    RegisterTrackedEvent("ENCOUNTER_START")
-    RegisterTrackedEvent("ENCOUNTER_END")
-    RegisterTrackedEvent("CHALLENGE_MODE_START")
-    RegisterTrackedEvent("CHALLENGE_MODE_COMPLETED")
-    RegisterTrackedEvent("PLAYER_ENTERING_WORLD")
+    for _, eventName in ipairs(TRACKED_EVENTS) do
+        RegisterTrackedEvent(eventName)
+    end
 
     eventFrame:SetScript("OnEvent", function(_, event, ...)
         ProphecyEngine:OnEvent(event, ...)
@@ -1282,6 +1293,12 @@ end
 
 function ProphecyEngine:Shutdown()
     engineActive = false
+    if eventFrame then
+        eventFrame:UnregisterAllEvents()
+        eventFrame:SetScript("OnEvent", nil)
+        eventFrame:SetScript("OnUpdate", nil)
+        eventFrame = nil
+    end
     RunRecorder:Stop()
     Checkpoint:Clear()
     wipe(nodes)
