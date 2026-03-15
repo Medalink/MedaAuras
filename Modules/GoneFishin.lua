@@ -84,6 +84,11 @@ local tabFrames = {}
 local tabRendered = {}
 local collectionList, zonesList
 local collectionSearchBox
+local mapFavoritesList, mapFavoritesSummary, mapFavoritesEmpty
+local selectedFavoriteId = nil
+local activeWaypointFavoriteId = nil
+local RefreshMapFavoritesList
+local ShowHUD, HideHUD
 
 local checklistScroll, checklistContent
 local checklistRows = {}
@@ -313,6 +318,179 @@ end
 local function IsCurrentSpotFaved()
     local favId = GetCurrentFavId()
     return favId and db.favorites[favId] ~= nil
+end
+
+local function GetFavoriteLabel(fav)
+    if not fav then return "Favorite Spot" end
+    return fav.label or fav.subzone or fav.zone or "Favorite Spot"
+end
+
+local function GetFavoriteDistance(fav)
+    if not fav or not fav.mapID or not fav.x or not fav.y then
+        return nil
+    end
+
+    local mapID, px, py = GetPlayerMapPos()
+    if not mapID or mapID ~= fav.mapID then
+        return nil
+    end
+
+    local dx, dy = px - fav.x, py - fav.y
+    return math_sqrt(dx * dx + dy * dy)
+end
+
+local function ClearFavoriteWaypoint(silent)
+    local prevFavId = activeWaypointFavoriteId
+    activeWaypointFavoriteId = nil
+
+    if C_Map and C_Map.ClearUserWaypoint then
+        pcall(C_Map.ClearUserWaypoint)
+    end
+    if C_SuperTrack and C_SuperTrack.SetSuperTrackedUserWaypoint then
+        pcall(C_SuperTrack.SetSuperTrackedUserWaypoint, false)
+    end
+
+    arcDirty = true
+    if RefreshMapFavoritesList then
+        RefreshMapFavoritesList()
+    end
+
+    if not silent and prevFavId and db and db.favorites and db.favorites[prevFavId] then
+        print(format("|cff00ccffGone Fishin':|r Cleared waypoint: |cffffd100%s|r", GetFavoriteLabel(db.favorites[prevFavId])))
+    end
+
+    if hudVisible and not isFishing then
+        HideHUD()
+    end
+end
+
+local function HasTrackedFavoriteWaypoint()
+    if not activeWaypointFavoriteId or not db or not db.favorites then
+        return false
+    end
+
+    if not db.favorites[activeWaypointFavoriteId] then
+        activeWaypointFavoriteId = nil
+        if RefreshMapFavoritesList then
+            RefreshMapFavoritesList()
+        end
+        return false
+    end
+
+    if C_Map and C_Map.HasUserWaypoint and not C_Map.HasUserWaypoint() then
+        activeWaypointFavoriteId = nil
+        if RefreshMapFavoritesList then
+            RefreshMapFavoritesList()
+        end
+        return false
+    end
+
+    return true
+end
+
+local function EnsureWorldMapLoaded()
+    if WorldMapFrame then
+        return true
+    end
+
+    if WorldMapFrame_LoadUI then
+        pcall(WorldMapFrame_LoadUI)
+    elseif UIParentLoadAddOn then
+        pcall(UIParentLoadAddOn, "Blizzard_WorldMap")
+    end
+
+    return WorldMapFrame ~= nil
+end
+
+local function OpenFavoriteOnMap(favId)
+    if not db or not db.favorites then
+        return false
+    end
+
+    local fav = db.favorites[favId]
+    if not fav or not fav.mapID then
+        return false
+    end
+
+    selectedFavoriteId = favId
+
+    if not EnsureWorldMapLoaded() then
+        print("|cff00ccffGone Fishin':|r World map is not available yet.")
+        if RefreshMapFavoritesList then
+            RefreshMapFavoritesList()
+        end
+        return false
+    end
+
+    if ShowUIPanel then
+        pcall(ShowUIPanel, WorldMapFrame)
+    elseif WorldMapFrame.Show then
+        pcall(WorldMapFrame.Show, WorldMapFrame)
+    end
+
+    if WorldMapFrame and WorldMapFrame.SetMapID then
+        pcall(WorldMapFrame.SetMapID, WorldMapFrame, fav.mapID)
+    end
+
+    if RefreshMapFavoritesList then
+        RefreshMapFavoritesList()
+    end
+
+    return true
+end
+
+local function SetFavoriteWaypoint(favId)
+    if not db or not db.favorites then
+        return false
+    end
+
+    local fav = db.favorites[favId]
+    if not fav or not fav.mapID or not fav.x or not fav.y then
+        print("|cff00ccffGone Fishin':|r Favorite is missing map coordinates.")
+        return false
+    end
+
+    if activeWaypointFavoriteId == favId then
+        ClearFavoriteWaypoint()
+        return true
+    end
+
+    if not (C_Map and C_Map.SetUserWaypoint and UiMapPoint and UiMapPoint.CreateFromCoordinates) then
+        print("|cff00ccffGone Fishin':|r Waypoints are not available in this client.")
+        return false
+    end
+
+    local point = UiMapPoint.CreateFromCoordinates(fav.mapID, fav.x, fav.y)
+    if not point then
+        print("|cff00ccffGone Fishin':|r Could not create waypoint for that favorite.")
+        return false
+    end
+
+    if C_Map.ClearUserWaypoint then
+        pcall(C_Map.ClearUserWaypoint)
+    end
+
+    local ok, result = pcall(C_Map.SetUserWaypoint, point)
+    if not ok or result == false then
+        print("|cff00ccffGone Fishin':|r Failed to set waypoint.")
+        return false
+    end
+
+    if C_SuperTrack and C_SuperTrack.SetSuperTrackedUserWaypoint then
+        pcall(C_SuperTrack.SetSuperTrackedUserWaypoint, true)
+    end
+
+    activeWaypointFavoriteId = favId
+    selectedFavoriteId = favId
+    ShowHUD()
+    arcDirty = true
+
+    if RefreshMapFavoritesList then
+        RefreshMapFavoritesList()
+    end
+
+    print(format("|cff00ccffGone Fishin':|r Waypoint set: |cffffd100%s|r", GetFavoriteLabel(fav)))
+    return true
 end
 
 -- ============================================================================
@@ -603,6 +781,11 @@ local function SaveFavorite()
         MapPins:SetPin("GoneFishin_Favorites", favId, db.favorites[favId])
     end
 
+    selectedFavoriteId = favId
+    if RefreshMapFavoritesList then
+        RefreshMapFavoritesList()
+    end
+
     print(format("|cff00ccffGone Fishin':|r Saved favorite: |cffffd100%s|r", subzone))
 end
 
@@ -611,9 +794,20 @@ local function RemoveFavorite(favId)
     local fav = db.favorites[favId]
     db.favorites[favId] = nil
 
+    if activeWaypointFavoriteId == favId then
+        ClearFavoriteWaypoint(true)
+    end
+    if selectedFavoriteId == favId then
+        selectedFavoriteId = nil
+    end
+
     local MapPins = ns.Services.MapPinProvider
     if MapPins then
         MapPins:RemovePin("GoneFishin_Favorites", favId)
+    end
+
+    if RefreshMapFavoritesList then
+        RefreshMapFavoritesList()
     end
 
     if fav then
@@ -652,6 +846,10 @@ local function SyncMapPins()
     end
 
     MapPins:SetGroupVisible("GoneFishin_Favorites", db.showMapPins ~= false)
+
+    if RefreshMapFavoritesList then
+        RefreshMapFavoritesList()
+    end
 end
 
 -- ============================================================================
@@ -1240,6 +1438,12 @@ local function UpdateHUDContent()
             faveButton.tex:SetDesaturated(false)
             local subzone = GetCurrentArea()
             centerTexts[1]:SetText(format("|cffffd100Fave: %s|r", subzone))
+        elseif HasTrackedFavoriteWaypoint() then
+            local trackedFav = db.favorites[activeWaypointFavoriteId]
+            faveButton:SetActive(false)
+            faveButton.tex:SetAtlas("Waypoint-MapPin-Untracked")
+            faveButton.tex:SetDesaturated(true)
+            centerTexts[1]:SetText(format("|cff7fd1ffRoute: %s|r", GetFavoriteLabel(trackedFav)))
         else
             faveButton:SetActive(false)
             faveButton.tex:SetAtlas("Waypoint-MapPin-Untracked")
@@ -1285,6 +1489,18 @@ local function UpdateDistanceText()
     end
 
     local mapID, px, py = GetPlayerMapPos()
+
+    if showFaves and HasTrackedFavoriteWaypoint() then
+        local trackedFav = db.favorites[activeWaypointFavoriteId]
+        local trackedDist = GetFavoriteDistance(trackedFav)
+        if trackedDist then
+            local yards = trackedDist * 1000
+            centerTexts[3]:SetText(format("|cff7fd1ffWP: %s ~%d yd|r", GetFavoriteLabel(trackedFav), math_floor(yards)))
+        else
+            centerTexts[3]:SetText(format("|cff7fd1ffWaypoint: %s|r", GetFavoriteLabel(trackedFav)))
+        end
+        return
+    end
 
     if showFaves and mapID then
         local nearestDist = math.huge
@@ -1358,7 +1574,7 @@ local function DisableHUDUpdates()
     end
 end
 
-local function ShowHUD()
+ShowHUD = function()
     if not db or not db.auraEnabled then return end
     if not hudFrame then CreateHUD() end
 
@@ -1380,8 +1596,11 @@ local function ShowHUD()
     end
 end
 
-local function HideHUD()
+HideHUD = function()
     if not hudFrame or not hudVisible then return end
+    if HasTrackedFavoriteWaypoint() then
+        return
+    end
 
     local delay = db and db.auraHideDelay or 8
     local requestId = hideRequestId + 1
@@ -2181,6 +2400,10 @@ function BuildZonesTab(parent)
                             if MapPins then
                                 MapPins:SetPin("GoneFishin_Favorites", favId, db.favorites[favId])
                             end
+                            selectedFavoriteId = favId
+                            if RefreshMapFavoritesList then
+                                RefreshMapFavoritesList()
+                            end
                         end
                     end
                     RefreshZonesTab()
@@ -2591,6 +2814,165 @@ local function BuildConfig(parent, moduleDB)
                 statsPanel:SetPoint("CENTER")
             end
         end)
+
+        yOff = yOff - 46
+
+        local favHdr = MedaUI:CreateSectionHeader(p, "Favorite Spots", 470)
+        favHdr:SetPoint("TOPLEFT", LEFT_X, yOff)
+        yOff = yOff - 34
+
+        mapFavoritesSummary = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        mapFavoritesSummary:SetPoint("TOPLEFT", LEFT_X, yOff)
+        mapFavoritesSummary:SetJustifyH("LEFT")
+        mapFavoritesSummary:SetWidth(460)
+
+        yOff = yOff - 22
+
+        mapFavoritesList = MedaUI:CreateScrollList(p, 470, 420, {
+            rowHeight = 42,
+            renderRow = function(row, item)
+                if not row.nameText then
+                    row.nameText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+                    row.nameText:SetPoint("TOPLEFT", 8, -6)
+                    row.nameText:SetJustifyH("LEFT")
+                    row.nameText:SetWidth(220)
+                    row.nameText:SetWordWrap(false)
+                end
+                if not row.detailText then
+                    row.detailText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                    row.detailText:SetPoint("BOTTOMLEFT", 8, 6)
+                    row.detailText:SetJustifyH("LEFT")
+                    row.detailText:SetWidth(250)
+                    row.detailText:SetWordWrap(false)
+                end
+                if not row.coordsText then
+                    row.coordsText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                    row.coordsText:SetPoint("RIGHT", -86, 0)
+                    row.coordsText:SetJustifyH("RIGHT")
+                    row.coordsText:SetWidth(90)
+                    row.coordsText:SetWordWrap(false)
+                end
+                if not row.trackBtn then
+                    row.trackBtn = MedaUI:CreateButton(row, "Track", 72, 24)
+                    row.trackBtn:SetPoint("RIGHT", -8, 0)
+                end
+
+                row:EnableMouse(true)
+                row:SetScript("OnMouseUp", function(_, button)
+                    if button ~= "LeftButton" then return end
+                    if row.trackBtn and MouseIsOver and MouseIsOver(row.trackBtn) then
+                        return
+                    end
+                    selectedFavoriteId = item.favId
+                    OpenFavoriteOnMap(item.favId)
+                end)
+                row:SetScript("OnEnter", function(self)
+                    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+                    GameTooltip:AddLine(GetFavoriteLabel(item.fav), 0.9, 0.7, 0.15)
+                    if item.fav.zone and item.fav.zone ~= "" then
+                        GameTooltip:AddLine(item.fav.zone, 0.8, 0.8, 0.8)
+                    end
+                    GameTooltip:AddLine(format("Coords: %.1f, %.1f", (item.fav.x or 0) * 100, (item.fav.y or 0) * 100), 1, 1, 1)
+                    GameTooltip:AddLine(format("Pool catches: %d", item.fav.poolCatches or 0), 0.7, 0.7, 0.7)
+                    if item.fav.notes and item.fav.notes ~= "" then
+                        GameTooltip:AddLine(item.fav.notes, 0.7, 0.7, 0.7, true)
+                    end
+                    GameTooltip:AddLine("Click row to open on map", 0.5, 0.85, 1)
+                    GameTooltip:Show()
+                end)
+                row:SetScript("OnLeave", function()
+                    GameTooltip:Hide()
+                end)
+
+                local Theme = MedaUI.Theme
+                local gold = Theme and Theme.gold or FALLBACK_GOLD
+                local bright = Theme and Theme.text or FALLBACK_BRIGHT
+                local dim = Theme and Theme.textDim or FALLBACK_DIM
+                local isSelected = item.favId == selectedFavoriteId
+                local isActive = item.favId == activeWaypointFavoriteId
+
+                row:SetBackdropBorderColor(unpack(isSelected and gold or (Theme and Theme.border or FALLBACK_DIM)))
+                row.nameText:SetText(GetFavoriteLabel(item.fav))
+                row.nameText:SetTextColor(bright[1], bright[2], bright[3])
+                row.detailText:SetText(item.detailLine)
+                row.detailText:SetTextColor(dim[1], dim[2], dim[3])
+                row.coordsText:SetText(item.coordLine)
+                if isActive then
+                    row.coordsText:SetTextColor(0.5, 0.82, 1)
+                    row.trackBtn:SetText("Clear")
+                else
+                    row.coordsText:SetTextColor(0.8, 0.8, 0.8)
+                    row.trackBtn:SetText("Track")
+                end
+
+                row.trackBtn.OnClick = function()
+                    selectedFavoriteId = item.favId
+                    SetFavoriteWaypoint(item.favId)
+                end
+            end,
+        })
+        mapFavoritesList:SetPoint("TOPLEFT", LEFT_X, yOff)
+
+        mapFavoritesEmpty = p:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+        mapFavoritesEmpty:SetPoint("TOP", mapFavoritesList, "TOP", 0, -26)
+        mapFavoritesEmpty:SetText("No favorite fishing spots saved yet.")
+        mapFavoritesEmpty:Hide()
+
+        RefreshMapFavoritesList = function()
+            if not mapFavoritesList then return end
+
+            local entries = {}
+            for favId, fav in pairs(moduleDB.favorites or {}) do
+                entries[#entries + 1] = {
+                    favId = favId,
+                    fav = fav,
+                    detailLine = ((fav.zone and fav.zone ~= "") and fav.zone or "Unknown Zone")
+                        .. format("  |  %d pool catches", fav.poolCatches or 0),
+                    coordLine = format("%.1f, %.1f", (fav.x or 0) * 100, (fav.y or 0) * 100),
+                }
+            end
+
+            table.sort(entries, function(a, b)
+                local zoneA = (a.fav.zone or ""):lower()
+                local zoneB = (b.fav.zone or ""):lower()
+                if zoneA ~= zoneB then
+                    return zoneA < zoneB
+                end
+                return GetFavoriteLabel(a.fav):lower() < GetFavoriteLabel(b.fav):lower()
+            end)
+
+            if selectedFavoriteId and not moduleDB.favorites[selectedFavoriteId] then
+                selectedFavoriteId = nil
+            end
+            if activeWaypointFavoriteId and not moduleDB.favorites[activeWaypointFavoriteId] then
+                activeWaypointFavoriteId = nil
+            end
+            if not selectedFavoriteId and entries[1] then
+                selectedFavoriteId = entries[1].favId
+            end
+
+            mapFavoritesList:SetData(entries)
+
+            local activeFav = activeWaypointFavoriteId and moduleDB.favorites[activeWaypointFavoriteId] or nil
+            local count = #entries
+            if mapFavoritesSummary then
+                local summary = format("%d favorite%s saved", count, count == 1 and "" or "s")
+                if activeFav then
+                    summary = summary .. format("  |  Waypoint: %s", GetFavoriteLabel(activeFav))
+                end
+                mapFavoritesSummary:SetText(summary)
+            end
+
+            if mapFavoritesEmpty then
+                if count == 0 then
+                    mapFavoritesEmpty:Show()
+                else
+                    mapFavoritesEmpty:Hide()
+                end
+            end
+        end
+
+        RefreshMapFavoritesList()
     end
 
     -- ===== Data Tab =====
@@ -3029,9 +3411,14 @@ StaticPopupDialogs["GONEFISHIN_CLEAR_FAVORITES"] = {
     button2 = "No",
     OnAccept = function()
         if not db then return end
+        ClearFavoriteWaypoint(true)
+        selectedFavoriteId = nil
         local MapPins = ns.Services.MapPinProvider
         if MapPins then MapPins:ClearGroup("GoneFishin_Favorites") end
         wipe(db.favorites)
+        if RefreshMapFavoritesList then
+            RefreshMapFavoritesList()
+        end
         print("|cff00ccffGone Fishin':|r All favorites cleared.")
     end,
     timeout = 0,
@@ -3045,6 +3432,8 @@ StaticPopupDialogs["GONEFISHIN_RESET_DATA"] = {
     button2 = "Cancel",
     OnAccept = function()
         if not db then return end
+        ClearFavoriteWaypoint(true)
+        selectedFavoriteId = nil
         wipe(db.fishLog)
         wipe(db.zoneStats)
         wipe(db.poolStats)
@@ -3064,6 +3453,9 @@ StaticPopupDialogs["GONEFISHIN_RESET_DATA"] = {
         sessionCasts = 0
         sessionJunk = 0
         currentStreak = 0
+        if RefreshMapFavoritesList then
+            RefreshMapFavoritesList()
+        end
         print("|cff00ccffGone Fishin':|r All fishing data has been reset.")
     end,
     timeout = 0,

@@ -69,7 +69,18 @@ end
 
 local function ParseNPCID(guid)
     if not guid then return nil end
-    local unitType, _, _, _, _, npcID = strsplit("-", guid)
+    local guidClean = pcall(function()
+        return guid == guid
+    end)
+    if not guidClean then
+        return nil
+    end
+
+    local ok, unitType, _, _, _, _, npcID = pcall(strsplit, "-", guid)
+    if not ok then
+        return nil
+    end
+
     if unitType == "Creature" or unitType == "Vehicle" then
         return npcID
     end
@@ -120,7 +131,14 @@ end
 local function SafeToString(val)
     if val == nil then return "" end
     local ok, str = pcall(tostring, val)
-    return ok and str or ""
+    if not ok or str == nil then
+        return ""
+    end
+
+    local clean = pcall(function()
+        return str == str
+    end)
+    return clean and str or ""
 end
 
 local function AddDetectedMessage(npcID, event, text)

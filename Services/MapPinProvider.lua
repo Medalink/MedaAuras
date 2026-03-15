@@ -14,6 +14,8 @@ local dataProvider
 local pinPool = {}
 local activePins = {}
 local refreshPending = false
+local initFrame
+local MedaMapDataProviderMixin
 
 local function ScheduleRefresh()
     if refreshPending then return end
@@ -26,7 +28,24 @@ local function ScheduleRefresh()
     end)
 end
 
+local function TryInitialize()
+    if dataProvider then
+        return true
+    end
+
+    if not WorldMapFrame then
+        return false
+    end
+
+    dataProvider = CreateFromMixins(MedaMapDataProviderMixin)
+    WorldMapFrame:AddDataProvider(dataProvider)
+    MedaAuras.LogDebug("[MapPinProvider] Initialized, data provider registered with WorldMapFrame")
+    ScheduleRefresh()
+    return true
+end
+
 function MapPinProvider:RegisterPinGroup(groupId, config)
+    TryInitialize()
     if groups[groupId] then return end
     groups[groupId] = {
         config = config or {},
@@ -36,6 +55,7 @@ function MapPinProvider:RegisterPinGroup(groupId, config)
 end
 
 function MapPinProvider:SetPin(groupId, pinId, data)
+    TryInitialize()
     local group = groups[groupId]
     if not group then return end
     group.pins[pinId] = data
@@ -43,6 +63,7 @@ function MapPinProvider:SetPin(groupId, pinId, data)
 end
 
 function MapPinProvider:RemovePin(groupId, pinId)
+    TryInitialize()
     local group = groups[groupId]
     if not group then return end
     group.pins[pinId] = nil
@@ -50,6 +71,7 @@ function MapPinProvider:RemovePin(groupId, pinId)
 end
 
 function MapPinProvider:ClearGroup(groupId)
+    TryInitialize()
     local group = groups[groupId]
     if not group then return end
     wipe(group.pins)
@@ -62,6 +84,7 @@ function MapPinProvider:GetPins(groupId)
 end
 
 function MapPinProvider:SetGroupVisible(groupId, visible)
+    TryInitialize()
     local group = groups[groupId]
     if not group then return end
     group.visible = visible
@@ -69,6 +92,7 @@ function MapPinProvider:SetGroupVisible(groupId, visible)
 end
 
 function MapPinProvider:UnregisterPinGroup(groupId)
+    TryInitialize()
     groups[groupId] = nil
     ScheduleRefresh()
 end
@@ -114,7 +138,7 @@ local function ReleaseAllPins()
     wipe(activePins)
 end
 
-local MedaMapDataProviderMixin = CreateFromMixins(MapCanvasDataProviderMixin)
+MedaMapDataProviderMixin = CreateFromMixins(MapCanvasDataProviderMixin)
 
 function MedaMapDataProviderMixin:RemoveAllData()
     ReleaseAllPins()
@@ -161,12 +185,25 @@ function MedaMapDataProviderMixin:OnMapChanged()
 end
 
 function MapPinProvider:Initialize()
-    if dataProvider then return end
+    if TryInitialize() then
+        return
+    end
 
-    if not WorldMapFrame then return end
+    if initFrame then
+        return
+    end
 
-    dataProvider = CreateFromMixins(MedaMapDataProviderMixin)
-    WorldMapFrame:AddDataProvider(dataProvider)
+    initFrame = CreateFrame("Frame")
+    initFrame:RegisterEvent("ADDON_LOADED")
+    initFrame:SetScript("OnEvent", function(_, _, addonName)
+        if addonName ~= "Blizzard_WorldMap" then
+            return
+        end
 
-    MedaAuras.LogDebug("[MapPinProvider] Initialized, data provider registered with WorldMapFrame")
+        if TryInitialize() then
+            initFrame:UnregisterEvent("ADDON_LOADED")
+            initFrame:SetScript("OnEvent", nil)
+            initFrame = nil
+        end
+    end)
 end
