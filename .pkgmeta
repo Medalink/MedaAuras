@@ -6,7 +6,17 @@ externals:
   Libs/LibDeflate: https://github.com/SafeteeWoW/LibDeflate
 
 ignore:
+  - .git
+  - .gitattributes
   - .github
+  - .vscode
+  - docs
+  - scripts
   - .gitignore
+  - .luacheckrc
+  - .luarc.json
   - README.md
+  - LICENSE
+  - lsp-stub-gaps.json
+  - lsp-stub-gaps.md
   - .pkgmeta
