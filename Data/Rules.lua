@@ -55,7 +55,7 @@ D.rules[#D.rules + 1] = {
     id      = "windrunner_curse",
     trigger = {
         type         = "instance",
-        instanceIDs  = { 2801 },
+        instanceIDs  = { 2805 },
     },
     checks = {
         {
@@ -87,7 +87,7 @@ D.rules[#D.rules + 1] = {
     id      = "magisters_purge",
     trigger = {
         type         = "instance",
-        instanceIDs  = { 2803 },
+        instanceIDs  = { 2811 },
     },
     checks = {
         {
@@ -108,7 +108,7 @@ D.rules[#D.rules + 1] = {
     id      = "blindingvale_purge",
     trigger = {
         type         = "instance",
-        instanceIDs  = { 2804 },
+        instanceIDs  = { 2859 },
     },
     checks = {
         {
@@ -129,7 +129,7 @@ D.rules[#D.rules + 1] = {
     id      = "maisara_disease",
     trigger = {
         type         = "instance",
-        instanceIDs  = { 2806 },
+        instanceIDs  = { 2874 },
     },
     checks = {
         {
@@ -150,7 +150,7 @@ D.rules[#D.rules + 1] = {
     id      = "murderrow_purge",
     trigger = {
         type         = "instance",
-        instanceIDs  = { 2802 },
+        instanceIDs  = { 2813 },
     },
     checks = {
         {

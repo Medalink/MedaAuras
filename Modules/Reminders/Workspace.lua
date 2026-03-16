@@ -6,7 +6,7 @@ ns.Reminders = R
 local S = R.state or {}
 R.state = S
 
-local MedaUI = LibStub("MedaUI-1.0")
+local MedaUI = LibStub("MedaUI-2.0")
 
 local SEVERITY_COLORS = R.SEVERITY_COLORS
 local COVERED_COLOR = R.COVERED_COLOR
@@ -2096,7 +2096,7 @@ local function RenderYouPage(ctx)
             local row = MedaUI:CreateStatusRow(content, { width = GetContentWidth(), iconSize = 28, showNote = true, cardStyle = true })
             row:SetPoint("TOPLEFT", 4, yOff)
             row:SetPoint("RIGHT", content, "RIGHT", -4, 0)
-            row:SetIcon(136116)
+            row:SetIcon((type(danger.icon) == "number" and danger.icon > 0 and danger.icon) or 136116)
             row:SetLabel(danger.mechanic or "Mechanic")
             local accent = SEVERITY_COLORS[danger.severity] or SEVERITY_COLORS.info
             row:SetAccentColor(accent[1], accent[2], accent[3])

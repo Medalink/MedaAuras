@@ -1,0 +1,21 @@
+{
+  "workspace": "F:\\Dev\\MedaAuras",
+  "summary": {
+    "missing": 0,
+    "workspace-local": 0,
+    "repo-config": 0,
+    "meda": 0,
+    "wow-api": 0,
+    "wow-retail-full": 1
+  },
+  "symbols": [
+    {
+      "symbol": "UiMapPoint",
+      "classification": "wow-retail-full",
+      "occurrences": 3,
+      "files": {
+        "Modules\\GoneFishin.lua": 3
+      }
+    }
+  ]
+}

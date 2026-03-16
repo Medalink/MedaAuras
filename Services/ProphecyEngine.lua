@@ -290,7 +290,6 @@ local callbacks = {}       -- { onStateChange, onDriftUpdate, onWipeStateChange,
 local engineActive = false
 local eventFrame
 local TRACKED_EVENTS = {
-    "COMBAT_LOG_EVENT_UNFILTERED",
     "ENCOUNTER_START",
     "ENCOUNTER_END",
     "CHALLENGE_MODE_START",
@@ -810,9 +809,7 @@ function ProphecyEngine:OnEvent(event, ...)
         if not acctDB or not acctDB.enabled then return end
     end
 
-    if event == "COMBAT_LOG_EVENT_UNFILTERED" then
-        self:OnCLEU()
-    elseif event == "ENCOUNTER_START" then
+    if event == "ENCOUNTER_START" then
         local encounterID, encounterName = ...
         self:OnEncounterStart(encounterID, encounterName)
     elseif event == "ENCOUNTER_END" then

@@ -20,6 +20,7 @@ Libs\LibDeflate\LibDeflate.lua
 # Core
 Core\Core.lua
 Core\CustomModules.lua
+Core\SettingsHost.lua
 
 # Data (load first, init before domain files)
 Data\RemindersInit.lua
@@ -41,6 +42,7 @@ Services\SpellCastTracker.lua
 Services\CooldownTimer.lua
 Services\UnitPriority.lua
 Services\GroupInspector.lua
+Services\MapPinProvider.xml
 Services\MapPinProvider.lua
 Services\PartySpellWatcher.lua
 Services\ProphecyEngine.lua

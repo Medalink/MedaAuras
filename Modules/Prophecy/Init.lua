@@ -6,7 +6,7 @@
 
 local _, ns = ...
 
-local MedaUI = LibStub("MedaUI-1.0")
+local MedaUI = LibStub("MedaUI-2.0")
 
 ns.Prophecy = {}
 
@@ -110,10 +110,30 @@ local function OnDisable()
     end
 end
 
-local function BuildConfig(parent, db)
-    if ns.Prophecy.BuildConfig then
-        ns.Prophecy.BuildConfig(parent, db)
+local function BuildPage(pageName, parent)
+    local db = GetDB()
+    if not db then
+        return 800
     end
+
+    if pageName == "timeline" then
+        ns.Prophecy.BuildBuilderTabs(parent, db, parent)
+        return 760
+    end
+    if pageName == "editor" then
+        ns.Prophecy.BuildEditorTab(parent, db)
+        return 820
+    end
+    if pageName == "history" then
+        ns.Prophecy.BuildHistoryTab(parent, db)
+        return 760
+    end
+    if pageName == "appearance" then
+        ns.Prophecy.BuildAppearancePage(parent, db)
+        return 720
+    end
+
+    return 800
 end
 
 -- ----------------------------------------------------------------
@@ -134,7 +154,19 @@ MedaAuras:RegisterModule({
     OnInitialize  = OnInitialize,
     OnEnable      = OnEnable,
     OnDisable     = OnDisable,
-    BuildConfig   = BuildConfig,
+    pages         = {
+        { id = "timeline", label = "Timeline" },
+        { id = "editor", label = "Editor" },
+        { id = "history", label = "History" },
+        { id = "appearance", label = "Appearance" },
+    },
+    pageHeights   = {
+        timeline = 760,
+        editor = 820,
+        history = 760,
+        appearance = 720,
+    },
+    buildPage     = BuildPage,
     slashCommands = {
         preview = function()
             if ns.Prophecy.TogglePreview then ns.Prophecy.TogglePreview() end

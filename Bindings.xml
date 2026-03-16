@@ -1,6 +1,6 @@
 <Bindings>
     <Binding name="CLICK MedaAurasLazyCast1:LeftButton"
-             header="MEDAAURAS" category="ADDONS"/>
+             header="MEDAAURAS"/>
     <Binding name="CLICK MedaAurasLazyCast2:LeftButton"
-             header="MEDAAURAS" category="ADDONS"/>
+             />
 </Bindings>

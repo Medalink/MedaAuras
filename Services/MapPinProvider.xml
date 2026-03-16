@@ -1,0 +1,15 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+  <Frame name="MedaMapPinTemplate" mixin="MedaMapPinMixin" virtual="true" enableMouse="true" hidden="true">
+    <Size x="16" y="16"/>
+    <Layers>
+      <Layer level="ARTWORK">
+        <Texture parentKey="icon" setAllPoints="true"/>
+      </Layer>
+    </Layers>
+    <Scripts>
+      <OnLoad method="OnLoad"/>
+      <OnEnter method="OnMouseEnter"/>
+      <OnLeave method="OnMouseLeave"/>
+    </Scripts>
+  </Frame>
+</Ui>

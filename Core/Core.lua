@@ -1,6 +1,6 @@
 local ADDON_NAME, ns = ...
 
-local MedaUI = LibStub("MedaUI-1.0")
+local MedaUI = LibStub("MedaUI-2.0")
 local Pixel = MedaUI.Pixel
 local debugstack = debugstack
 local format = format
@@ -124,6 +124,14 @@ MedaAuras.LogWarn = LogWarn
 MedaAuras.LogError = LogError
 MedaAuras.LogTable = LogTable
 
+function MedaAuras:SetDebugMode(enabled)
+    debugEnabled = not not enabled
+end
+
+function MedaAuras:IsDebugModeEnabled()
+    return debugEnabled
+end
+
 -- ============================================================================
 -- Error Isolation
 -- ============================================================================
@@ -189,6 +197,14 @@ function MedaAuras:GetModule(name)
         return self:GetCustomModuleConfig(name)
     end
     return modules[name]
+end
+
+function MedaAuras:GetRegisteredModuleNames()
+    local names = {}
+    for index, name in ipairs(moduleOrder) do
+        names[index] = name
+    end
+    return names
 end
 
 function MedaAuras:GetModuleDB(name)
@@ -285,344 +301,6 @@ end
 
 function MedaAuras:GetOptionsDB()
     return MedaAurasDB and MedaAurasDB.options
-end
-
--- ============================================================================
--- Settings Panel
--- ============================================================================
-
-local settingsPanel
-local selectedModule = nil
-
-local SIDEBAR_WIDTH = 304
-local PANEL_WIDTH = 1180
-local PANEL_HEIGHT = 840
-
-local function BuildGeneralConfig(parent)
-    local yOff = 0
-
-    local headerContainer = MedaUI:CreateSectionHeader(parent, "General Settings", 470)
-    headerContainer:SetPoint("TOPLEFT", 0, yOff)
-    yOff = yOff - 40
-
-    local themeLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    themeLabel:SetPoint("TOPLEFT", 0, yOff)
-    themeLabel:SetText("UI Theme")
-    themeLabel:SetTextColor(unpack(MedaUI.Theme.text))
-    yOff = yOff - 20
-
-    local themeSelector = MedaUI:CreateThemeSelector(parent, 200, {
-        onChange = function(value)
-            if MedaAurasDB then
-                MedaAurasDB.options.theme = value
-            end
-        end,
-    })
-    themeSelector:SetPoint("TOPLEFT", 0, yOff)
-    local currentTheme = MedaAurasDB and MedaAurasDB.options.theme
-    if currentTheme then
-        themeSelector:SetSelected(currentTheme)
-    end
-    yOff = yOff - 40
-
-    local debugCheck = MedaUI:CreateCheckbox(parent, "Enable Debug Mode")
-    debugCheck:SetPoint("TOPLEFT", 0, yOff)
-    debugCheck:SetChecked(debugEnabled)
-    debugCheck.OnValueChanged = function(_, checked)
-        debugEnabled = checked
-        if MedaAurasDB then
-            MedaAurasDB.options.debugMode = checked
-        end
-        Log(format("Debug mode toggled %s", checked and "ON" or "OFF"))
-    end
-    yOff = yOff - 40
-
-    local muteSoundsCheck = MedaUI:CreateCheckbox(parent, "Mute All Sounds")
-    muteSoundsCheck:SetPoint("TOPLEFT", 0, yOff)
-    muteSoundsCheck:SetChecked(MedaAurasDB and MedaAurasDB.options.muteSounds)
-    muteSoundsCheck.OnValueChanged = function(_, checked)
-        if MedaAurasDB then
-            MedaAurasDB.options.muteSounds = checked
-        end
-        MedaUI:SetSoundsEnabled(not checked)
-    end
-    yOff = yOff - 40
-
-    local LDBIcon = LibStub("LibDBIcon-1.0", true)
-    local hasMinimapModules = false
-    for _, modName in ipairs(moduleOrder) do
-        local config = modules[modName]
-        if config and config.defaults and config.defaults.showMinimapButton ~= nil then
-            hasMinimapModules = true
-            break
-        end
-    end
-
-    if hasMinimapModules then
-        local mmHeader = MedaUI:CreateSectionHeader(parent, "Minimap Buttons", 470)
-        mmHeader:SetPoint("TOPLEFT", 0, yOff)
-        yOff = yOff - 40
-
-        for _, modName in ipairs(moduleOrder) do
-            local config = modules[modName]
-            if config and config.defaults and config.defaults.showMinimapButton ~= nil then
-                local modDB = MedaAuras:GetModuleDB(modName)
-                local ldbName = "MedaAuras" .. modName
-                local cb = MedaUI:CreateCheckbox(parent, config.title or modName)
-                cb:SetPoint("TOPLEFT", 0, yOff)
-                cb:SetChecked(modDB and modDB.showMinimapButton ~= false)
-                cb.OnValueChanged = function(_, checked)
-                    if modDB then
-                        modDB.showMinimapButton = checked
-                    end
-                    if LDBIcon and LDBIcon:IsRegistered(ldbName) then
-                        if checked then LDBIcon:Show(ldbName) else LDBIcon:Hide(ldbName) end
-                    end
-                end
-                yOff = yOff - 26
-            end
-        end
-        yOff = yOff - 10
-    end
-
-    if settingsPanel then
-        settingsPanel:SetContentHeight(math.abs(yOff))
-    end
-end
-
-local STABILITY_LEGEND = {
-    { label = "Stable",       color = STABILITY_COLORS.stable },
-    { label = "Beta",         color = STABILITY_COLORS.beta },
-    { label = "Experimental", color = STABILITY_COLORS.experimental },
-}
-
-local function RebuildSidebar()
-    settingsPanel:BeginSidebar()
-
-    -- General section
-    settingsPanel:AddSection("General")
-    settingsPanel:AddNavRow("General", "Settings")
-    settingsPanel:AddNavRow("Import", "Import")
-
-    -- Modules section
-    settingsPanel:AddSection("Modules")
-    table.sort(moduleOrder)
-    for _, modName in ipairs(moduleOrder) do
-        local config = modules[modName]
-        local db = MedaAuras:GetModuleDB(modName)
-        settingsPanel:AddModuleRow(modName, config.title or modName, {
-            enabled = db and db.enabled or false,
-            getEnabled = function() local d = MedaAuras:GetModuleDB(modName); return d and d.enabled end,
-            stability = config.stability,
-            stabilityColors = STABILITY_COLORS,
-            version = config.version,
-            author = config.author,
-            customTag = config.customTag,
-            customColor = config.customColor,
-            slashCommands = config.slashCommands,
-            slashPrefix = "/mwa " .. modName:lower(),
-            onToggle = function(key, enabled)
-                if enabled then
-                    MedaAuras:EnableModule(key)
-                else
-                    MedaAuras:DisableModule(key)
-                end
-                MedaAuras:RefreshSidebarDot(key)
-            end,
-        })
-    end
-
-    -- Custom Modules section
-    if MedaAuras.GetCustomModuleEntries then
-        local customEntries = MedaAuras:GetCustomModuleEntries()
-        settingsPanel:AddSection("Custom Modules")
-
-        for _, entry in ipairs(customEntries) do
-            local config = MedaAuras:GetCustomModuleConfig(entry.key)
-            if config then
-                local db = MedaAuras:GetModuleDB(entry.key)
-                settingsPanel:AddModuleRow(entry.key, config.title or entry.moduleId, {
-                    enabled = db and db.enabled or false,
-                    getEnabled = function() local d = MedaAuras:GetModuleDB(entry.key); return d and d.enabled end,
-                    stability = config.stability,
-                    stabilityColors = STABILITY_COLORS,
-                    version = config.version,
-                    customTag = config.customTag,
-                    customColor = config.customColor,
-                    onToggle = function(key, enabled)
-                        if enabled then
-                            MedaAuras:EnableModule(key)
-                        else
-                            MedaAuras:DisableModule(key)
-                        end
-                        MedaAuras:RefreshSidebarDot(key)
-                    end,
-                })
-            end
-        end
-    end
-
-    settingsPanel:EndSidebar()
-end
-
-local function BuildSettingsPanel()
-    if settingsPanel then
-        RebuildSidebar()
-        return settingsPanel
-    end
-
-    settingsPanel = MedaUI:CreateSettingsPanel("MedaAurasSettingsPanel", {
-        width = PANEL_WIDTH,
-        height = PANEL_HEIGHT,
-        sidebarWidth = SIDEBAR_WIDTH,
-        title = "MedaAuras",
-        subtitle = "C O N F I G U R A T I O N",
-        minWidth = SIDEBAR_WIDTH + 300,
-        minHeight = 400,
-        watermarkTexture = MedaUI.mediaPath .. "Textures\\meda-logo.tga",
-    })
-    tinsert(UISpecialFrames, "MedaAurasSettingsPanel")
-
-    -- Register content builders for special pages
-    settingsPanel:SetContentBuilder("General", function(contentFrame)
-        BuildGeneralConfig(contentFrame)
-    end)
-
-    settingsPanel:SetContentBuilder("Import", function()
-        if MedaAuras.ShowImportCustomModuleDialog then
-            MedaAuras:ShowImportCustomModuleDialog()
-        end
-    end)
-
-    settingsPanel:SetOnItemSelected(function(key)
-        selectedModule = key
-
-        if key == "General" or key == "Import" then return end
-
-        local contentFrame = settingsPanel:GetContentFrame()
-
-        if MedaAuras.IsCustomModuleKey and MedaAuras:IsCustomModuleKey(key) then
-            if MedaAuras.BuildCustomModuleConfig then
-                MedaAuras:BuildCustomModuleConfig(contentFrame, key)
-            end
-            settingsPanel:SetContentHeight(800)
-            return
-        end
-
-        local config = modules[key]
-        if not config then return end
-        local db = MedaAuras:GetModuleDB(key)
-        if not db then return end
-
-        local headerHeight = settingsPanel:BuildConfigHeader(contentFrame, {
-            title = config.title or config.name or key,
-            stability = config.stability,
-            stabilityColors = STABILITY_COLORS,
-            version = config.version,
-            author = config.author,
-            description = config.description,
-        })
-
-        local moduleFrame = CreateFrame("Frame", nil, contentFrame)
-        moduleFrame:SetPoint("TOPLEFT", 0, -headerHeight)
-        moduleFrame:SetPoint("RIGHT", 0, 0)
-        moduleFrame:SetHeight(5000)
-
-        if config.BuildConfig then
-            SafeCall(key, config.BuildConfig, moduleFrame, db)
-        end
-
-        settingsPanel:SetContentHeight(800)
-    end)
-
-    -- Footer buttons
-    settingsPanel:SetFooterButtons({
-        {
-            text = "Reset to Defaults",
-            width = 164,
-            align = "left",
-            onClick = function()
-                if selectedModule and selectedModule ~= "General" and selectedModule ~= "Editor" and selectedModule ~= "Import" then
-                    local config = modules[selectedModule]
-                    if config and config.defaults then
-                        local db = MedaAuras:GetModuleDB(selectedModule)
-                        if db then
-                            if config.OnResetDefaults then
-                                config.OnResetDefaults(db)
-                            end
-                            for k, v in pairs(config.defaults) do
-                                db[k] = DeepCopy(v)
-                            end
-                            settingsPanel:SelectItem(selectedModule)
-                            Log(format("Reset defaults for module: %s", selectedModule))
-                        end
-                    end
-                end
-            end,
-        },
-        {
-            text = "Close",
-            width = 108,
-            align = "right",
-            onClick = function()
-                settingsPanel:Hide()
-            end,
-        },
-    })
-
-    -- Legend
-    settingsPanel:SetLegend(STABILITY_LEGEND)
-
-    -- Build sidebar and select General
-    RebuildSidebar()
-    settingsPanel:SelectItem("General")
-
-    return settingsPanel
-end
-
-function MedaAuras:ToggleSettings()
-    local panel = BuildSettingsPanel()
-    panel:Toggle()
-    if panel:IsShown() then
-        panel:SelectItem(selectedModule or "General")
-    end
-end
-
-function MedaAuras:RebuildSettingsSidebar()
-    if settingsPanel then
-        RebuildSidebar()
-    end
-end
-
-function MedaAuras:SetContentHeight(height)
-    if settingsPanel then
-        settingsPanel:SetContentHeight(height)
-    end
-end
-
-function MedaAuras:RegisterConfigCleanup(frame)
-    if settingsPanel then
-        settingsPanel:RegisterConfigCleanup(frame)
-    end
-end
-
-function MedaAuras:CreateConfigTabs(parent, tabs)
-    if settingsPanel then
-        return settingsPanel:CreateConfigTabs(parent, tabs)
-    end
-    return MedaUI:CreateTabBar(parent, tabs), {}
-end
-
-function MedaAuras:RefreshModuleConfig()
-    if selectedModule and settingsPanel and settingsPanel:IsShown() then
-        settingsPanel:SelectItem(selectedModule)
-    end
-end
-
-function MedaAuras:RefreshSidebarDot(modName)
-    if settingsPanel then
-        settingsPanel:RefreshModuleToggle(modName)
-    end
 end
 
 -- ============================================================================

@@ -1,0 +1,67 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "WoW: Refresh API Stubs",
+      "type": "shell",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "F:\\Dev\\wow-tools\\scripts\\refresh_wow_api_stubs.ps1"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "WoW: Watch API Stubs",
+      "type": "shell",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "F:\\Dev\\wow-tools\\scripts\\watch_wow_api_stubs.ps1"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "LuaLS: Check Workspace",
+      "type": "shell",
+      "command": "lua-language-server",
+      "args": [
+        "--check=.",
+        "--configpath=.luarc.json",
+        "--checklevel=Error",
+        "--check_format=pretty"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "LuaLS: Detect Stub Gaps",
+      "type": "shell",
+      "command": "python",
+      "args": [
+        "F:\\Dev\\wow-tools\\scripts\\detect_stub_gaps.py",
+        "--workspace",
+        "${workspaceFolder}",
+        "--config",
+        "${workspaceFolder}\\.luarc.json",
+        "--output",
+        "${workspaceFolder}\\lsp-stub-gaps.md"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Luacheck: Workspace",
+      "type": "shell",
+      "command": "luacheck",
+      "args": [
+        "."
+      ],
+      "problemMatcher": []
+    }
+  ]
+}

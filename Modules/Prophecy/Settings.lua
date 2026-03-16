@@ -6,7 +6,7 @@
 
 local _, ns = ...
 
-local MedaUI = LibStub("MedaUI-1.0")
+local MedaUI = LibStub("MedaUI-2.0")
 local Pixel = MedaUI.Pixel
 
 local function GetDB()
@@ -17,7 +17,7 @@ end
 -- Appearance tab
 -- =====================================================================
 
-local function BuildAppearanceTab(parent, db)
+function ns.Prophecy.BuildAppearancePage(parent, db)
     local yOff = 0
     local LEFT_X = 0
     local RIGHT_X = 238
@@ -26,7 +26,6 @@ local function BuildAppearanceTab(parent, db)
             ns.Prophecy.OnRefresh()
         end
     end
-
     -- Overlay opacity
     local opacitySlider = MedaUI:CreateLabeledSlider(parent, "Overlay Opacity", 200, 0, 100, 1)
     Pixel.SetPoint(opacitySlider, "TOPLEFT", LEFT_X, -yOff)
@@ -149,60 +148,4 @@ local function BuildAppearanceTab(parent, db)
     previewBtn:SetScript("OnClick", function()
         if ns.Prophecy.TogglePreview then ns.Prophecy.TogglePreview() end
     end)
-end
-
--- =====================================================================
--- BuildConfig entry point
--- =====================================================================
-
-function ns.Prophecy.BuildConfig(parent, db)
-    local tabBar = MedaUI:CreateTabBar(parent, {
-        { id = "timeline",   label = "Timeline" },
-        { id = "editor",     label = "Editor" },
-        { id = "history",    label = "History" },
-        { id = "appearance", label = "Appearance" },
-    })
-    Pixel.SetPoint(tabBar, "TOPLEFT", 0, 0)
-
-    local contentFrame = MedaUI:CreateContentFrame(parent, {
-        fillParent = true,
-        insets = { top = 34 },
-    })
-
-    local tabFrames = {}
-    local currentContent = nil
-
-    local function ClearContent()
-        if currentContent then
-            currentContent:Hide()
-        end
-    end
-
-    local function ShowTab(tabId)
-        ClearContent()
-        local frame = tabFrames[tabId]
-        if not frame then
-            frame = MedaUI:CreateContentFrame(contentFrame, { fillParent = true })
-            tabFrames[tabId] = frame
-
-            if tabId == "timeline" then
-                ns.Prophecy.BuildBuilderTabs(parent, db, frame)
-            elseif tabId == "editor" then
-                ns.Prophecy.BuildEditorTab(frame, db)
-            elseif tabId == "history" then
-                ns.Prophecy.BuildHistoryTab(frame, db)
-            elseif tabId == "appearance" then
-                BuildAppearanceTab(frame, db)
-            end
-        end
-
-        currentContent = frame
-        frame:Show()
-    end
-
-    tabBar.OnTabChanged = function(_, tabId)
-        ShowTab(tabId)
-    end
-
-    ShowTab("timeline")
 end

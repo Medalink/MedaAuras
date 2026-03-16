@@ -1,6 +1,6 @@
 local _, ns = ...
 
-local MedaUI = LibStub("MedaUI-1.0")
+local MedaUI = LibStub("MedaUI-2.0")
 
 local format = format
 local GetTime = GetTime
@@ -1055,7 +1055,7 @@ end
 -- Settings UI
 -- ============================================================================
 
-local function BuildConfig(parent, moduleDB)
+local function BuildSettingsPage(parent, moduleDB)
     local LEFT_X, RIGHT_X = 0, 238
     db = moduleDB
 
@@ -1624,7 +1624,13 @@ MedaAuras:RegisterModule({
     OnInitialize = OnInitialize,
     OnEnable = OnEnable,
     OnDisable = OnDisable,
-    BuildConfig = BuildConfig,
+    pages = {
+        { id = "settings", label = "Settings" },
+    },
+    buildPage = function(_, parent)
+        BuildSettingsPage(parent, MedaAuras:GetModuleDB(MODULE_NAME))
+        return 820
+    end,
     slashCommands = slashCommands,
 })
 

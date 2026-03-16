@@ -108,17 +108,24 @@ local function BuildInterruptNode(entry, index)
         id       = "int_" .. index,
         text     = "Interrupt: " .. entry.spell .. " (" .. entry.mob .. ")",
         type     = PROPHECY_TYPES.INTERRUPT,
+        icon     = entry.icon,
         triggers = triggers,
         actions  = { { type = "fulfill" } },
     }
 end
 
 local function BuildDangerNode(danger, index)
+    local triggers = { { type = "manual" } }
+    if danger.spellID then
+        table.insert(triggers, 1, { type = "cleu_spell", spellIds = { danger.spellID }, subevent = "SPELL_CAST_SUCCESS" })
+        triggers.mode = "any"
+    end
     return {
         id       = "danger_" .. index,
         text     = danger.mechanic .. " (" .. danger.source .. ")",
         type     = PROPHECY_TYPES.AWARENESS,
-        triggers = { { type = "manual" } },
+        icon     = danger.icon,
+        triggers = triggers,
         actions  = { { type = "fulfill" } },
     }
 end
@@ -164,6 +171,7 @@ local function BuildBossNodes(dangers, dungeonName)
                 id       = engageId .. "_danger_" .. i,
                 text     = danger.mechanic .. ": " .. danger.tip,
                 type     = PROPHECY_TYPES.AWARENESS,
+                icon     = danger.icon,
                 triggers = {
                     { type = "chain", afterProphecy = engageId },
                 },
@@ -292,7 +300,9 @@ function ProphecyTemplates:_EnrichWithTimingData(template)
     local D = ns.RemindersData
     if D and D.contexts and D.contexts.dungeons and template.instanceID then
         local ctx = D.contexts.dungeons[template.instanceID]
-        if ctx and ctx.name then
+        if ctx and ctx.meta and ctx.meta.slug then
+            dungeonSlug = ctx.meta.slug
+        elseif ctx and ctx.name then
             dungeonSlug = ctx.name:lower():gsub("%s+", "-"):gsub("[^%w%-]", "")
         end
     end
@@ -300,6 +310,7 @@ function ProphecyTemplates:_EnrichWithTimingData(template)
 
     -- Collect lust spell median times from any spec's timeline
     local lustMedians = {}
+    local lustSpellIDs = {}
     for _, dungeons in pairs(PD.cdTimelines) do
         local dungeon = dungeons[dungeonSlug]
         if dungeon and dungeon.spells then
@@ -307,6 +318,7 @@ function ProphecyTemplates:_EnrichWithTimingData(template)
                 local spell = dungeon.spells[lustId]
                 if spell and spell.median and not lustMedians[1] then
                     lustMedians[#lustMedians + 1] = spell.median
+                    lustSpellIDs[#lustSpellIDs + 1] = lustId
                 end
             end
             if #lustMedians > 0 then break end
@@ -320,6 +332,10 @@ function ProphecyTemplates:_EnrichWithTimingData(template)
             lustIdx = lustIdx + 1
             if lustMedians[lustIdx] then
                 node.expectedTime = lustMedians[lustIdx]
+            end
+            local spellMeta = PD.spells and lustSpellIDs[lustIdx] and PD.spells[lustSpellIDs[lustIdx]]
+            if spellMeta then
+                node.icon = spellMeta.icon or node.icon
             end
         end
     end

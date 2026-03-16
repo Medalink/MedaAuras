@@ -7,7 +7,7 @@
 
 local _, ns = ...
 
-local MedaUI = LibStub("MedaUI-1.0")
+local MedaUI = LibStub("MedaUI-2.0")
 local Pixel = MedaUI.Pixel
 
 local format = string.format

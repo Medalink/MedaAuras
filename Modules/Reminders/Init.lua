@@ -6,7 +6,7 @@ ns.Reminders = R
 local S = R.state or {}
 R.state = S
 
-local MedaUI = LibStub("MedaUI-1.0")
+local MedaUI = LibStub("MedaUI-2.0")
 
 local MODULE_NAME = R.MODULE_NAME
 local MODULE_VERSION = R.MODULE_VERSION
@@ -340,7 +340,7 @@ local function CreateUI()
     if S.coveragePanel.footer then S.coveragePanel.footer:Hide() end
     if S.coveragePanel.statusBar then S.coveragePanel.statusBar:Hide() end
 
-    S.uiState.workspaceShell = MedaUI:CreateWorkspaceShell(S.coveragePanel, {
+    S.uiState.workspaceShell = MedaUI:CreateWorkspaceHost(S.coveragePanel, {
         toolbarWidth = 760,
         headerTextRightGap = 780,
     })
@@ -782,255 +782,261 @@ end
 -- Settings UI
 -- ============================================================================
 
-local function BuildConfig(parent, moduleDB)
+local function BuildTrackingPage(parent, moduleDB)
     local LEFT_X, RIGHT_X = 0, 238
     S.db = moduleDB
+    local yOff = 0
+
+    local genHdr = MedaUI:CreateSectionHeader(parent, "General")
+    genHdr:SetPoint("TOPLEFT", LEFT_X, yOff)
+    yOff = yOff - 34
+
+    local mmCb = MedaUI:CreateCheckbox(parent, "Show minimap button")
+    mmCb:SetChecked(S.db.showMinimapButton ~= false)
+    mmCb.OnValueChanged = function(_, val)
+        S.db.showMinimapButton = val
+        if S.minimapButton then
+            if val then S.minimapButton.ShowButton() else S.minimapButton.HideButton() end
+        end
+    end
+    mmCb:SetPoint("TOPLEFT", LEFT_X, yOff)
+    local lockCb = MedaUI:CreateCheckbox(parent, "Lock panel position")
+    lockCb:SetChecked(S.db.locked or false)
+    lockCb.OnValueChanged = function(_, val)
+        S.db.locked = val
+        if S.coveragePanel then S.coveragePanel:SetLocked(val) end
+    end
+    lockCb:SetPoint("TOPLEFT", RIGHT_X, yOff)
+    yOff = yOff - 28
+
+    local autoShowCb = MedaUI:CreateCheckbox(parent, "Auto-show on instance entrance")
+    autoShowCb:SetChecked(S.db.autoShowInInstance ~= false)
+    autoShowCb.OnValueChanged = function(_, val) S.db.autoShowInInstance = val end
+    autoShowCb:SetPoint("TOPLEFT", LEFT_X, yOff)
+    yOff = yOff - 34
+
+    local talHdr = MedaUI:CreateSectionHeader(parent, "Talent")
+    talHdr:SetPoint("TOPLEFT", LEFT_X, yOff)
+    yOff = yOff - 34
+
+    local prCb = MedaUI:CreateCheckbox(parent, "Show personal talent reminders")
+    prCb:SetChecked(S.db.personalReminders ~= false)
+    prCb.OnValueChanged = function(_, val) S.db.personalReminders = val; RunPipeline(false) end
+    prCb:SetPoint("TOPLEFT", LEFT_X, yOff)
+    local talUtilCb = MedaUI:CreateCheckbox(parent, "Track utility talents")
+    talUtilCb:SetChecked(S.db.tag_utility ~= false)
+    talUtilCb.OnValueChanged = function(_, val) S.db.tag_utility = val; RunPipeline(false) end
+    talUtilCb:SetPoint("TOPLEFT", RIGHT_X, yOff)
+    yOff = yOff - 34
+
+    local debuffHdr = MedaUI:CreateSectionHeader(parent, "Debuff")
+    debuffHdr:SetPoint("TOPLEFT", LEFT_X, yOff)
+    yOff = yOff - 34
+
+    local dispelMasterCb = MedaUI:CreateCheckbox(parent, "Track dispel coverage")
+    dispelMasterCb:SetChecked(S.db.tag_dispel ~= false)
+    dispelMasterCb.OnValueChanged = function(_, val) S.db.tag_dispel = val; RunPipeline(false) end
+    dispelMasterCb:SetPoint("TOPLEFT", LEFT_X, yOff)
+    yOff = yOff - 28
+
+    local curseCb = MedaUI:CreateCheckbox(parent, "Curse removal")
+    curseCb:SetChecked(S.db.tag_curse ~= false)
+    curseCb.OnValueChanged = function(_, val) S.db.tag_curse = val; RunPipeline(false) end
+    curseCb:SetPoint("TOPLEFT", LEFT_X + 16, yOff)
+    local poisonCb = MedaUI:CreateCheckbox(parent, "Poison removal")
+    poisonCb:SetChecked(S.db.tag_poison ~= false)
+    poisonCb.OnValueChanged = function(_, val) S.db.tag_poison = val; RunPipeline(false) end
+    poisonCb:SetPoint("TOPLEFT", RIGHT_X, yOff)
+    yOff = yOff - 28
+
+    local diseaseCb = MedaUI:CreateCheckbox(parent, "Disease removal")
+    diseaseCb:SetChecked(S.db.tag_disease ~= false)
+    diseaseCb.OnValueChanged = function(_, val) S.db.tag_disease = val; RunPipeline(false) end
+    diseaseCb:SetPoint("TOPLEFT", LEFT_X + 16, yOff)
+    local magicCb = MedaUI:CreateCheckbox(parent, "Magic removal")
+    magicCb:SetChecked(S.db.tag_magic ~= false)
+    magicCb.OnValueChanged = function(_, val) S.db.tag_magic = val; RunPipeline(false) end
+    magicCb:SetPoint("TOPLEFT", RIGHT_X, yOff)
+    yOff = yOff - 34
+
+    local diHdr = MedaUI:CreateSectionHeader(parent, "Dungeon Info")
+    diHdr:SetPoint("TOPLEFT", LEFT_X, yOff)
+    yOff = yOff - 34
+
+    local intCb = MedaUI:CreateCheckbox(parent, "Show interrupt priorities")
+    intCb:SetChecked(S.db.showInterrupts ~= false)
+    intCb.OnValueChanged = function(_, val) S.db.showInterrupts = val; RunPipeline(false) end
+    intCb:SetPoint("TOPLEFT", LEFT_X, yOff)
+    local affCb = MedaUI:CreateCheckbox(parent, "Show affix tips")
+    affCb:SetChecked(S.db.showAffixTips ~= false)
+    affCb.OnValueChanged = function(_, val) S.db.showAffixTips = val; RunPipeline(false) end
+    affCb:SetPoint("TOPLEFT", RIGHT_X, yOff)
+
+    return 500
+end
+
+local function BuildSourcesPage(parent, moduleDB)
+    local LEFT_X = 0
     local Theme = MedaUI.Theme
+    S.db = moduleDB
 
-    local tabBar, tabs = MedaAuras:CreateConfigTabs(parent, {
-        { id = "tracking",   label = "Tracking" },
-        { id = "sources",    label = "Sources" },
-        { id = "appearance", label = "Appearance" },
-    })
+    local yOff = 0
+    local srcHdr = MedaUI:CreateSectionHeader(parent, "Sources")
+    srcHdr:SetPoint("TOPLEFT", LEFT_X, yOff)
+    yOff = yOff - 34
 
-    -- ===== Tracking Tab =====
-    do
-        local p = tabs["tracking"]
-        local yOff = 0
+    local srcDesc = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    srcDesc:SetPoint("TOPLEFT", LEFT_X, yOff)
+    srcDesc:SetPoint("RIGHT", parent, "RIGHT", -4, 0)
+    srcDesc:SetJustifyH("LEFT")
+    srcDesc:SetWordWrap(true)
+    srcDesc:SetTextColor(unpack(Theme.textDim or {0.6, 0.6, 0.6}))
+    srcDesc:SetText("Choose which data sources provide recommendations. At least one must be active.")
+    yOff = yOff - srcDesc:GetStringHeight() - 8
 
-        local genHdr = MedaUI:CreateSectionHeader(p, "General")
-        genHdr:SetPoint("TOPLEFT", LEFT_X, yOff)
-        yOff = yOff - 34
+    if not S.db.sources then S.db.sources = {} end
 
-        local mmCb = MedaUI:CreateCheckbox(p, "Show minimap button")
-        mmCb:SetChecked(S.db.showMinimapButton ~= false)
-        mmCb.OnValueChanged = function(_, val)
-            S.db.showMinimapButton = val
-            if S.minimapButton then
-                if val then S.minimapButton.ShowButton() else S.minimapButton.HideButton() end
-            end
+    local configData = GetData()
+    local sourceKeys = {}
+    if configData and configData.sources then
+        for key, src in pairs(configData.sources) do
+            sourceKeys[#sourceKeys + 1] = { key = key, label = src.label }
         end
-        mmCb:SetPoint("TOPLEFT", LEFT_X, yOff)
-        local lockCb = MedaUI:CreateCheckbox(p, "Lock panel position")
-        lockCb:SetChecked(S.db.locked or false)
-        lockCb.OnValueChanged = function(_, val)
-            S.db.locked = val
-            if S.coveragePanel then S.coveragePanel:SetLocked(val) end
-        end
-        lockCb:SetPoint("TOPLEFT", RIGHT_X, yOff)
-        yOff = yOff - 28
-
-        local autoShowCb = MedaUI:CreateCheckbox(p, "Auto-show on instance entrance")
-        autoShowCb:SetChecked(S.db.autoShowInInstance ~= false)
-        autoShowCb.OnValueChanged = function(_, val) S.db.autoShowInInstance = val end
-        autoShowCb:SetPoint("TOPLEFT", LEFT_X, yOff)
-        yOff = yOff - 34
-
-        local talHdr = MedaUI:CreateSectionHeader(p, "Talent")
-        talHdr:SetPoint("TOPLEFT", LEFT_X, yOff)
-        yOff = yOff - 34
-
-        local prCb = MedaUI:CreateCheckbox(p, "Show personal talent reminders")
-        prCb:SetChecked(S.db.personalReminders ~= false)
-        prCb.OnValueChanged = function(_, val) S.db.personalReminders = val; RunPipeline(false) end
-        prCb:SetPoint("TOPLEFT", LEFT_X, yOff)
-        local talUtilCb = MedaUI:CreateCheckbox(p, "Track utility talents")
-        talUtilCb:SetChecked(S.db.tag_utility ~= false)
-        talUtilCb.OnValueChanged = function(_, val) S.db.tag_utility = val; RunPipeline(false) end
-        talUtilCb:SetPoint("TOPLEFT", RIGHT_X, yOff)
-        yOff = yOff - 34
-
-        local debuffHdr = MedaUI:CreateSectionHeader(p, "Debuff")
-        debuffHdr:SetPoint("TOPLEFT", LEFT_X, yOff)
-        yOff = yOff - 34
-
-        local dispelMasterCb = MedaUI:CreateCheckbox(p, "Track dispel coverage")
-        dispelMasterCb:SetChecked(S.db.tag_dispel ~= false)
-        dispelMasterCb.OnValueChanged = function(_, val) S.db.tag_dispel = val; RunPipeline(false) end
-        dispelMasterCb:SetPoint("TOPLEFT", LEFT_X, yOff)
-        yOff = yOff - 28
-
-        local curseCb = MedaUI:CreateCheckbox(p, "Curse removal")
-        curseCb:SetChecked(S.db.tag_curse ~= false)
-        curseCb.OnValueChanged = function(_, val) S.db.tag_curse = val; RunPipeline(false) end
-        curseCb:SetPoint("TOPLEFT", LEFT_X + 16, yOff)
-        local poisonCb = MedaUI:CreateCheckbox(p, "Poison removal")
-        poisonCb:SetChecked(S.db.tag_poison ~= false)
-        poisonCb.OnValueChanged = function(_, val) S.db.tag_poison = val; RunPipeline(false) end
-        poisonCb:SetPoint("TOPLEFT", RIGHT_X, yOff)
-        yOff = yOff - 28
-
-        local diseaseCb = MedaUI:CreateCheckbox(p, "Disease removal")
-        diseaseCb:SetChecked(S.db.tag_disease ~= false)
-        diseaseCb.OnValueChanged = function(_, val) S.db.tag_disease = val; RunPipeline(false) end
-        diseaseCb:SetPoint("TOPLEFT", LEFT_X + 16, yOff)
-        local magicCb = MedaUI:CreateCheckbox(p, "Magic removal")
-        magicCb:SetChecked(S.db.tag_magic ~= false)
-        magicCb.OnValueChanged = function(_, val) S.db.tag_magic = val; RunPipeline(false) end
-        magicCb:SetPoint("TOPLEFT", RIGHT_X, yOff)
-        yOff = yOff - 34
-
-        local diHdr = MedaUI:CreateSectionHeader(p, "Dungeon Info")
-        diHdr:SetPoint("TOPLEFT", LEFT_X, yOff)
-        yOff = yOff - 34
-
-        local intCb = MedaUI:CreateCheckbox(p, "Show interrupt priorities")
-        intCb:SetChecked(S.db.showInterrupts ~= false)
-        intCb.OnValueChanged = function(_, val) S.db.showInterrupts = val; RunPipeline(false) end
-        intCb:SetPoint("TOPLEFT", LEFT_X, yOff)
-        local affCb = MedaUI:CreateCheckbox(p, "Show affix tips")
-        affCb:SetChecked(S.db.showAffixTips ~= false)
-        affCb.OnValueChanged = function(_, val) S.db.showAffixTips = val; RunPipeline(false) end
-        affCb:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        table.sort(sourceKeys, function(a, b) return a.label < b.label end)
     end
 
-    -- ===== Sources Tab =====
-    do
-        local p = tabs["sources"]
-        local yOff = 0
-
-        local srcHdr = MedaUI:CreateSectionHeader(p, "Sources")
-        srcHdr:SetPoint("TOPLEFT", LEFT_X, yOff)
-        yOff = yOff - 34
-
-        local srcDesc = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        srcDesc:SetPoint("TOPLEFT", LEFT_X, yOff)
-        srcDesc:SetPoint("RIGHT", p, "RIGHT", -4, 0)
-        srcDesc:SetJustifyH("LEFT")
-        srcDesc:SetWordWrap(true)
-        srcDesc:SetTextColor(unpack(Theme.textDim or {0.6, 0.6, 0.6}))
-        srcDesc:SetText("Choose which data sources provide recommendations. At least one must be active.")
-        yOff = yOff - srcDesc:GetStringHeight() - 8
-
-        if not S.db.sources then S.db.sources = {} end
-
-        local configData = GetData()
-        local sourceKeys = {}
-        if configData and configData.sources then
-            for key, src in pairs(configData.sources) do
-                sourceKeys[#sourceKeys + 1] = { key = key, label = src.label }
-            end
-            table.sort(sourceKeys, function(a, b) return a.label < b.label end)
-        end
-
-        local function CountActiveSources()
-            local count = 0
-            for _, sk in ipairs(sourceKeys) do
-                if S.db.sources[sk.key] ~= false then count = count + 1 end
-            end
-            return count
-        end
-
+    local function CountActiveSources()
+        local count = 0
         for _, sk in ipairs(sourceKeys) do
-            local srcMeta = configData.sources[sk.key]
-            local cbLabel = srcMeta and srcMeta.url and format("%s  |cff888888(%s)|r", sk.label, srcMeta.url) or sk.label
-            local sCb = MedaUI:CreateCheckbox(p, cbLabel)
-            sCb:SetChecked(S.db.sources[sk.key] ~= false)
-            sCb.OnValueChanged = function(_, val)
-                if not val and CountActiveSources() <= 1 then
-                    sCb:SetChecked(true)
-                    return
-                end
-                S.db.sources[sk.key] = val
-                RunPipeline(false)
-            end
-            sCb:SetPoint("TOPLEFT", LEFT_X, yOff)
-            yOff = yOff - 28
+            if S.db.sources[sk.key] ~= false then count = count + 1 end
         end
+        return count
     end
 
-    -- ===== Appearance Tab =====
-    do
-        local p = tabs["appearance"]
-        local yOff = 0
-
-        local themeHdr = MedaUI:CreateSectionHeader(p, "Theme")
-        themeHdr:SetPoint("TOPLEFT", LEFT_X, yOff)
-        yOff = yOff - 34
-
-        local bgCb = MedaUI:CreateCheckbox(p, "Show panel background")
-        bgCb:SetChecked(S.db.showBackground ~= false)
-        bgCb:SetPoint("TOPLEFT", LEFT_X, yOff)
+    for _, sk in ipairs(sourceKeys) do
+        local srcMeta = configData.sources[sk.key]
+        local cbLabel = srcMeta and srcMeta.url and format("%s  |cff888888(%s)|r", sk.label, srcMeta.url) or sk.label
+        local sCb = MedaUI:CreateCheckbox(parent, cbLabel)
+        sCb:SetChecked(S.db.sources[sk.key] ~= false)
+        sCb.OnValueChanged = function(_, val)
+            if not val and CountActiveSources() <= 1 then
+                sCb:SetChecked(true)
+                return
+            end
+            S.db.sources[sk.key] = val
+            RunPipeline(false)
+        end
+        sCb:SetPoint("TOPLEFT", LEFT_X, yOff)
         yOff = yOff - 28
+    end
 
-        local bgLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        bgLabel:SetPoint("TOPLEFT", LEFT_X + 16, yOff)
-        bgLabel:SetText("Background opacity:")
-        bgLabel:SetTextColor(unpack(Theme.text))
-        yOff = yOff - 18
+    return 500
+end
 
-        local bgSlider = MedaUI:CreateSlider(p, 200, 0.1, 1.0, 0.05)
-        bgSlider:SetValue(S.db.showBackground and (S.db.backgroundOpacity > 0 and S.db.backgroundOpacity or 0.8) or 0.8)
-        bgSlider:SetPoint("TOPLEFT", LEFT_X + 16, yOff)
-        bgSlider.OnValueChanged = function(_, val)
-            if S.db.showBackground then
-                S.db.backgroundOpacity = val
-                if S.coveragePanel then S.coveragePanel:SetBackgroundOpacity(val) end
-            end
-        end
+local function BuildAppearancePage(parent, moduleDB)
+    local LEFT_X, RIGHT_X = 0, 238
+    local Theme = MedaUI.Theme
+    S.db = moduleDB
 
-        bgCb.OnValueChanged = function(_, val)
-            S.db.showBackground = val
-            if val then
-                local opacity = bgSlider:GetValue()
-                S.db.backgroundOpacity = opacity
-                bgSlider:Show()
-                bgLabel:Show()
-            else
-                S.db.backgroundOpacity = 0
-                bgSlider:Hide()
-                bgLabel:Hide()
-            end
-            if S.coveragePanel then S.coveragePanel:SetBackgroundOpacity(S.db.backgroundOpacity) end
-        end
-        if not S.db.showBackground then bgSlider:Hide(); bgLabel:Hide() end
-        yOff = yOff - 48
+    local yOff = 0
+    local themeHdr = MedaUI:CreateSectionHeader(parent, "Theme")
+    themeHdr:SetPoint("TOPLEFT", LEFT_X, yOff)
+    yOff = yOff - 34
 
-        local shellHdr = MedaUI:CreateSectionHeader(p, "Workspace")
-        shellHdr:SetPoint("TOPLEFT", LEFT_X, yOff)
-        yOff = yOff - 34
+    local bgCb = MedaUI:CreateCheckbox(parent, "Show panel background")
+    bgCb:SetChecked(S.db.showBackground ~= false)
+    bgCb:SetPoint("TOPLEFT", LEFT_X, yOff)
+    yOff = yOff - 28
 
-        local shellDesc = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        shellDesc:SetPoint("TOPLEFT", LEFT_X, yOff)
-        shellDesc:SetPoint("RIGHT", p, "RIGHT", -4, 0)
-        shellDesc:SetJustifyH("LEFT")
-        shellDesc:SetWordWrap(true)
-        shellDesc:SetTextColor(unpack(Theme.textDim or { 0.6, 0.6, 0.6 }))
-        shellDesc:SetText("The new reminders window keeps navigation, activity selection, and source freshness pinned in the chrome at all times.")
-        yOff = yOff - shellDesc:GetStringHeight() - 14
+    local bgLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    bgLabel:SetPoint("TOPLEFT", LEFT_X + 16, yOff)
+    bgLabel:SetText("Background opacity:")
+    bgLabel:SetTextColor(unpack(Theme.text))
+    yOff = yOff - 18
 
-        local actionsHdr = MedaUI:CreateSectionHeader(p, "Actions")
-        actionsHdr:SetPoint("TOPLEFT", LEFT_X, yOff)
-        yOff = yOff - 34
-
-        local resetPanelBtn = MedaUI:CreateButton(p, "Reset panel position", 160)
-        resetPanelBtn:SetPoint("TOPLEFT", LEFT_X, yOff)
-        resetPanelBtn.OnClick = function()
-            if S.coveragePanel then
-                S.coveragePanel:ClearAllPoints()
-                S.coveragePanel:SetPoint("RIGHT", UIParent, "RIGHT", -50, 0)
-                S.coveragePanel:SetSize(1120, 720)
-                S.db.panelPoint = nil
-                S.db.panelWidth = 1120
-                S.db.panelHeight = 720
-            end
-        end
-
-        local openBtn = MedaUI:CreateButton(p, "Open Reminders", 160)
-        openBtn:SetPoint("TOPLEFT", RIGHT_X, yOff)
-        openBtn.OnClick = function()
-            S.dismissed = false
-            if S.coveragePanel then
-                S.coveragePanel:ClearDismissed()
-                RunPipeline(false)
-                S.coveragePanel:Show()
-                S.coveragePanel:Raise()
-            end
+    local bgSlider = MedaUI:CreateSlider(parent, 200, 0.1, 1.0, 0.05)
+    bgSlider:SetValue(S.db.showBackground and (S.db.backgroundOpacity > 0 and S.db.backgroundOpacity or 0.8) or 0.8)
+    bgSlider:SetPoint("TOPLEFT", LEFT_X + 16, yOff)
+    bgSlider.OnValueChanged = function(_, val)
+        if S.db.showBackground then
+            S.db.backgroundOpacity = val
+            if S.coveragePanel then S.coveragePanel:SetBackgroundOpacity(val) end
         end
     end
 
-    MedaAuras:SetContentHeight(500)
+    bgCb.OnValueChanged = function(_, val)
+        S.db.showBackground = val
+        if val then
+            local opacity = bgSlider:GetValue()
+            S.db.backgroundOpacity = opacity
+            bgSlider:Show()
+            bgLabel:Show()
+        else
+            S.db.backgroundOpacity = 0
+            bgSlider:Hide()
+            bgLabel:Hide()
+        end
+        if S.coveragePanel then S.coveragePanel:SetBackgroundOpacity(S.db.backgroundOpacity) end
+    end
+    if not S.db.showBackground then bgSlider:Hide(); bgLabel:Hide() end
+    yOff = yOff - 48
+
+    local shellHdr = MedaUI:CreateSectionHeader(parent, "Workspace")
+    shellHdr:SetPoint("TOPLEFT", LEFT_X, yOff)
+    yOff = yOff - 34
+
+    local shellDesc = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    shellDesc:SetPoint("TOPLEFT", LEFT_X, yOff)
+    shellDesc:SetPoint("RIGHT", parent, "RIGHT", -4, 0)
+    shellDesc:SetJustifyH("LEFT")
+    shellDesc:SetWordWrap(true)
+    shellDesc:SetTextColor(unpack(Theme.textDim or { 0.6, 0.6, 0.6 }))
+    shellDesc:SetText("The new reminders window keeps navigation, activity selection, and source freshness pinned in the chrome at all times.")
+    yOff = yOff - shellDesc:GetStringHeight() - 14
+
+    local actionsHdr = MedaUI:CreateSectionHeader(parent, "Actions")
+    actionsHdr:SetPoint("TOPLEFT", LEFT_X, yOff)
+    yOff = yOff - 34
+
+    local resetPanelBtn = MedaUI:CreateButton(parent, "Reset panel position", 160)
+    resetPanelBtn:SetPoint("TOPLEFT", LEFT_X, yOff)
+    resetPanelBtn.OnClick = function()
+        if S.coveragePanel then
+            S.coveragePanel:ClearAllPoints()
+            S.coveragePanel:SetPoint("RIGHT", UIParent, "RIGHT", -50, 0)
+            S.coveragePanel:SetSize(1120, 720)
+            S.db.panelPoint = nil
+            S.db.panelWidth = 1120
+            S.db.panelHeight = 720
+        end
+    end
+
+    local openBtn = MedaUI:CreateButton(parent, "Open Reminders", 160)
+    openBtn:SetPoint("TOPLEFT", RIGHT_X, yOff)
+    openBtn.OnClick = function()
+        S.dismissed = false
+        if S.coveragePanel then
+            S.coveragePanel:ClearDismissed()
+            RunPipeline(false)
+            S.coveragePanel:Show()
+            S.coveragePanel:Raise()
+        end
+    end
+
+    return 500
+end
+
+local function BuildPage(pageName, parent)
+    local moduleDB = S.db or MedaAuras:GetModuleDB(MODULE_NAME)
+    if pageName == "tracking" then
+        BuildTrackingPage(parent, moduleDB)
+    elseif pageName == "sources" then
+        BuildSourcesPage(parent, moduleDB)
+    elseif pageName == "appearance" then
+        BuildAppearancePage(parent, moduleDB)
+    end
     RunPreview()
+    return 500
 end
 
 -- ============================================================================
@@ -1140,7 +1146,17 @@ MedaAuras:RegisterModule({
     OnInitialize  = OnInitialize,
     OnEnable      = OnEnable,
     OnDisable     = OnDisable,
-    BuildConfig   = BuildConfig,
+    pages         = {
+        { id = "tracking", label = "Tracking" },
+        { id = "sources", label = "Sources" },
+        { id = "appearance", label = "Appearance" },
+    },
+    pageHeights   = {
+        tracking = 500,
+        sources = 500,
+        appearance = 500,
+    },
+    buildPage     = BuildPage,
     slashCommands = slashCommands,
 })
 

@@ -1,6 +1,6 @@
 local ADDON_NAME, ns = ...
 
-local MedaUI = LibStub("MedaUI-1.0")
+local MedaUI = LibStub("MedaUI-2.0")
 local Pixel = MedaUI.Pixel
 local Serializer = (LibStub and LibStub.GetLibrary and LibStub:GetLibrary("LibSerialize", true)) or _G.LibSerialize
 local LibDeflate = (LibStub and LibStub.GetLibrary and LibStub:GetLibrary("LibDeflate", true)) or _G.LibDeflate

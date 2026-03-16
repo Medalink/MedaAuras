@@ -1,0 +1,48 @@
+{
+  "$schema": "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json",
+  "runtime": {
+    "version": "Lua 5.1",
+    "special": {
+      "reload": "ReloadUI"
+    }
+  },
+  "workspace": {
+    "library": [
+      "../wow-tools/lua-stubs/meda",
+      "../wow-tools/lua-stubs/wow-retail-full",
+      "../wow-tools/lua-stubs/wow-retail-ui",
+      "../wow-tools/lua-stubs/wow-api",
+      "Libs/MedaUI",
+    ],
+    "checkThirdParty": false,
+    "useGitIgnore": true,
+    "maxPreload": 5000,
+    "preloadFileSize": 500
+  },
+  "diagnostics": {
+    "globals": [
+      "MedaAuras",
+      "MedaAurasDB",
+      "MedaAurasCharDB",
+      "MedaAuras_CreatureVO",
+      "MedaAurasSettingsPanel",
+      "SLASH_MEDAAURAS1",
+      "SLASH_MEDAAURAS2",
+      "SLASH_MEDAREMINDERS1",
+      "BINDING_HEADER_MEDAAURAS",
+      "BINDING_NAME_CLICK_MedaAurasLazyCast1_LeftButton",
+      "BINDING_NAME_CLICK_MedaAurasLazyCast2_LeftButton"
+    ]
+  },
+  "hint": {
+    "enable": true,
+    "arrayIndex": "Disable"
+  },
+  "completion": {
+    "callSnippet": "Replace",
+    "displayContext": 2
+  },
+  "format": {
+    "enable": false
+  }
+}

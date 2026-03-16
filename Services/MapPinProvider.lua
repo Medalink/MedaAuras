@@ -1,24 +1,79 @@
 local _, ns = ...
 
 local pairs = pairs
-local ipairs = ipairs
 local wipe = wipe
 local CreateFrame = CreateFrame
 local C_Timer = C_Timer
+
+local MAP_PIN_TEMPLATE = "MedaMapPinTemplate"
 
 local MapPinProvider = {}
 ns.Services.MapPinProvider = MapPinProvider
 
 local groups = {}
 local dataProvider
-local pinPool = {}
-local activePins = {}
 local refreshPending = false
 local initFrame
-local MedaMapDataProviderMixin
+local mapHooksInstalled = false
+
+MedaMapPinMixin = CreateFromMixins(MapCanvasPinMixin)
+
+function MedaMapPinMixin:OnLoad()
+    self:UseFrameLevelType("PIN_FRAME_LEVEL_AREA_POI")
+    self:SetScalingLimits(1, 1, 1)
+end
+
+function MedaMapPinMixin:OnAcquired(groupId, pinId, pinData, config)
+    self.groupId = groupId
+    self.pinId = pinId
+    self.data = pinData
+    self.tooltipFunc = config and config.tooltipFunc or nil
+
+    local iconPath = (pinData and pinData.icon) or (config and config.icon) or "Interface\\Minimap\\ObjectIconsAtlas"
+    local iconSize = (config and config.iconSize) or 16
+
+    self:SetSize(iconSize, iconSize)
+    self.icon:SetTexture(iconPath)
+    self.icon:SetTexCoord(0, 1, 0, 1)
+    self:SetPosition(pinData.x, pinData.y)
+    self:Show()
+end
+
+function MedaMapPinMixin:OnReleased()
+    GameTooltip:Hide()
+    self.groupId = nil
+    self.pinId = nil
+    self.data = nil
+    self.tooltipFunc = nil
+end
+
+function MedaMapPinMixin:OnMouseEnter()
+    if not self.tooltipFunc then
+        return
+    end
+
+    if WorldMap_HijackTooltip then
+        WorldMap_HijackTooltip(self:GetMap())
+    else
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    end
+
+    self.tooltipFunc(self)
+    GameTooltip:Show()
+end
+
+function MedaMapPinMixin:OnMouseLeave()
+    GameTooltip:Hide()
+    if WorldMap_ResetTooltip then
+        WorldMap_ResetTooltip(self:GetMap())
+    end
+end
 
 local function ScheduleRefresh()
-    if refreshPending then return end
+    if refreshPending then
+        return
+    end
+
     refreshPending = true
     C_Timer.After(0, function()
         refreshPending = false
@@ -26,6 +81,15 @@ local function ScheduleRefresh()
             dataProvider:RefreshAllData()
         end
     end)
+end
+
+local function InstallMapHooks()
+    if mapHooksInstalled or not WorldMapFrame then
+        return
+    end
+
+    mapHooksInstalled = true
+    WorldMapFrame:HookScript("OnShow", ScheduleRefresh)
 end
 
 local function TryInitialize()
@@ -39,14 +103,20 @@ local function TryInitialize()
 
     dataProvider = CreateFromMixins(MedaMapDataProviderMixin)
     WorldMapFrame:AddDataProvider(dataProvider)
-    MedaAuras.LogDebug("[MapPinProvider] Initialized, data provider registered with WorldMapFrame")
+    InstallMapHooks()
     ScheduleRefresh()
     return true
 end
 
 function MapPinProvider:RegisterPinGroup(groupId, config)
     TryInitialize()
-    if groups[groupId] then return end
+
+    if groups[groupId] then
+        groups[groupId].config = config or groups[groupId].config or {}
+        ScheduleRefresh()
+        return
+    end
+
     groups[groupId] = {
         config = config or {},
         pins = {},
@@ -57,7 +127,10 @@ end
 function MapPinProvider:SetPin(groupId, pinId, data)
     TryInitialize()
     local group = groups[groupId]
-    if not group then return end
+    if not group then
+        return
+    end
+
     group.pins[pinId] = data
     ScheduleRefresh()
 end
@@ -65,7 +138,10 @@ end
 function MapPinProvider:RemovePin(groupId, pinId)
     TryInitialize()
     local group = groups[groupId]
-    if not group then return end
+    if not group then
+        return
+    end
+
     group.pins[pinId] = nil
     ScheduleRefresh()
 end
@@ -73,7 +149,10 @@ end
 function MapPinProvider:ClearGroup(groupId)
     TryInitialize()
     local group = groups[groupId]
-    if not group then return end
+    if not group then
+        return
+    end
+
     wipe(group.pins)
     ScheduleRefresh()
 end
@@ -86,7 +165,10 @@ end
 function MapPinProvider:SetGroupVisible(groupId, visible)
     TryInitialize()
     local group = groups[groupId]
-    if not group then return end
+    if not group then
+        return
+    end
+
     group.visible = visible
     ScheduleRefresh()
 end
@@ -97,83 +179,34 @@ function MapPinProvider:UnregisterPinGroup(groupId)
     ScheduleRefresh()
 end
 
-local function AcquirePin(owner)
-    local pin = table.remove(pinPool)
-    if not pin then
-        pin = CreateFrame("Frame", nil, owner)
-        pin.icon = pin:CreateTexture(nil, "ARTWORK")
-        pin.icon:SetAllPoints()
-        pin:EnableMouse(true)
-        pin:SetScript("OnEnter", function(self)
-            if self.tooltipFunc then
-                GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                self.tooltipFunc(self)
-                GameTooltip:Show()
-            end
-        end)
-        pin:SetScript("OnLeave", function()
-            GameTooltip:Hide()
-        end)
-    end
-    pin:SetParent(owner)
-    pin:Show()
-    return pin
-end
-
-local function ReleasePin(pin)
-    pin:Hide()
-    pin:ClearAllPoints()
-    pin:SetParent(nil)
-    pin.tooltipFunc = nil
-    pin.data = nil
-    pin.groupId = nil
-    pin.pinId = nil
-    pinPool[#pinPool + 1] = pin
-end
-
-local function ReleaseAllPins()
-    for _, pin in ipairs(activePins) do
-        ReleasePin(pin)
-    end
-    wipe(activePins)
-end
-
 MedaMapDataProviderMixin = CreateFromMixins(MapCanvasDataProviderMixin)
 
 function MedaMapDataProviderMixin:RemoveAllData()
-    ReleaseAllPins()
+    local map = self:GetMap()
+    if map then
+        map:RemoveAllPinsByTemplate(MAP_PIN_TEMPLATE)
+    end
 end
 
-function MedaMapDataProviderMixin:RefreshAllData(fromOnShow)
+function MedaMapDataProviderMixin:RefreshAllData()
     self:RemoveAllData()
 
-    local mapFrame = self:GetMap()
-    if not mapFrame then return end
+    local map = self:GetMap()
+    if not map then
+        return
+    end
 
-    local currentMapID = mapFrame:GetMapID()
-    if not currentMapID then return end
+    local currentMapID = map:GetMapID()
+    if not currentMapID then
+        return
+    end
 
     for groupId, group in pairs(groups) do
         if group.visible then
-            local cfg = group.config
-            local iconPath = cfg.icon or "Interface\\Minimap\\ObjectIconsAtlas"
-            local iconSize = cfg.iconSize or 16
-
+            local cfg = group.config or {}
             for pinId, pinData in pairs(group.pins) do
                 if pinData.mapID == currentMapID and pinData.x and pinData.y then
-                    local pin = AcquirePin(mapFrame:GetCanvas())
-                    pin:SetSize(iconSize, iconSize)
-                    pin.icon:SetTexture(pinData.icon or iconPath)
-                    pin.icon:SetTexCoord(0, 1, 0, 1)
-                    pin.data = pinData
-                    pin.groupId = groupId
-                    pin.pinId = pinId
-                    pin.tooltipFunc = cfg.tooltipFunc
-
-                    mapFrame:SetPinPosition(pin, pinData.x, pinData.y)
-                    pin:SetFrameStrata("HIGH")
-
-                    activePins[#activePins + 1] = pin
+                    map:AcquirePin(MAP_PIN_TEMPLATE, groupId, pinId, pinData, cfg)
                 end
             end
         end

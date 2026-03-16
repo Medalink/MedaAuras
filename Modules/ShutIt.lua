@@ -1,6 +1,6 @@
 local _, ns = ...
 
-local MedaUI = LibStub("MedaUI-1.0")
+local MedaUI = LibStub("MedaUI-2.0")
 local Pixel = MedaUI.Pixel
 
 local format = format
@@ -56,6 +56,7 @@ local selectedNPCID
 local detailWidgets = {}
 local sidebarButtons = {}
 local sidebarScroll, sidebarContent
+local UpdateIndicatorCount, ShowExplorerForNPC
 
 local talkingHeadHooked = false
 
@@ -403,7 +404,7 @@ end
 -- Live Capture
 -- ============================================================================
 
-local function UpdateIndicatorCount()
+UpdateIndicatorCount = function()
     if indicatorFrame and indicatorFrame:IsShown() then
         indicatorFrame.countText:SetText(blockedCount .. " blocked")
     end
@@ -1161,7 +1162,7 @@ ShowExportImportPopup = function(mode, text)
     end
 end
 
-local function ShowExplorerForNPC(npcID)
+ShowExplorerForNPC = function(npcID)
     if not explorerPanel then return end
     selectedNPCID = npcID
     if not explorerPanel:IsShown() then
@@ -1399,7 +1400,7 @@ local MODULE_DEFAULTS = {
 -- Settings Panel (BuildConfig)
 -- ============================================================================
 
-local function BuildConfig(parent, moduleDB)
+local function BuildSettingsPage(parent, moduleDB)
     db = moduleDB
     local yOff = 0
 
@@ -1575,6 +1576,12 @@ MedaAuras:RegisterModule({
         RebuildNameLookup()
         StopLiveCapture()
     end,
-    BuildConfig   = BuildConfig,
+    pages         = {
+        { id = "settings", label = "Settings" },
+    },
+    buildPage     = function(_, parent)
+        BuildSettingsPage(parent, MedaAuras:GetModuleDB(MODULE_NAME))
+        return 820
+    end,
     slashCommands = slashCommands,
 })

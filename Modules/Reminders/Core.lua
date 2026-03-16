@@ -50,7 +50,7 @@ local S = R.state or {
 }
 R.state = S
 
-local MedaUI = LibStub("MedaUI-1.0")
+local MedaUI = LibStub("MedaUI-2.0")
 
 local GetPreferredStats
 local FindPlayerBuff
@@ -1254,7 +1254,10 @@ local function RenderPlayerTab(content)
             row:SetPoint("TOPLEFT", content, "TOPLEFT", 0, yOff)
             row:SetPoint("RIGHT", content, "RIGHT", 0, 0)
 
-            local icon = DANGER_ICONS[d.type] or DANGER_ICONS[d.capability] or DANGER_ICON_DEFAULT
+            local icon = (type(d.icon) == "number" and d.icon > 0 and d.icon)
+                or DANGER_ICONS[d.type]
+                or DANGER_ICONS[d.capability]
+                or DANGER_ICON_DEFAULT
             row:SetIcon(icon)
             local mechLabel = d.mechanic or "Unknown"
             local dispelHex = d.capability and DISPEL_COLORS[d.capability]
@@ -1307,6 +1310,18 @@ local function RenderPlayerTab(content)
                 end
                 if d.source then tip:AddLine("Source: " .. d.source, 0.87, 0.67, 0.27) end
                 if d.encounter and d.encounter ~= "" then tip:AddLine("Encounter: " .. d.encounter, 0.6, 0.6, 0.6) end
+                if d.dispelType and d.dispelType ~= "" then tip:AddLine("Dispel Type: " .. d.dispelType, 0.4, 0.7, 1.0) end
+                if d.rangeText and d.rangeText ~= "" then tip:AddLine("Range: " .. d.rangeText, 0.75, 0.75, 0.75) end
+                if d.castTimeMS ~= nil then
+                    local castText = d.castTimeMS <= 0 and "Instant" or format("%.1fs", d.castTimeMS / 1000)
+                    tip:AddLine("Cast: " .. castText, 0.75, 0.75, 0.75)
+                end
+                if d.cooldownMS and d.cooldownMS > 0 then
+                    tip:AddLine("Cooldown: " .. format("%.1fs", d.cooldownMS / 1000), 0.75, 0.75, 0.75)
+                end
+                if d.spellMechanic and d.spellMechanic ~= "" then
+                    tip:AddLine("Mechanic: " .. d.spellMechanic, 0.75, 0.75, 0.75)
+                end
                 tip:AddLine(" ")
                 if d.tip then tip:AddLine(d.tip, 1, 1, 1, true) end
                 if d.response and RESPONSE_TEXT[d.response] then

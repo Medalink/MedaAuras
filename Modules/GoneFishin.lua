@@ -1,6 +1,6 @@
 local _, ns = ...
 
-local MedaUI = LibStub("MedaUI-1.0")
+local MedaUI = LibStub("MedaUI-2.0")
 local Pixel = MedaUI.Pixel
 
 local format = format
@@ -89,6 +89,7 @@ local selectedFavoriteId = nil
 local activeWaypointFavoriteId = nil
 local RefreshMapFavoritesList
 local ShowHUD, HideHUD
+local EndSession, CancelSessionTimeout, ShowExportWindow
 
 local checklistScroll, checklistContent
 local checklistRows = {}
@@ -830,8 +831,8 @@ local function SyncMapPins()
     if not MapPins then return end
 
     MapPins:RegisterPinGroup("GoneFishin_Favorites", {
-        icon = "Interface\\Icons\\Trade_Fishing",
-        iconSize = 20,
+        icon = "Interface\\AddOns\\MedaAuras\\Media\\Textures\\gonefishin-pin",
+        iconSize = 42,
         tooltipFunc = function(pin)
             GameTooltip:AddLine(pin.data.label or "Fishing Spot", 0.9, 0.7, 0.15)
             GameTooltip:AddLine(format("Pool catches: %d", pin.data.poolCatches or 0), 1, 1, 1)
@@ -1657,7 +1658,7 @@ local function RestoreSession()
     currentStreak = s.streak or 0
 end
 
-local function EndSession()
+EndSession = function()
     if not sessionActive then return end
     sessionActive = false
     if fishingStartTime > 0 then
@@ -1668,7 +1669,7 @@ local function EndSession()
     if db then db.currentSession = nil end
 end
 
-local function CancelSessionTimeout()
+CancelSessionTimeout = function()
     if sessionTimer then
         sessionTimer:Cancel()
         sessionTimer = nil
@@ -2618,7 +2619,7 @@ end
 -- Settings Panel (BuildConfig)
 -- ============================================================================
 
-local function BuildConfig(parent, moduleDB)
+local function BuildSettingsPage(parent, moduleDB)
     local LEFT_X, RIGHT_X = 0, 238
     db = moduleDB
 
@@ -2639,6 +2640,23 @@ local function BuildConfig(parent, moduleDB)
         { id = "map",  label = "Map" },
         { id = "data", label = "Data" },
     })
+    local baseTabChanged = tabBar.OnTabChanged
+    tabBar.OnTabChanged = function(self, tabId, previousTabId)
+        if baseTabChanged then
+            baseTabChanged(self, tabId, previousTabId)
+        end
+
+        if tabId == "map" then
+            C_Timer.After(0, function()
+                if RefreshMapFavoritesList then
+                    RefreshMapFavoritesList()
+                end
+                if mapFavoritesList then
+                    mapFavoritesList:Refresh()
+                end
+            end)
+        end
+    end
 
     -- ===== HUD Tab =====
     do
@@ -2952,6 +2970,7 @@ local function BuildConfig(parent, moduleDB)
             end
 
             mapFavoritesList:SetData(entries)
+            mapFavoritesList:Refresh()
 
             local activeFav = activeWaypointFavoriteId and moduleDB.favorites[activeWaypointFavoriteId] or nil
             local count = #entries
@@ -3387,7 +3406,7 @@ local function BuildExportString()
     return "GoneFishinExport = " .. SerializeTable(exportData)
 end
 
-local function ShowExportWindow()
+ShowExportWindow = function()
     if not exportFrame then
         exportFrame = MedaUI:CreateImportExportDialog({
             width = 600,
@@ -3727,6 +3746,12 @@ MedaAuras:RegisterModule({
     OnInitialize  = OnInitialize,
     OnEnable      = OnEnable,
     OnDisable     = OnDisable,
-    BuildConfig   = BuildConfig,
+    pages         = {
+        { id = "settings", label = "Settings" },
+    },
+    buildPage     = function(_, parent)
+        BuildSettingsPage(parent, MedaAuras:GetModuleDB(MODULE_NAME))
+        return 980
+    end,
     slashCommands = slashCommands,
 })
