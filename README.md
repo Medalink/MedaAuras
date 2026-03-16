@@ -11,83 +11,57 @@
 - 🧩 **Modular architecture** — each feature is an independent mini-addon with its own settings
 - 🔇 **Error isolation** — one module crashing won't break the rest
 - 🎨 **MedaUI integration** — consistent, clean settings interface
-- ⚙️ **Per-module config** — sidebar navigation with enable/disable checkboxes
+- ⚙️ **Per-module config** — shared sidebar navigation with enable/disable toggles and module settings pages
+- 📦 **Custom module import** — validate and install standalone MedaAuras module packages directly from the built-in Import page or `/mwa import`
 
 ### Focus Interrupt Helper
 
-- 🟢 **Color-coded interrupt status** — green (in range + ready), red (out of range), orange (on cooldown)
-- 🎯 **Focus priority** — checks focus target first, falls back to current target (or focus-only mode)
-- 🔄 **Three display modes:**
-  - **Standalone Icon** — draggable icon with cooldown timer
-  - **Action Bar Overlay** — color wash on your existing bar button
-  - **Auto-Detect (CD Hook)** — hooks button updates for reliable detection (ElvUI compatible)
-- 📊 **CDM overlay** — also colors your interrupt in Blizzard's CooldownViewer
-- ⏱️ **Self-tracking cooldown** — bypasses Blizzard's "secret values" restriction with its own timer
-- 🐾 **Warlock pet support** — detects Spell Lock, Axe Toss, and Grimoire: Fel Ravager including button morphing
-- 🎨 **Fully customizable** colors, icon size, overlay opacity & cosmetic icon override
+- 🎯 **Smarter interrupt glow** — highlights your kick based on whether your focus or target is in range and whether the spell is ready
+- 🪟 **Multiple display styles** — use a movable standalone icon or color your existing action bar button instead
+- 🐾 **Class support** — works with normal interrupts and warlock pet kicks, with simple color and icon customization
+
+### Interrupted
+
+- 🚫 **Party interrupt tracker** — shows your kick and your party's kicks in one list so you can see who is ready
+- ⏱️ **Clear cooldown bars** — each player gets a class-colored timer with an optional `READY` state when their interrupt comes back
+- 🪟 **Easy to place** — move, resize, and show it only where you want, including dungeons, raids, arena, or open world
 
 ### Gone Fishin'
 
-- 🎣 **Three-panel HUD** — left (zone & session stats), right (zone fish checklist), and bottom (favorites, best spot, lure tips) panels appear while fishing; each panel can be dragged independently and remembers its position
-- 🔒 **Lock / unlock** — panels are locked by default to prevent accidental moves; unlock from settings to reposition, then re-lock
-- 🐟 **Zone fish checklist** — live checklist of every fish available in the current zone with quality-colored names and lifetime counts; scrolls via mouse wheel when more than 6 are caught
-- 📂 **Collapsible junk & missing** — `[+] Junk` and `[+] Missing` sections sit below the fish list and expand on click to show junk items caught in the zone or fish you haven't caught yet (dimmed/desaturated)
-- ⭐ **Favorite spots** — mark any fishing location as a favorite with world map pins and distance indicator on the HUD
-- 🏆 **Best spot tracking** — automatically surfaces the zone with the most fishing pool catches
-- 🧪 **Lure hints** — HUD suggests lures for uncaught fish in your current zone
-- 📊 **Stats window** — draggable panel with three tabs:
-  - **Overview** — total caught, casts, catch rate, time fished, fish/hour, longest streak, rarest catch, unique count
-  - **Collection** — Midnight Pokedex with per-category progress bars (Fish, Lures, Treasures, Lines, Rods, Recipes) plus dynamic "Other Catches" section; sort, search, and rich hover tooltips with zone/pool/rarity data
-  - **Zones** — expandable zone rows with subzone breakdowns and favorite buttons
-- 🗺️ **Map pins** — favorite fishing spots appear on the world map
-- 📤 **Export** — dump discovery data for crowd-sourcing static datasets
-- 🔄 **Versioned migrations** — SavedVariables safely upgraded across addon updates, never losing data
+- 🎣 **Fishing HUD** — shows zone info, session totals, fish checklist, favorite spot info, and lure tips while you fish
+- ⭐ **Collection tools** — save favorite fishing spots, track your best zones, and see them on the world map
+- 📊 **Full fishing journal** — browse overview, collection, and zone stats in a separate window, with export support for your data
 
 ### Group Mana Tracker
 
-- 💧 **Healer mana at a glance** — shows mana for every healer in your party or raid
-- 🧊 **Druid form aware** — remembers last known mana when druids shapeshift instead of showing zero
-- 🍺 **Drinking alert** — configurable banner with countdown bar when a healer starts drinking, with optional sound
-- 🔒 **Taint safe** — displays secret mana values directly without breaking in M+ or restricted contexts
+- 💧 **Healer mana list** — keeps healer mana visible in party and raid so you can check recovery at a glance
+- 🍺 **Drinking alerts** — pops a clear warning when a healer starts drinking, with optional sound and countdown bar
+- 🎨 **Readable layout** — move the frame, resize it, and tune icons, text, colors, and spacing to fit your UI
 
 ### Lazy Cast
 
-- 🎯 **Role-based auto-targeting** — cast spells on tank, healer, DPS, pet, or self without changing your current target
-- 🔢 **Two configurable slots** — each slot pairs a spell with a target role; auto-creates a macro you drag to your action bar
-- 🐾 **Pet support** — targets your own pet first, then scans group/raid for other players' pets (hunters, warlocks, etc.)
-- 🛡️ **Dead-target fallback** — automatically skips dead group members and picks the next alive player in that role
-- 💚 **Self-cast fallback** — optional per-slot toggle for healers who want the spell to land on themselves when no role target is available (off by default to prevent accidental self-casts)
+- 🎯 **Role-based casting** — cast on tank, healer, DPS, pet, or self without changing your main target
+- ✨ **Great for support spells** — ideal for spells like `Power Infusion` or `Misdirection` when you want them to snap to the right target fast
+- 🔢 **Two quick slots** — set up two spell slots and place their generated macros straight onto your action bars
+- ⭐ **Preferred targets** — save favorite players for each slot and optionally fall back to self when no match is available
 
 ### Mana Tracker
 
-- 🔵 **Always-visible mana display** — shows your current mana regardless of combat state or druid form
-- 🛡️ **Secret value safe** — handles WoW 12.0+ secret numbers without crashing
-- 📊 **Bar or Orb** — two display styles, fully customizable colors, textures, and sizing
+- 🔵 **Always-on mana display** — keeps your mana visible even when the default UI would normally hide it
+- 📊 **Bar or orb mode** — choose the style that fits your UI, then adjust size, orientation, textures, and text
+- 🪟 **Simple positioning** — move it, lock it, and customize colors, borders, and labels without extra setup
 
 ### Reminders
 
-- 📊 **Four-tab panel** — draggable, resizable coverage panel with auto-show on instance entry:
-  - **You** — personal instance briefing with key dangers, bloodlust timings, and class-specific talent tips for the current dungeon
-  - **Group Comp** — live dispel matrix and utility audit with severity-coded rows
-  - **Talents** — top talent builds, hero talents, stat weights, gear, enchants, consumables, and trinkets with one-click export copy
-  - **Prep** — pre-key checklist with affix summary and recommended consumables/enchants
-- 💊 **Dispel coverage** — tracks Curse, Poison, Disease, and Magic removal across your group with per-type toggles
-- ⚔️ **Utility tracking** — monitors Bloodlust, Battle Res, Purge/Spellsteal, Enrage removal (Soothe), and Group Stealth (Shroud)
-- 🏰 **Full dungeon database** — 12 Midnight dungeons with per-dungeon dangers, dispel priorities, interrupt priorities, and encounter-specific tips
-- 🕳️ **Delve support** — context-aware recommendations for all Midnight delves
-- 🔮 **Rules engine** — dungeon-specific severity overrides and affix-aware boosts that adjust coverage priorities per instance
-- 🔔 **Notification banners** — severity-gated alerts (critical/warning/info) with adjustable duration when entering instances with coverage gaps
-- 🗺️ **Context override** — test your group against any dungeon or delve from the dropdown; preview mode with a fake group for testing without zoning in
+- 📊 **All-in-one prep panel** — a four-tab window for personal reminders, group coverage, talent suggestions, and pre-key prep
+- ⚔️ **Group coverage checks** — highlights missing dispels, utility, and important interrupts for your current party
+- 🗺️ **Dungeon and delve help** — auto-shows in instances and lets you preview other dungeons, delves, classes, roles, and specs from the toolbar
 
 ### Shut It
 
-- 🔇 **One-click NPC silencing** — target an NPC and click the minimap button to instantly mute their chat messages and talking head dialog; no confirmation step, takes effect immediately
-- 🎯 **Live capture** — runs in the background during delves, dungeons, and open world; logs every message the NPC tries to say while suppressing it in real-time
-- 📋 **NPC Explorer** — browse and manage all silenced NPCs in a list/detail panel; search by name or NPC ID to add entries manually without needing to target the NPC in-game
-- 🔊 **Automatic voice-over muting** — embeds a database of creature voice-over FileDataIDs built from the community listfile; when you silence an NPC, matching voice files are looked up and muted instantly via `MuteSoundFile` with no manual ID entry needed
-- 🔍 **Manual sound ID support** — add individual Sound FileIDs or SoundKit IDs per NPC for anything the auto-lookup misses, with per-entry play and remove buttons; wago.tools URL auto-generated for manual lookup
-- 🗣️ **Talking head suppression** — automatically hides the talking head frame and kills the voice-over audio for silenced NPCs
-- 📤 **Export / Import** — share your silenced NPC list with friends via a copyable string; per-NPC or export-all, with a paste-to-import popup
+- 🔇 **Silence annoying NPCs** — target an NPC and mute their chat, talking heads, and voice lines with one click
+- 📋 **NPC Explorer** — manage your muted list in a dedicated panel and add NPCs by name or ID when needed
+- 📤 **Share and fine-tune** — export or import mute lists and add manual sound IDs for anything the automatic mute misses
 ---
 
 ## 🚀 Quick Start
@@ -95,6 +69,10 @@
 ```
 /mwa          → Open settings panel
 /mauras       → Open settings panel (alias)
+/mwa import   → Open custom module import dialog
+/mwa lock     → Lock movable addon frames
+/mwa unlock   → Unlock movable addon frames
+/mr           → Open the Reminders panel
 ```
 
 ---
