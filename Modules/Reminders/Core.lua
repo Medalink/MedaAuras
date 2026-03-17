@@ -499,42 +499,99 @@ local function BuildViewerRoster(profile)
     return roster
 end
 
+local function BuildProviderMatch(member, provider, extra)
+    local record = {
+        unit = member.unit or "player",
+        name = member.name or "Unknown",
+        class = member.class,
+        specID = member.specID,
+        spellID = provider.spellID,
+        spellName = provider.spellName,
+        note = provider.note,
+        icon = provider.icon,
+        rangeText = provider.rangeText,
+        castTimeMS = provider.castTimeMS,
+        cooldownMS = provider.cooldownMS,
+        dispelTargets = provider.dispelTargets,
+        talentSpellID = provider.talentSpellID,
+    }
+
+    if extra then
+        for key, value in pairs(extra) do
+            record[key] = value
+        end
+    end
+
+    return record
+end
+
+local function RosterMemberHasProvider(member, provider, profile)
+    if not member or not provider then return false end
+
+    if member.isPlayer then
+        if profile and profile.isLive then
+            local spellID = provider.talentSpellID or provider.spellID
+            return spellID and IsPlayerSpell and IsPlayerSpell(spellID) or false
+        end
+        return true
+    end
+
+    if provider.talentSpellID then
+        local GroupInspector = ns.Services.GroupInspector
+        return GroupInspector and GroupInspector.UnitHasTalentSpell
+            and GroupInspector:UnitHasTalentSpell(member.unit, provider.talentSpellID)
+            or false
+    end
+
+    return true
+end
+
+local function RosterMemberCanTalentProvider(member, provider, profile)
+    if not member or not provider or not provider.talentSpellID then
+        return false, false
+    end
+
+    if member.isPlayer then
+        if profile and profile.isLive then
+            return not (IsPlayerSpell and IsPlayerSpell(provider.talentSpellID) or false), true
+        end
+        return true, true
+    end
+
+    local GroupInspector = ns.Services.GroupInspector
+    local info = GroupInspector and GroupInspector.GetUnitInfo and GroupInspector:GetUnitInfo(member.unit) or nil
+    local hasTalent = GroupInspector and GroupInspector.UnitHasTalentSpell
+        and GroupInspector:UnitHasTalentSpell(member.unit, provider.talentSpellID)
+        or false
+    return not hasTalent, info and info.talentsKnown or false
+end
+
 local function QueryProvidersForRoster(providersList, roster, profile)
-    if not providersList then return {} end
+    if not providersList then return {}, {} end
     local matches = {}
+    local potentialMatches = {}
 
     for _, member in ipairs(roster or {}) do
         for _, provider in ipairs(providersList) do
             if member.class == provider.class then
                 local specMatch = (provider.specID == nil) or (member.specID == provider.specID)
                 if specMatch then
-                    local hasSpell = true
-                    if member.isPlayer and profile and profile.isLive then
-                        hasSpell = provider.spellID and IsPlayerSpell and IsPlayerSpell(provider.spellID) or false
-                    end
-
-                    if hasSpell then
-                        matches[#matches + 1] = {
-                            unit = member.unit or "player",
-                            name = member.name or "Unknown",
-                            class = member.class,
-                            specID = member.specID,
-                            spellID = provider.spellID,
-                            spellName = provider.spellName,
-                            note = provider.note,
-                            icon = provider.icon,
-                            rangeText = provider.rangeText,
-                            castTimeMS = provider.castTimeMS,
-                            cooldownMS = provider.cooldownMS,
-                            dispelTargets = provider.dispelTargets,
-                        }
+                    if RosterMemberHasProvider(member, provider, profile) then
+                        matches[#matches + 1] = BuildProviderMatch(member, provider)
+                    else
+                        local canTalent, talentsKnown = RosterMemberCanTalentProvider(member, provider, profile)
+                        if canTalent then
+                            potentialMatches[#potentialMatches + 1] = BuildProviderMatch(member, provider, {
+                                talentsKnown = talentsKnown,
+                            })
+                        end
                     end
                 end
             end
         end
     end
 
-    return matches
+    return matches, potentialMatches
 end
 
 local function Evaluate()
@@ -566,7 +623,7 @@ local function Evaluate()
                     elseif IsCapabilityEnabled(capability) then
                         seenCapabilities[capID] = true
 
-                        local matches = QueryProvidersForRoster(capability.providers, roster, viewerProfile)
+                        local matches, potentialMatches = QueryProvidersForRoster(capability.providers, roster, viewerProfile)
                         local matchCount = #matches
                         local conditionKey = ResolveConditionKey(capability, matchCount)
                         local output = MergeOutput(capability, check, conditionKey)
@@ -581,6 +638,7 @@ local function Evaluate()
                             capability   = capability,
                             matchCount   = matchCount,
                             matches      = matches,
+                            potentialMatches = potentialMatches,
                             conditionKey = conditionKey,
                             output       = output,
                             personal     = personal,

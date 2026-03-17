@@ -73,7 +73,6 @@ local isResizing = false
 local shouldShowByZone = true
 local spellMatchHandle
 local rosterFrame
-local reinspectTicker
 local blizzardProbeCount = 0
 
 local MAX_BARS = 15
@@ -890,16 +889,6 @@ local function SetupRosterEvents()
         if event == "GROUP_ROSTER_UPDATE" then
             CleanPartyList()
             AutoRegisterParty()
-            if IsInGroup() then
-                if not reinspectTicker then
-                    reinspectTicker = C_Timer.NewTicker(30, function()
-                        LogDebug("Reinspect ticker fired")
-                        ns.Services.GroupInspector:RequestReinspectAll()
-                    end)
-                end
-            else
-                if reinspectTicker then reinspectTicker:Cancel(); reinspectTicker = nil end
-            end
         elseif event == "PLAYER_ENTERING_WORLD" then
             CheckZoneVisibility()
             AutoRegisterParty()
@@ -989,15 +978,7 @@ local function OnInitialize(moduleDB)
     LogDebug("  Step 8: Register GroupInspector inspect-complete callback")
     ns.Services.GroupInspector:RegisterInspectComplete("Cracked", OnInspectComplete)
 
-    LogDebug("  Step 9: Start reinspect ticker (30s) if in group")
-    if IsInGroup() then
-        reinspectTicker = C_Timer.NewTicker(30, function()
-            LogDebug("Reinspect ticker fired")
-            ns.Services.GroupInspector:RequestReinspectAll()
-        end)
-    end
-
-    LogDebug("  Step 10: Start UpdateDisplay ticker (0.1s)")
+    LogDebug("  Step 9: Start UpdateDisplay ticker (0.1s)")
     if updateTicker then updateTicker:Cancel() end
     updateTicker = C_Timer.NewTicker(0.1, UpdateDisplay)
 
@@ -1023,8 +1004,6 @@ local function OnDisable()
     end
 
     ns.Services.GroupInspector:UnregisterInspectComplete("Cracked")
-
-    if reinspectTicker then reinspectTicker:Cancel(); reinspectTicker = nil end
 
     wipe(partyMembers)
     wipe(myCds)

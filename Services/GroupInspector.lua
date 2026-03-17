@@ -22,6 +22,10 @@ local GetInspectSpecialization = GetInspectSpecialization
 local CanInspect = CanInspect
 local NotifyInspect = NotifyInspect
 local IsPlayerSpell = IsPlayerSpell
+local InCombatLockdown = InCombatLockdown
+local IsInInstance = IsInInstance
+local GetInstanceInfo = GetInstanceInfo
+local C_Traits = _G and _G.C_Traits or nil
 local C_Timer = C_Timer
 
 local GroupInspector = {}
@@ -32,16 +36,16 @@ ns.Services.GroupInspector = GroupInspector
 -- ============================================================================
 
 local eventFrame
-local cache = {}           -- [guid] = { unit, name, class, specID, inspected, timestamp }
+local cache = {}           -- [guid] = { unit, name, class, specID, inspected, talentSpells, talentsKnown, timestamp }
 local inspectQueue = {}    -- FIFO of { unit, guid } awaiting inspect
 local queuedInspects = {}  -- [guid] = true while queued
 local inspectBusy = false
 local callbacks = {}       -- [key] = func
 local inspectCompleteCallbacks = {} -- [key] = func(unit, name, class, specID)
-local ticker
+local pendingProcessAfterCombat = false
+local lastInstanceKey
 
 local INSPECT_INTERVAL = 1.5
-local CACHE_STALE_SEC = 300
 
 -- ============================================================================
 -- Logging helpers
@@ -101,6 +105,69 @@ local function FireInspectComplete(unit, name, class, specID)
     end
 end
 
+local function GetInstanceKey()
+    local inInstance, instanceType = IsInInstance and IsInInstance() or false, nil
+    if inInstance and GetInstanceInfo then
+        local _, instType, diffID, _, _, _, _, instID = GetInstanceInfo()
+        return format("%s:%s:%s", tostring(instType or instanceType or "instance"), tostring(instID or 0), tostring(diffID or 0))
+    end
+
+    return "world"
+end
+
+local function BuildTalentSpellSet()
+    local spells = {}
+    if not C_Traits then
+        return spells, false
+    end
+
+    local configID = -1
+    local okConfig, configInfo = pcall(C_Traits.GetConfigInfo, configID)
+    if not okConfig or not configInfo or not configInfo.treeIDs or #configInfo.treeIDs == 0 then
+        return spells, false
+    end
+
+    for _, treeID in ipairs(configInfo.treeIDs) do
+        local okTree, nodeIDs = pcall(C_Traits.GetTreeNodes, treeID)
+        if okTree and nodeIDs then
+            for _, nodeID in ipairs(nodeIDs) do
+                local okNode, nodeInfo = pcall(C_Traits.GetNodeInfo, configID, nodeID)
+                if okNode and nodeInfo and nodeInfo.activeEntry and nodeInfo.activeRank and nodeInfo.activeRank > 0 then
+                    local entryID = nodeInfo.activeEntry.entryID
+                    if entryID then
+                        local okEntry, entryInfo = pcall(C_Traits.GetEntryInfo, configID, entryID)
+                        if okEntry and entryInfo and entryInfo.definitionID then
+                            local okDef, defInfo = pcall(C_Traits.GetDefinitionInfo, entryInfo.definitionID)
+                            if okDef and defInfo and defInfo.spellID and defInfo.spellID > 0 then
+                                spells[defInfo.spellID] = true
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return spells, true
+end
+
+local function ScanTalentSpellsIntoEntry(entry)
+    if not entry then return false end
+
+    local spells, ok = BuildTalentSpellSet()
+    entry.talentSpells = spells
+    entry.talentsKnown = ok
+    entry.timestamp = GetTime()
+
+    local count = 0
+    for _ in pairs(spells) do
+        count = count + 1
+    end
+    LogDebug(format("Talent scan for %s: known=%s count=%d",
+        entry.name or "Unknown", tostring(ok), count))
+    return ok
+end
+
 local function CacheUnit(unit)
     if not UnitExists(unit) then return nil end
     local guid = UnitGUID(unit)
@@ -131,6 +198,8 @@ local function CacheUnit(unit)
         class     = class or "UNKNOWN",
         specID    = specID,
         inspected = inspected,
+        talentSpells = existing and existing.talentSpells or {},
+        talentsKnown = existing and existing.talentsKnown or UnitIsUnit(unit, "player"),
         timestamp = GetTime(),
     }
 
@@ -143,6 +212,13 @@ end
 local function ProcessInspectQueue()
     if inspectBusy or #inspectQueue == 0 then return end
     if not next(callbacks) and not next(inspectCompleteCallbacks) then return end
+    if InCombatLockdown and InCombatLockdown() then
+        if not pendingProcessAfterCombat then
+            pendingProcessAfterCombat = true
+            LogDebug("Deferring inspect queue until combat ends")
+        end
+        return
+    end
 
     local request = table.remove(inspectQueue, 1)
     local unit = request and request.unit
@@ -189,7 +265,7 @@ local function OnInspectReady(guid)
                 local oldSpec = entry.specID
                 entry.specID = specID
                 entry.inspected = true
-                entry.timestamp = GetTime()
+                ScanTalentSpellsIntoEntry(entry)
                 LogDebug(format("Inspected %s: specID=%d%s",
                     entry.name, specID,
                     oldSpec and oldSpec ~= specID and format(" (changed from %d)", oldSpec) or ""))
@@ -201,6 +277,33 @@ local function OnInspectReady(guid)
     end
 
     C_Timer.After(INSPECT_INTERVAL, ProcessInspectQueue)
+end
+
+local function MarkAllNonPlayerEntriesStale()
+    for _, entry in pairs(cache) do
+        if not UnitIsUnit(entry.unit, "player") then
+            entry.inspected = false
+        end
+    end
+end
+
+local function UnitHasProvider(unit, provider)
+    if not unit or not provider or not UnitExists(unit) then
+        return false
+    end
+
+    if UnitIsUnit(unit, "player") then
+        local spellID = provider.talentSpellID or provider.spellID
+        return spellID and IsPlayerSpell and IsPlayerSpell(spellID) or false
+    end
+
+    local guid = UnitGUID(unit)
+    local entry = guid and cache[guid] or nil
+    if provider.talentSpellID then
+        return entry and entry.talentsKnown and entry.talentSpells and entry.talentSpells[provider.talentSpellID] or false
+    end
+
+    return true
 end
 
 local function ScanRoster()
@@ -245,8 +348,24 @@ end
 -- ============================================================================
 
 local function OnEvent(_, event, arg1)
-    if event == "GROUP_ROSTER_UPDATE" or event == "PLAYER_ENTERING_WORLD" then
+    if event == "GROUP_ROSTER_UPDATE" then
         ScanRoster()
+    elseif event == "PLAYER_ENTERING_WORLD" or event == "ZONE_CHANGED_NEW_AREA" then
+        local instanceKey = GetInstanceKey()
+        local instanceChanged = instanceKey ~= lastInstanceKey
+        lastInstanceKey = instanceKey
+
+        if instanceChanged then
+            LogDebug(format("Instance boundary changed to %s; scheduling full reinspect", instanceKey))
+            MarkAllNonPlayerEntriesStale()
+        end
+
+        ScanRoster()
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        if pendingProcessAfterCombat then
+            pendingProcessAfterCombat = false
+            ProcessInspectQueue()
+        end
     elseif event == "INSPECT_READY" then
         OnInspectReady(arg1)
     end
@@ -262,9 +381,12 @@ function GroupInspector:Initialize()
     eventFrame = CreateFrame("Frame")
     eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
     eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+    eventFrame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+    eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
     eventFrame:RegisterEvent("INSPECT_READY")
     eventFrame:SetScript("OnEvent", OnEvent)
 
+    lastInstanceKey = GetInstanceKey()
     LogDebug("Initialized")
     ScanRoster()
 end
@@ -304,15 +426,7 @@ function GroupInspector:QueryProviders(providersList)
                     local specMatch = (provider.specID == nil) or
                                      (entry and entry.specID == provider.specID)
 
-                    if specMatch then
-                        local hasSpell = false
-                        if UnitIsUnit(unit, "player") then
-                            hasSpell = IsPlayerSpell(provider.spellID)
-                        else
-                            hasSpell = true
-                        end
-
-                        if hasSpell then
+                    if specMatch and UnitHasProvider(unit, provider) then
                             results[#results + 1] = {
                                 unit      = unit,
                                 name      = entry and entry.name or UnitName(unit) or "Unknown",
@@ -322,7 +436,6 @@ function GroupInspector:QueryProviders(providersList)
                                 spellName = provider.spellName,
                                 note      = provider.note,
                             }
-                        end
                     end
                 end
             end
@@ -338,22 +451,35 @@ function GroupInspector:GetUnitInfo(unit)
     return guid and cache[guid] or nil
 end
 
+function GroupInspector:UnitHasTalentSpell(unit, spellID)
+    if not spellID or spellID <= 0 or not UnitExists(unit) then return false end
+    if UnitIsUnit(unit, "player") then
+        return IsPlayerSpell and IsPlayerSpell(spellID) or false
+    end
+
+    local guid = UnitGUID(unit)
+    local entry = guid and cache[guid] or nil
+    return entry and entry.talentsKnown and entry.talentSpells and entry.talentSpells[spellID] or false
+end
+
+function GroupInspector:UnitHasProvider(unit, provider)
+    return UnitHasProvider(unit, provider)
+end
+
 function GroupInspector:RequestRefresh()
     wipe(inspectQueue)
     wipe(queuedInspects)
     inspectBusy = false
+    pendingProcessAfterCombat = false
     ScanRoster()
 end
 
 function GroupInspector:RequestReinspectAll()
-    for _, entry in pairs(cache) do
-        if not UnitIsUnit(entry.unit, "player") then
-            entry.inspected = false
-        end
-    end
+    MarkAllNonPlayerEntriesStale()
     wipe(inspectQueue)
     wipe(queuedInspects)
     inspectBusy = false
+    pendingProcessAfterCombat = false
     ScanRoster()
 end
 

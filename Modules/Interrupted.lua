@@ -18,7 +18,6 @@ local UnitExists = UnitExists
 local IsInGroup = IsInGroup
 local C_Spell = C_Spell
 local C_Timer = C_Timer
-local C_Traits = C_Traits
 
 if MedaAuras and MedaAuras.Log then
     MedaAuras.Log("[Interrupted] File loaded OK")
@@ -59,13 +58,14 @@ local myName, myClass, mySpellID, myBaseCd, myIsPetSpell
 local myKickCdEnd = 0
 
 local mainFrame, titleText, resizeHandle
+local rescanButton
 local bars = {}
 local updateTicker
 local isResizing = false
 local shouldShowByZone = true
 local watcherHandle, mobKickHandle
-local reinspectTicker
 local UpdateDisplay
+local AutoRegisterParty, CleanPartyList
 
 local DEFAULT_FONT_FACE = GameFontNormal and GameFontNormal:GetFont() or "Fonts\\FRIZQT__.TTF"
 local FONT_FLAGS = "OUTLINE"
@@ -179,6 +179,17 @@ end
 local function NormalizeRemainingCooldown(rem)
     if not rem or rem <= 0.5 then return 0 end
     return rem
+end
+
+local function RequestInspectorRescan()
+    local inspector = ns.Services and ns.Services.GroupInspector
+    if not inspector then return end
+
+    Log("Manual group rescan requested")
+    inspector:RequestReinspectAll()
+    CleanPartyList()
+    AutoRegisterParty()
+    UpdateDisplay()
 end
 
 local function GetPartyCooldownRemaining(info, now)
@@ -386,7 +397,7 @@ end
 -- Auto-register party members by class
 -- ============================================================================
 
-local function AutoRegisterParty()
+AutoRegisterParty = function()
     LogDebug(format("AutoRegisterParty: inGroup=%s", tostring(IsInGroup())))
     for i = 1, 4 do
         local u = "party" .. i
@@ -434,7 +445,7 @@ local function AutoRegisterParty()
     UpdateDisplay()
 end
 
-local function CleanPartyList()
+CleanPartyList = function()
     local current = {}
     for i = 1, 4 do
         local u = "party" .. i
@@ -458,11 +469,11 @@ local function CleanPartyList()
 end
 
 -- ============================================================================
--- Talent scanning on inspect complete
+-- Talent-aware interrupt tuning from GroupInspector cache
 -- ============================================================================
 
-local function ScanTalentsForMember(unit, name, class, specID)
-    LogDebug(format("ScanTalentsForMember: unit=%s name=%s class=%s specID=%s",
+local function ApplyTalentModifiersForMember(unit, name, class, specID)
+    LogDebug(format("ApplyTalentModifiersForMember: unit=%s name=%s class=%s specID=%s",
         tostring(unit), tostring(name), tostring(class), tostring(specID)))
 
     if not InterruptResolver then
@@ -482,53 +493,35 @@ local function ScanTalentsForMember(unit, name, class, specID)
     local info = TrackPartyMember(name, class, primary)
     info.onKickReduction = nil
 
-    local configID = -1
-    local ok, configInfo = pcall(C_Traits.GetConfigInfo, configID)
-    LogDebug(format("  C_Traits.GetConfigInfo(-1): ok=%s hasConfig=%s hasTrees=%s",
-        tostring(ok), tostring(configInfo ~= nil),
-        tostring(configInfo and configInfo.treeIDs and #configInfo.treeIDs or 0)))
-    if not ok or not configInfo or not configInfo.treeIDs or #configInfo.treeIDs == 0 then
-        LogDebug("  -> No trait config available, skipping talent scan")
+    local inspector = ns.Services and ns.Services.GroupInspector
+    local unitInfo = inspector and inspector.GetUnitInfo and inspector:GetUnitInfo(unit) or nil
+    if not unitInfo or not unitInfo.talentsKnown then
+        LogDebug("  -> No inspected talent cache available, skipping talent modifiers")
         return
     end
 
-    local treeID = configInfo.treeIDs[1]
-    local ok2, nodeIDs = pcall(C_Traits.GetTreeNodes, treeID)
-    if not ok2 or not nodeIDs then return end
-
-    for _, nodeID in ipairs(nodeIDs) do
-        local ok3, nodeInfo = pcall(C_Traits.GetNodeInfo, configID, nodeID)
-        if ok3 and nodeInfo and nodeInfo.activeEntry and nodeInfo.activeRank and nodeInfo.activeRank > 0 then
-            local entryID = nodeInfo.activeEntry.entryID
-            if entryID then
-                local ok4, entryInfo = pcall(C_Traits.GetEntryInfo, configID, entryID)
-                if ok4 and entryInfo and entryInfo.definitionID then
-                    local ok5, defInfo = pcall(C_Traits.GetDefinitionInfo, entryInfo.definitionID)
-                    if ok5 and defInfo and defInfo.spellID then
-                        local talent = CD_REDUCTION_TALENTS[defInfo.spellID]
-                        if talent then
-                            local newCd
-                            if talent.pctReduction then
-                                newCd = info.baseCd * (1 - talent.pctReduction / 100)
-                                newCd = math.floor(newCd + 0.5)
-                            else
-                                newCd = info.baseCd - talent.reduction
-                            end
-                            if newCd < 1 then newCd = 1 end
-                            info.baseCd = newCd
-                            LogDebug(format("%s has %s, CD -> %ds", name, talent.name, newCd))
-                        end
-
-                        local onKick = CD_ON_KICK_TALENTS[defInfo.spellID]
-                        if onKick then
-                            info.onKickReduction = onKick.reduction
-                            LogDebug(format("%s has %s, -%ds on kick", name, onKick.name, onKick.reduction))
-                        end
-                    end
-                end
+    for spellID, talent in pairs(CD_REDUCTION_TALENTS) do
+        if inspector:UnitHasTalentSpell(unit, spellID) then
+            local newCd
+            if talent.pctReduction then
+                newCd = info.baseCd * (1 - talent.pctReduction / 100)
+                newCd = math.floor(newCd + 0.5)
+            else
+                newCd = info.baseCd - talent.reduction
             end
+            if newCd < 1 then newCd = 1 end
+            info.baseCd = newCd
+            LogDebug(format("%s has %s, CD -> %ds", name, talent.name, newCd))
         end
     end
+
+    for spellID, onKick in pairs(CD_ON_KICK_TALENTS) do
+        if inspector:UnitHasTalentSpell(unit, spellID) then
+            info.onKickReduction = onKick.reduction
+            LogDebug(format("%s has %s, -%ds on kick", name, onKick.name, onKick.reduction))
+        end
+    end
+
     UpdateDisplay()
 end
 
@@ -899,6 +892,10 @@ local function CreateUI()
     titleText:SetText("|cFF00DDDDInterrupts|r")
     if not db.showTitle then titleText:Hide() end
 
+    rescanButton = MedaUI:CreateButton(mainFrame, "Rescan", 64)
+    rescanButton:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", -4, -3)
+    rescanButton.OnClick = RequestInspectorRescan
+
     resizeHandle = CreateFrame("Button", nil, mainFrame)
     resizeHandle:SetSize(16, 16)
     resizeHandle:SetPoint("BOTTOMRIGHT", 0, 0)
@@ -968,16 +965,6 @@ local function SetupRosterEvents()
         if event == "GROUP_ROSTER_UPDATE" then
             CleanPartyList()
             AutoRegisterParty()
-            if IsInGroup() then
-                if not reinspectTicker then
-                    reinspectTicker = C_Timer.NewTicker(30, function()
-                        LogDebug("Reinspect ticker fired, requesting re-inspect all")
-                        ns.Services.GroupInspector:RequestReinspectAll()
-                    end)
-                end
-            else
-                if reinspectTicker then reinspectTicker:Cancel(); reinspectTicker = nil end
-            end
         elseif event == "PLAYER_ENTERING_WORLD" then
             CheckZoneVisibility()
             FindMyInterrupt()
@@ -1014,6 +1001,9 @@ local function OnInitialize(moduleDB)
     LogDebug(format("  ns.Services.PartySpellWatcher=%s", tostring(ns.Services.PartySpellWatcher ~= nil)))
     LogDebug(format("  ns.Services.GroupInspector=%s", tostring(ns.Services.GroupInspector ~= nil)))
     LogDebug(format("  ns.Services.InterruptResolver=%s", tostring(ns.Services.InterruptResolver ~= nil)))
+    if ns.Services.GroupInspector and ns.Services.GroupInspector.Initialize then
+        ns.Services.GroupInspector:Initialize()
+    end
 
     LogDebug("  Step 1: FindMyInterrupt")
     FindMyInterrupt()
@@ -1040,17 +1030,9 @@ local function OnInitialize(moduleDB)
     LogDebug(format("  watcherHandle=%s mobKickHandle=%s", tostring(watcherHandle), tostring(mobKickHandle)))
 
     LogDebug("  Step 8: Register GroupInspector inspect-complete callback")
-    ns.Services.GroupInspector:RegisterInspectComplete("Interrupted", ScanTalentsForMember)
+    ns.Services.GroupInspector:RegisterInspectComplete("Interrupted", ApplyTalentModifiersForMember)
 
-    LogDebug("  Step 9: Start reinspect ticker (30s) if in group")
-    if IsInGroup() then
-        reinspectTicker = C_Timer.NewTicker(30, function()
-            LogDebug("Reinspect ticker fired, requesting re-inspect all")
-            ns.Services.GroupInspector:RequestReinspectAll()
-        end)
-    end
-
-    LogDebug("  Step 10: Start UpdateDisplay ticker (0.1s)")
+    LogDebug("  Step 9: Start UpdateDisplay ticker (0.1s)")
     if updateTicker then updateTicker:Cancel() end
     updateTicker = C_Timer.NewTicker(0.1, UpdateDisplay)
 
@@ -1079,8 +1061,6 @@ local function OnDisable()
     end
 
     ns.Services.GroupInspector:UnregisterInspectComplete("Interrupted")
-
-    if reinspectTicker then reinspectTicker:Cancel(); reinspectTicker = nil end
 
     wipe(partyMembers)
     wipe(noInterruptPlayers)
@@ -1407,6 +1387,11 @@ local function BuildSettingsPage(parent, moduleDB)
         lockCB:SetChecked(moduleDB.locked)
         lockCB.OnValueChanged = function(_, checked) moduleDB.locked = checked end
         generalY = generalY - 30
+
+        local rescanBtn = MedaUI:CreateButton(p, "Rescan Group Cache", 180)
+        rescanBtn:SetPoint("TOPLEFT", LEFT_X, generalY)
+        rescanBtn.OnClick = RequestInspectorRescan
+        generalY = generalY - 40
 
         local iconsCB = MedaUI:CreateCheckbox(p, "Show Icons")
         iconsCB:SetPoint("TOPLEFT", LEFT_X, generalY)

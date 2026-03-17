@@ -21,6 +21,7 @@ local DPS_SPECS = R.DPS_SPECS
 local ALL_CLASSES = R.ALL_CLASSES
 
 local RunPipeline
+local RequestInspectorRescan
 
 local function Log(...)
     return R.Log(...)
@@ -229,6 +230,14 @@ RunPipeline = function(clearDismiss)
     end
 end
 
+RequestInspectorRescan = function()
+    local GroupInspector = ns.Services.GroupInspector
+    if GroupInspector then
+        GroupInspector:RequestReinspectAll()
+    end
+    RunPipeline(false)
+end
+
 -- ============================================================================
 -- Event handling
 -- ============================================================================
@@ -341,8 +350,8 @@ local function CreateUI()
     if S.coveragePanel.statusBar then S.coveragePanel.statusBar:Hide() end
 
     S.uiState.workspaceShell = MedaUI:CreateWorkspaceHost(S.coveragePanel, {
-        toolbarWidth = 760,
-        headerTextRightGap = 780,
+        toolbarWidth = 900,
+        headerTextRightGap = 920,
     })
     S.uiState.workspaceShell:SetPoint("TOPLEFT", S.coveragePanel, "TOPLEFT", 8, -38)
     S.uiState.workspaceShell:SetPoint("BOTTOMRIGHT", S.coveragePanel, "BOTTOMRIGHT", -8, 8)
@@ -374,6 +383,13 @@ local function CreateUI()
     end
     liveResetButton:Hide()
     S.uiState.toolbar.liveResetButton = liveResetButton
+
+    local rescanButton = MedaUI:CreateButton(toolbar, "Rescan Group", 110)
+    rescanButton:SetPoint("LEFT", liveResetButton, "RIGHT", 8, 0)
+    rescanButton.OnClick = function()
+        RequestInspectorRescan()
+    end
+    S.uiState.toolbar.rescanButton = rescanButton
 
     local contextDropdown = MedaUI:CreateDropdown(toolbar, 220, BuildContextDropdownItems())
     contextDropdown:SetPoint("TOPRIGHT", toolbar, "TOPRIGHT", 0, 0)
@@ -516,6 +532,9 @@ local function StartModule()
 
     local GroupInspector = ns.Services.GroupInspector
     if GroupInspector then
+        if GroupInspector.Initialize then
+            GroupInspector:Initialize()
+        end
         GroupInspector:RegisterCallback("Reminders", OnInspectorUpdate)
     end
 
@@ -830,6 +849,9 @@ local function BuildTrackingPage(parent, moduleDB)
     autoShowCb:SetChecked(S.db.autoShowInInstance ~= false)
     autoShowCb.OnValueChanged = function(_, val) S.db.autoShowInInstance = val end
     autoShowCb:SetPoint("TOPLEFT", LEFT_X, yOff)
+    local rescanBtn = MedaUI:CreateButton(parent, "Rescan Group Cache", 180)
+    rescanBtn:SetPoint("TOPLEFT", RIGHT_X, yOff - 4)
+    rescanBtn.OnClick = RequestInspectorRescan
     yOff = yOff - 34
 
     local talHdr = MedaUI:CreateSectionHeader(parent, "Talent")
@@ -1080,7 +1102,7 @@ local slashCommands = {
     refresh = function()
         local GroupInspector = ns.Services.GroupInspector
         if GroupInspector then
-            GroupInspector:RequestRefresh()
+            GroupInspector:RequestReinspectAll()
         end
         RunPipeline(true)
     end,

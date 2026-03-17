@@ -2130,6 +2130,9 @@ local function GetGroupCoverageState(result)
     end
 
     if result.matchCount == 0 then
+        if result.potentialMatches and #result.potentialMatches > 0 then
+            return "Talent Swap", DUNGEON_FOCUS_TALENT_HEX, SEVERITY_COLORS.warning, "canTalent", 5
+        end
         if result.personal then
             return "Talent", DUNGEON_FOCUS_TALENT_HEX, SEVERITY_COLORS.warning, "canTalent", 5
         end
@@ -2154,6 +2157,7 @@ end
 local function BuildGroupCoverageDetail(result, structured, primaryDanger)
     local parts = {}
     local providerNames = BuildCoverageNames(result and result.matches)
+    local potentialNames = BuildCoverageNames(result and result.potentialMatches)
 
     if result and result.matchCount > 0 then
         if providerNames then
@@ -2172,6 +2176,11 @@ local function BuildGroupCoverageDetail(result, structured, primaryDanger)
         if gapText then
             parts[#parts + 1] = TrimSummary(gapText, 140)
         end
+    end
+
+    if potentialNames then
+        local prefix = (result and result.matchCount > 0) and "Can also swap:" or "Can swap:"
+        parts[#parts + 1] = prefix .. " " .. potentialNames .. "."
     end
 
     if result and result.personal and result.personal.detail then
@@ -2199,6 +2208,7 @@ local function CreateGroupCoverageEntry(data, ctx, result, instanceCtx, extra)
     local primaryDanger = relatedDangers[1]
     local actionLabel, actionHex, accent, response, statusWeight = GetGroupCoverageState(result)
     local providerNames = BuildCoverageNames(result.matches)
+    local potentialNames = BuildCoverageNames(result.potentialMatches)
     local mobNames = {}
 
     for _, danger in ipairs(relatedDangers) do
@@ -2232,6 +2242,7 @@ local function CreateGroupCoverageEntry(data, ctx, result, instanceCtx, extra)
         sortWeight = (extra and extra.sortWeight or 0) + statusWeight + GetDungeonFocusSeverityWeight(primaryDanger and primaryDanger.severity),
         priorityRank = extra and extra.priorityRank or 99,
         providersNote = BuildCoverageProviderNote(result.matches) or providerNames,
+        potentialProvidersNote = potentialNames,
         groupSummary = structured and structured.summary or nil,
         talentNote = result.personal and result.personal.detail or nil,
         missingNote = result.matchCount == 0 and (structured and (structured.missingAction or structured.fullGroupWorkaround) or nil) or nil,
@@ -2737,6 +2748,10 @@ local function AddDungeonFocusTooltip(tip, entry)
     if entry.providersNote and entry.providersNote ~= "" then
         AddTooltipSpacer(tip)
         tip:AddLine("Coverage: " .. entry.providersNote, 0.75, 0.85, 1.0, true)
+    end
+
+    if entry.potentialProvidersNote and entry.potentialProvidersNote ~= "" then
+        tip:AddLine("Can swap: " .. entry.potentialProvidersNote, 1.0, 0.78, 0.35, true)
     end
 
     if entry.groupSummary and entry.groupSummary ~= "" then
