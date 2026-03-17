@@ -33,7 +33,6 @@ Data\Recommendations.lua
 Data\GoneFishinFish.lua
 Data\CreatureVO.lua
 Data\Interrupts.lua
-Data\Defensives.lua
 Data\ProphecyData.lua
 Data\ProphecyTemplates.lua
 
@@ -60,7 +59,6 @@ Modules\GoneFishin.lua
 Modules\ShutIt.lua
 Modules\LazyCast.lua
 Modules\Interrupted.lua
-Modules\Cracked.lua
 
 # Prophecy Module
 Modules\Prophecy\Init.lua

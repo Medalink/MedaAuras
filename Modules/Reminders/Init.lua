@@ -819,6 +819,9 @@ local function RunPreview()
     if S.uiState.workspaceShell then
         RenderCurrentPage()
     end
+    if R.RefreshHUDs then
+        R.RefreshHUDs()
+    end
 end
 
 -- ============================================================================
@@ -1072,6 +1075,55 @@ local function BuildAppearancePage(parent, moduleDB)
     return 500
 end
 
+local function ShouldAutoPreviewSettingsPage()
+    if not S.coveragePanel then
+        return true
+    end
+
+    if S.coveragePanel:IsShown() then
+        return true
+    end
+
+    return not S.dismissed
+end
+
+local function IsHUDSettingsPage(pageName)
+    return pageName == "dispelhud" or pageName == "interrupthud"
+end
+
+local function RefreshSettingsPreview(pageName)
+    if ShouldAutoPreviewSettingsPage() then
+        RunPreview()
+        return
+    end
+
+    if IsHUDSettingsPage(pageName) and R.RefreshHUDs then
+        R.RefreshHUDs()
+    end
+end
+
+function R.IsHUDSettingsPreviewActive(kind)
+    local activeModuleId, activePageId = nil, nil
+    if MedaAuras.GetActiveSettingsSelection then
+        activeModuleId, activePageId = MedaAuras:GetActiveSettingsSelection()
+    end
+    if not activeModuleId then
+        return false
+    end
+
+    if activeModuleId ~= MODULE_NAME then
+        return false
+    end
+
+    if kind == "dispel" then
+        return activePageId == "dispelhud"
+    elseif kind == "interrupt" then
+        return activePageId == "interrupthud"
+    end
+
+    return false
+end
+
 local function BuildPage(pageName, parent)
     local moduleDB = S.db or MedaAuras:GetModuleDB(MODULE_NAME)
     local height = 500
@@ -1081,12 +1133,12 @@ local function BuildPage(pageName, parent)
         height = BuildSourcesPage(parent, moduleDB)
     elseif pageName == "appearance" then
         height = BuildAppearancePage(parent, moduleDB)
-    elseif pageName == "huds" and R.BuildHUDSettingsPage then
-        height = R.BuildHUDSettingsPage(parent, moduleDB)
+    elseif pageName == "dispelhud" and R.BuildHUDSettingsTab then
+        height = R.BuildHUDSettingsTab(parent, moduleDB, "dispel")
+    elseif pageName == "interrupthud" and R.BuildHUDSettingsTab then
+        height = R.BuildHUDSettingsTab(parent, moduleDB, "interrupt")
     end
-    if pageName ~= "huds" then
-        RunPreview()
-    end
+    RefreshSettingsPreview(pageName)
     return height
 end
 
@@ -1230,15 +1282,20 @@ MedaAuras:RegisterModule({
         { id = "tracking", label = "Tracking" },
         { id = "sources", label = "Sources" },
         { id = "appearance", label = "Appearance" },
-        { id = "huds", label = "HUDs" },
+        { id = "dispelhud", label = "Dispel HUD" },
+        { id = "interrupthud", label = "Interrupt HUD" },
     },
     pageHeights   = {
         tracking = 500,
         sources = 500,
         appearance = 500,
-        huds = 720,
+        dispelhud = 720,
+        interrupthud = 720,
     },
     buildPage     = BuildPage,
+    onPageCacheRestore = function(pageName)
+        RefreshSettingsPreview(pageName)
+    end,
     slashCommands = slashCommands,
 })
 

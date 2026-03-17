@@ -382,6 +382,18 @@ local function BuildSettingsHost()
     settingsHost.OnSelectionChanged = function(moduleId, pageId)
         selectedModuleId = moduleId or selectedModuleId
         selectedPageId = pageId
+        if ns.Reminders and ns.Reminders.RefreshHUDs then
+            ns.Reminders.RefreshHUDs()
+        end
+    end
+
+    local hostFrame = settingsHost.GetFrame and settingsHost:GetFrame() or nil
+    if hostFrame and hostFrame.HookScript then
+        hostFrame:HookScript("OnHide", function()
+            if ns.Reminders and ns.Reminders.RefreshHUDs then
+                ns.Reminders.RefreshHUDs()
+            end
+        end)
     end
 
     RegisterOptionsModules()
@@ -432,6 +444,14 @@ function MedaAuras:CreateConfigTabs(parent, tabs)
         return settingsHost:CreateConfigTabs(parent, tabs)
     end
     return MedaUI:CreateTabBar(parent, tabs), {}
+end
+
+function MedaAuras:GetActiveSettingsSelection()
+    if not settingsHost or not settingsHost:IsShown() then
+        return nil, nil
+    end
+
+    return settingsHost.activeModuleId, settingsHost.activePageId
 end
 
 function MedaAuras:RefreshModuleConfig()

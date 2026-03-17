@@ -58,7 +58,6 @@ local myName, myClass, mySpellID, myBaseCd, myIsPetSpell
 local myKickCdEnd = 0
 
 local mainFrame, titleText, resizeHandle
-local rescanButton
 local bars = {}
 local updateTicker
 local isResizing = false
@@ -319,6 +318,36 @@ local function ResolveNameColor(isPlayer, classToken)
     end
 
     return 1, 1, 1
+end
+
+local function ApplyBarVisuals(bar, entryName, classToken, icon, maxCd, remaining, isPlayer, nameFontSize, cdFontSize)
+    if not bar then return end
+
+    local barR, barG, barB = ResolveBarColor(classToken)
+    local nameR, nameG, nameB = ResolveNameColor(isPlayer, classToken)
+    local nameOutline = isPlayer and (db.playerNameOutline or "outline") or "outline"
+    local rem = remaining or 0
+    local cooldown = maxCd or 15
+
+    bar.icon:SetTexture(icon or FALLBACK_INTERRUPT_ICON)
+    bar.nameText:SetFontObject(GetFontObj(db.font or "default", nameFontSize, nameOutline))
+    bar.nameText:SetText(entryName or "")
+    bar.nameText:SetTextColor(nameR, nameG, nameB)
+    bar.cdText:SetFontObject(GetFontObj(db.font or "default", cdFontSize, "outline"))
+    bar.cdBar:SetMinMaxValues(0, cooldown)
+
+    if rem > 0 then
+        bar.cdBar:SetValue(rem)
+        bar.cdBar:SetStatusBarColor(barR, barG, barB, 0.85)
+        bar.barBg:SetVertexColor(barR * 0.25, barG * 0.25, barB * 0.25, 0.9)
+        bar.cdText:SetText(string.format("%.0f", rem))
+        bar.cdText:SetTextColor(1, 1, 1)
+    else
+        bar.cdBar:SetValue(0)
+        bar.barBg:SetVertexColor(barR, barG, barB, 0.85)
+        bar.cdText:SetText(GetReadyDisplayText(cooldown))
+        bar.cdText:SetTextColor(0.2, 1.0, 0.2)
+    end
 end
 
 local function GetDetectedPlayerInterrupts()
@@ -787,7 +816,7 @@ local lastStateDump = 0
 UpdateDisplay = function()
     if not mainFrame or not shouldShowByZone then return end
 
-    local _, barH, _, fontSize, _, titleH = GetBarLayout()
+    local _, barH, _, fontSize, cdFontSize, titleH = GetBarLayout()
     local now = GetTime()
     local barIdx = 1
     local displayEntries = GetDisplayEntries(now)
@@ -810,30 +839,17 @@ UpdateDisplay = function()
         if barIdx > 6 then break end
         local bar = bars[barIdx]
         bar:Show()
-        bar.icon:SetTexture(entry.data.icon or FALLBACK_INTERRUPT_ICON)
-        local barR, barG, barB = ResolveBarColor(entry.info.class)
-        local nameR, nameG, nameB = ResolveNameColor(entry.isPlayer, entry.info.class)
-        local nameOutline = entry.isPlayer and (db.playerNameOutline or "outline") or "outline"
-        bar.nameText:SetFontObject(GetFontObj(db.font or "default", fontSize, nameOutline))
-        bar.nameText:SetText(entry.name)
-        bar.nameText:SetTextColor(nameR, nameG, nameB)
-
-        local rem = entry.remaining or 0
-        local maxCd = entry.info.baseCd or entry.data.cd or 15
-        bar.cdBar:SetMinMaxValues(0, maxCd)
-
-        if rem > 0 then
-            bar.cdBar:SetValue(rem)
-            bar.cdBar:SetStatusBarColor(barR, barG, barB, 0.85)
-            bar.barBg:SetVertexColor(barR * 0.25, barG * 0.25, barB * 0.25, 0.9)
-            bar.cdText:SetText(string.format("%.0f", rem))
-            bar.cdText:SetTextColor(1, 1, 1)
-        else
-            bar.cdBar:SetValue(0)
-            bar.barBg:SetVertexColor(barR, barG, barB, 0.85)
-            bar.cdText:SetText(GetReadyDisplayText(maxCd))
-            bar.cdText:SetTextColor(0.2, 1.0, 0.2)
-        end
+        ApplyBarVisuals(
+            bar,
+            entry.name,
+            entry.info.class,
+            entry.data.icon or FALLBACK_INTERRUPT_ICON,
+            entry.info.baseCd or entry.data.cd or 15,
+            entry.remaining,
+            entry.isPlayer,
+            fontSize,
+            cdFontSize
+        )
         barIdx = barIdx + 1
     end
 
@@ -891,10 +907,6 @@ local function CreateUI()
     titleText:SetPoint("TOP", 0, -3)
     titleText:SetText("|cFF00DDDDInterrupts|r")
     if not db.showTitle then titleText:Hide() end
-
-    rescanButton = MedaUI:CreateButton(mainFrame, "Rescan", 64)
-    rescanButton:SetPoint("TOPRIGHT", mainFrame, "TOPRIGHT", -4, -3)
-    rescanButton.OnClick = RequestInspectorRescan
 
     resizeHandle = CreateFrame("Button", nil, mainFrame)
     resizeHandle:SetSize(16, 16)
@@ -1118,6 +1130,35 @@ local PREVIEW_MOCK = {
     { name = "Felrush",     class = "DEMONHUNTER", spellID = 183752, baseCd = 15, cdOffset = 0  },
 }
 
+local function GetPreviewMocks()
+    local preview = {}
+    local playerName = myName or UnitName("player")
+    local playerClass = myClass or select(2, UnitClass("player"))
+
+    for index, mock in ipairs(PREVIEW_MOCK) do
+        local entry = {
+            name = mock.name,
+            class = mock.class,
+            spellID = mock.spellID,
+            baseCd = mock.baseCd,
+            cdOffset = mock.cdOffset,
+            isPlayer = false,
+        }
+
+        if index == 1 then
+            entry.name = playerName or mock.name
+            entry.class = playerClass or mock.class
+            entry.spellID = mySpellID or mock.spellID
+            entry.baseCd = myBaseCd or mock.baseCd
+            entry.isPlayer = true
+        end
+
+        preview[#preview + 1] = entry
+    end
+
+    return preview
+end
+
 local function DestroyPreview()
     if pvTicker then pvTicker:Cancel(); pvTicker = nil end
     if pvBars then
@@ -1226,10 +1267,11 @@ local function UpdatePreview()
     if not pvContainer or not pvBars or not db then return end
 
     local elapsed = GetTime() - pvStartTime
-    local _, barH, _, _, _, titleH = GetBarLayout()
+    local _, barH, _, fontSize, cdFontSize, titleH = GetBarLayout()
     local previewEntries = {}
+    local previewMocks = GetPreviewMocks()
 
-    for _, mock in ipairs(PREVIEW_MOCK) do
+    for _, mock in ipairs(previewMocks) do
         local readyWindow = 5
         local cycleLen = mock.baseCd + readyWindow
         local pos = (elapsed + mock.cdOffset) % cycleLen
@@ -1258,32 +1300,21 @@ local function UpdatePreview()
         if not bar then break end
 
         local data = ALL_INTERRUPTS[mock.spellID]
-        if data then
-            bar.icon:SetTexture(data.icon)
-            local barR, barG, barB = ResolveBarColor(mock.class)
-            bar.nameText:SetText(mock.name)
-            bar.nameText:SetTextColor(1, 1, 1)
-            local rem = entry.remaining or 0
-
-            bar.cdBar:SetMinMaxValues(0, mock.baseCd)
-
-            if rem > 0 then
-                bar.cdBar:SetValue(rem)
-                bar.cdBar:SetStatusBarColor(barR, barG, barB, 0.85)
-                bar.barBg:SetVertexColor(barR * 0.25, barG * 0.25, barB * 0.25, 0.9)
-                bar.cdText:SetText(format("%.0f", rem))
-                bar.cdText:SetTextColor(1, 1, 1)
-            else
-                bar.cdBar:SetValue(0)
-                bar.barBg:SetVertexColor(barR, barG, barB, 0.85)
-                bar.cdText:SetText(GetReadyDisplayText(mock.baseCd))
-                bar.cdText:SetTextColor(0.2, 1.0, 0.2)
-            end
-        end
+        ApplyBarVisuals(
+            bar,
+            mock.name,
+            mock.class,
+            data and data.icon or FALLBACK_INTERRUPT_ICON,
+            mock.baseCd,
+            entry.remaining,
+            mock.isPlayer,
+            fontSize,
+            cdFontSize
+        )
     end
 
     pvContainer:SetAlpha(db.alpha)
-    pvContainer:SetSize(db.frameWidth, titleH + #PREVIEW_MOCK * (barH + 1))
+    pvContainer:SetSize(db.frameWidth, titleH + #previewMocks * (barH + 1))
 end
 
 local function RebuildPreview()
@@ -1327,6 +1358,19 @@ local function BuildSettingsPage(parent, moduleDB)
 
     local LEFT_X = 0
     local RIGHT_X = 240
+    local detectedNameLabel
+
+    local function RefreshDetectedPlayerPreview()
+        if not detectedNameLabel then return end
+
+        local playerName = myName or UnitName("player") or "Player"
+        local playerClass = myClass or select(2, UnitClass("player"))
+        local r, g, b = ResolveNameColor(true, playerClass)
+
+        detectedNameLabel:SetFontObject(GetFontObj(moduleDB.font or "default", 13, moduleDB.playerNameOutline or "outline"))
+        detectedNameLabel:SetText(playerName)
+        detectedNameLabel:SetTextColor(r, g, b)
+    end
 
     local function RefreshVisualLayout()
         wipe(fontCache)
@@ -1335,6 +1379,7 @@ local function BuildSettingsPage(parent, moduleDB)
             UpdateDisplay()
         end
         RebuildPreview()
+        RefreshDetectedPlayerPreview()
     end
 
     local function RefreshVisualState()
@@ -1342,6 +1387,7 @@ local function BuildSettingsPage(parent, moduleDB)
             UpdateDisplay()
         end
         UpdatePreview()
+        RefreshDetectedPlayerPreview()
     end
 
     local _, tabs = MedaAuras:CreateConfigTabs(parent, {
@@ -1544,14 +1590,9 @@ local function BuildSettingsPage(parent, moduleDB)
             detectedBg:SetTexture(BAR_TEXTURE)
             detectedBg:SetVertexColor(0.08, 0.08, 0.08, 0.85)
 
-            local detectedName = detectedFrame:CreateFontString(nil, "OVERLAY")
-            detectedName:SetFontObject(GetFontObj(moduleDB.font or "default", 13, moduleDB.playerNameOutline or "outline"))
-            detectedName:SetPoint("TOPLEFT", 10, -8)
-            detectedName:SetText(myName or UnitName("player") or "Player")
-            do
-                local r, g, b = ResolveNameColor(true, myClass)
-                detectedName:SetTextColor(r, g, b)
-            end
+            detectedNameLabel = detectedFrame:CreateFontString(nil, "OVERLAY")
+            detectedNameLabel:SetPoint("TOPLEFT", 10, -8)
+            RefreshDetectedPlayerPreview()
 
             local detectedLabel = detectedFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
             detectedLabel:SetPoint("TOPRIGHT", -10, -10)

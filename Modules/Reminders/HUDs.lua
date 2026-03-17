@@ -15,7 +15,9 @@ local ipairs = ipairs
 local math_floor = math.floor
 local math_max = math.max
 local pairs = pairs
+local table_sort = table.sort
 local tostring = tostring
+local GET_SPELL_TEXTURE = _G and _G.GetSpellTexture or nil
 
 local OUTLINE_MAP = {
     none = "",
@@ -100,6 +102,10 @@ local TITLE_GAP = 16
 local ROW_GAP = 4
 local OVERFLOW_GAP = 6
 local EMPTY_GAP = 6
+local HUD_SETTINGS_PAGES = {
+    dispel = "dispelhud",
+    interrupt = "interrupthud",
+}
 
 local hudRuntime = S.hudRuntime or {
     fontCache = {},
@@ -114,6 +120,14 @@ local hudRuntime = S.hudRuntime or {
     },
 }
 S.hudRuntime = hudRuntime
+
+local BuildDispelEntries
+local BuildInterruptEntries
+local IsDispelCapability
+local GetProfileForFilter
+local ProfileHasCapability
+local MakeEntryKey
+local GetDangerIcon
 
 local function CopyDefaults(dst, defaults)
     for key, value in pairs(defaults) do
@@ -197,6 +211,238 @@ local function GetContextData()
     return data, ctx, instanceCtx
 end
 
+local function IsHUDSettingsPreviewActive(kind)
+    if not (R.IsHUDSettingsPreviewActive and HUD_SETTINGS_PAGES[kind]) then
+        return false
+    end
+
+    return R.IsHUDSettingsPreviewActive(kind) == true
+end
+
+local function ResolveSpellID(spellRef)
+    if R.ResolveSpellID then
+        return R.ResolveSpellID(spellRef)
+    end
+
+    if type(spellRef) == "number" and spellRef > 0 then
+        return spellRef
+    end
+
+    return nil
+end
+
+local function GetDispelTypeKey(danger)
+    if not danger then return nil end
+    if type(danger.dispelType) == "string" and danger.dispelType ~= "" then
+        return danger.dispelType:lower()
+    end
+    if type(danger.capability) == "string" and danger.capability:match("^dispel_") then
+        return danger.capability:gsub("^dispel_", ""):lower()
+    end
+    return nil
+end
+
+local function BuildPreviewCandidates(data)
+    local candidates = {}
+    local seen = {}
+
+    local function AddCandidate(ctx, instanceCtx)
+        if not (ctx and instanceCtx) then
+            return
+        end
+
+        local key = tostring(ctx.instanceType or "?") .. ":" .. tostring(ctx.instanceID or ctx.instanceName or "?")
+        if seen[key] then
+            return
+        end
+
+        seen[key] = true
+        candidates[#candidates + 1] = {
+            ctx = ctx,
+            instanceCtx = instanceCtx,
+        }
+    end
+
+    local currentCtx = GetCurrentContext()
+    if currentCtx and R.ResolveInstanceContext then
+        AddCandidate(currentCtx, R.ResolveInstanceContext(data, currentCtx))
+    end
+
+    if S.lastContext and R.ResolveInstanceContext then
+        AddCandidate(S.lastContext, R.ResolveInstanceContext(data, S.lastContext))
+    end
+
+    local dungeons = data and data.contexts and data.contexts.dungeons or nil
+    if dungeons then
+        local ordered = {}
+        for instanceID, dungeon in pairs(dungeons) do
+            if type(dungeon) == "table" then
+                ordered[#ordered + 1] = {
+                    instanceID = tonumber(instanceID) or instanceID,
+                    dungeon = dungeon,
+                }
+            end
+        end
+
+        table_sort(ordered, function(a, b)
+            local aName = SafeText(a and a.dungeon and a.dungeon.name) or ""
+            local bName = SafeText(b and b.dungeon and b.dungeon.name) or ""
+            if aName ~= bName then
+                return aName < bName
+            end
+            return tostring(a and a.instanceID or "") < tostring(b and b.instanceID or "")
+        end)
+
+        for _, entry in ipairs(ordered) do
+            AddCandidate({
+                inInstance = true,
+                instanceType = "party",
+                instanceID = entry.instanceID,
+                instanceName = entry.dungeon.name,
+            }, entry.dungeon)
+        end
+    end
+
+    return candidates
+end
+
+local function BuildPreviewDispelEntries(data, instanceCtx, config)
+    if not (data and instanceCtx and config) then
+        return {}
+    end
+
+    local capabilityPriority = {}
+    for index, capabilityID in ipairs(instanceCtx.dispelPriority or {}) do
+        capabilityPriority[capabilityID] = index
+    end
+
+    local profile = GetProfileForFilter()
+    local entries = {}
+    local seen = {}
+
+    for _, danger in ipairs(instanceCtx.dangers or {}) do
+        local capabilityID = danger.capability
+        if IsDispelCapability(capabilityID) and not seen[MakeEntryKey(danger)] then
+            local capability = data.capabilities and data.capabilities[capabilityID] or nil
+            local mineOnly = (config.filterMode or "mine") == "mine"
+            if (not mineOnly) or ProfileHasCapability(profile, capability) then
+                local meta = DISPEL_TYPE_META[capabilityID] or {
+                    label = capability and capability.label or "Dispel",
+                    color = { 1, 1, 1 },
+                }
+
+                entries[#entries + 1] = {
+                    title = SafeText(danger.mechanic) or SafeText(capability and capability.label) or "Tracked Dispel",
+                    detail = meta.label,
+                    detailColor = meta.color,
+                    icon = GetDangerIcon(data, danger, FALLBACK_ICON),
+                    priority = capabilityPriority[capabilityID] or 999,
+                    severityWeight = GetSeverityWeight(danger.severity),
+                    sortLabel = (SafeText(danger.mechanic) or ""):lower(),
+                }
+                seen[MakeEntryKey(danger)] = true
+            end
+        end
+    end
+
+    table_sort(entries, function(a, b)
+        if a.priority ~= b.priority then
+            return a.priority < b.priority
+        end
+        if a.severityWeight ~= b.severityWeight then
+            return a.severityWeight > b.severityWeight
+        end
+        return a.sortLabel < b.sortLabel
+    end)
+
+    return entries
+end
+
+local function BuildPreviewInterruptEntries(data, instanceCtx)
+    if not instanceCtx then
+        return {}
+    end
+
+    local entries = {}
+    for index, stop in ipairs(instanceCtx.interruptPriority or {}) do
+        local matched = nil
+        for _, danger in ipairs(instanceCtx.dangers or {}) do
+            local sameSpell = SafeText(danger.mechanic) == SafeText(stop.spell)
+                or SafeText(danger.spellName) == SafeText(stop.spell)
+            local sameMob = SafeText(danger.source) == SafeText(stop.mob)
+            if sameSpell and sameMob then
+                matched = danger
+                break
+            end
+        end
+
+        local title = SafeText(stop.spell) or SafeText(matched and matched.mechanic) or "Interrupt"
+        local detail = SafeText(stop.mob) or SafeText(matched and matched.source) or "Unknown Mob"
+        entries[#entries + 1] = {
+            title = title,
+            detail = detail,
+            detailColor = { 0.85, 0.72, 0.32 },
+            icon = GetDangerIcon(data, matched or {
+                mechanic = title,
+                source = detail,
+                spellID = matched and matched.spellID or nil,
+                capability = matched and matched.capability or "interrupt",
+                type = matched and matched.type or "interrupt",
+            }, FALLBACK_INTERRUPT_ICON),
+            priority = index,
+            severityWeight = GetSeverityWeight((matched and matched.severity) or stop.danger),
+            sortLabel = title:lower(),
+        }
+    end
+
+    table_sort(entries, function(a, b)
+        if a.priority ~= b.priority then
+            return a.priority < b.priority
+        end
+        if a.severityWeight ~= b.severityWeight then
+            return a.severityWeight > b.severityWeight
+        end
+        if a.sortLabel ~= b.sortLabel then
+            return a.sortLabel < b.sortLabel
+        end
+        return (a.detail or "") < (b.detail or "")
+    end)
+
+    return entries
+end
+
+local function GetPreviewEntries(kind)
+    local data = R.GetData and R.GetData() or nil
+    local config = GetHUDDB(kind)
+    if not (data and config) then
+        return {}
+    end
+
+    local candidates = BuildPreviewCandidates(data)
+    for _, candidate in ipairs(candidates) do
+        local entries
+        if kind == "dispel" then
+            entries = BuildPreviewDispelEntries(data, candidate.instanceCtx, config)
+            if #entries == 0 and (config.filterMode or "mine") == "mine" then
+                local previewConfig = {}
+                for key, value in pairs(config) do
+                    previewConfig[key] = value
+                end
+                previewConfig.filterMode = "all"
+                entries = BuildPreviewDispelEntries(data, candidate.instanceCtx, previewConfig)
+            end
+        else
+            entries = BuildPreviewInterruptEntries(data, candidate.instanceCtx)
+        end
+
+        if entries and #entries > 0 then
+            return entries
+        end
+    end
+
+    return {}
+end
+
 local function GetToolkitDangers(data, ctx)
     if not (data and ctx and R.EvaluatePlayerToolkit) then
         return nil
@@ -206,17 +452,17 @@ local function GetToolkitDangers(data, ctx)
     return toolkit and toolkit.dangers or nil
 end
 
-local function IsDispelCapability(capabilityID)
+IsDispelCapability = function(capabilityID)
     return type(capabilityID) == "string" and capabilityID:find("^dispel_") ~= nil
 end
 
-local function GetProfileForFilter()
+GetProfileForFilter = function()
     return (R.GetLivePlayerProfile and R.GetLivePlayerProfile())
         or (R.GetViewerProfile and R.GetViewerProfile())
         or nil
 end
 
-local function ProfileHasCapability(profile, capability)
+ProfileHasCapability = function(profile, capability)
     if not profile or not capability or not capability.providers then
         return false
     end
@@ -239,7 +485,7 @@ local function ProfileHasCapability(profile, capability)
     return false
 end
 
-local function MakeEntryKey(danger)
+MakeEntryKey = function(danger)
     return table.concat({
         SafeText(danger and danger.capability) or "",
         SafeText(danger and danger.mechanic) or "",
@@ -247,9 +493,21 @@ local function MakeEntryKey(danger)
     }, "|")
 end
 
-local function GetDangerIcon(data, danger, fallbackIcon)
-    if danger and danger.spellID and GetSpellTexture then
-        local texture = GetSpellTexture(danger.spellID)
+GetDangerIcon = function(data, danger, fallbackIcon)
+    if danger and type(danger.icon) == "number" and danger.icon > 0 then
+        return danger.icon
+    end
+
+    if danger and danger.spellID and GET_SPELL_TEXTURE then
+        local texture = GET_SPELL_TEXTURE(danger.spellID)
+        if texture then
+            return texture
+        end
+    end
+
+    local spellID = ResolveSpellID(danger and danger.mechanic)
+    if spellID and GET_SPELL_TEXTURE then
+        local texture = GET_SPELL_TEXTURE(spellID)
         if texture then
             return texture
         end
@@ -260,10 +518,21 @@ local function GetDangerIcon(data, danger, fallbackIcon)
         return capability.icon
     end
 
+    if danger and (danger.type == "interrupt" or danger.capability == "interrupt") then
+        return FALLBACK_INTERRUPT_ICON
+    end
+
+    local dispelType = GetDispelTypeKey(danger)
+    if dispelType == "magic" then return 135894 end
+    if dispelType == "curse" then return 135952 end
+    if dispelType == "poison" then return 136068 end
+    if dispelType == "disease" then return 135935 end
+    if dispelType == "bleed" then return 4630445 end
+
     return fallbackIcon or FALLBACK_ICON
 end
 
-local function BuildDispelEntries(data, ctx, instanceCtx, config)
+BuildDispelEntries = function(data, ctx, instanceCtx, config)
     if not (data and ctx and instanceCtx) then
         return {}
     end
@@ -320,7 +589,7 @@ local function BuildDispelEntries(data, ctx, instanceCtx, config)
     return entries
 end
 
-local function BuildInterruptEntries(data, ctx, instanceCtx)
+BuildInterruptEntries = function(data, ctx, instanceCtx)
     if not (data and ctx and instanceCtx) then
         return {}
     end
@@ -639,11 +908,16 @@ local function RefreshDispelHUD(data, ctx, instanceCtx)
         return
     end
 
-    local entries = BuildDispelEntries(data, ctx, instanceCtx, config)
     if not instanceCtx then
-        HideHUD("dispel")
+        if IsHUDSettingsPreviewActive("dispel") then
+            LayoutEntries("dispel", GetPreviewEntries("dispel"))
+        else
+            HideHUD("dispel")
+        end
         return
     end
+
+    local entries = BuildDispelEntries(data, ctx, instanceCtx, config)
 
     local emptyText = nil
     if #entries == 0 then
@@ -663,11 +937,16 @@ local function RefreshInterruptHUD(data, ctx, instanceCtx)
         return
     end
 
-    local entries = BuildInterruptEntries(data, ctx, instanceCtx)
     if not instanceCtx then
-        HideHUD("interrupt")
+        if IsHUDSettingsPreviewActive("interrupt") then
+            LayoutEntries("interrupt", GetPreviewEntries("interrupt"))
+        else
+            HideHUD("interrupt")
+        end
         return
     end
+
+    local entries = BuildInterruptEntries(data, ctx, instanceCtx)
 
     local emptyText = (#entries == 0) and "No tracked interrupts in this content." or nil
     LayoutEntries("interrupt", entries, emptyText)
@@ -713,50 +992,6 @@ function R.ResetHUDPosition(kind)
     end
 end
 
-local function BuildGeneralHUDTab(parent)
-    local yOff = 0
-
-    local header = MedaUI:CreateSectionHeader(parent, "HUDs")
-    header:SetPoint("TOPLEFT", 0, yOff)
-    yOff = yOff - 42
-
-    local note = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    note:SetPoint("TOPLEFT", 0, yOff)
-    note:SetPoint("RIGHT", parent, "RIGHT", -12, 0)
-    note:SetJustifyH("LEFT")
-    note:SetWordWrap(true)
-    note:SetTextColor(unpack(MedaUI.Theme.textDim or { 0.65, 0.65, 0.65 }))
-    note:SetText("These overlays follow the current Reminders content selection. With no manual override selected in Reminders, they follow your live delve, dungeon, or raid context.")
-    yOff = yOff - note:GetStringHeight() - 18
-
-    local resetDispel = MedaUI:CreateButton(parent, "Reset Dispel HUD", 160)
-    resetDispel:SetPoint("TOPLEFT", 0, yOff)
-    resetDispel.OnClick = function()
-        R.ResetHUDPosition("dispel")
-        R.RefreshHUDs()
-    end
-
-    local resetInterrupt = MedaUI:CreateButton(parent, "Reset Interrupt HUD", 160)
-    resetInterrupt:SetPoint("TOPLEFT", 190, yOff)
-    resetInterrupt.OnClick = function()
-        R.ResetHUDPosition("interrupt")
-        R.RefreshHUDs()
-    end
-
-    yOff = yOff - 52
-
-    local dragNote = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    dragNote:SetPoint("TOPLEFT", 0, yOff)
-    dragNote:SetPoint("RIGHT", parent, "RIGHT", -12, 0)
-    dragNote:SetJustifyH("LEFT")
-    dragNote:SetWordWrap(true)
-    dragNote:SetTextColor(unpack(MedaUI.Theme.textDim or { 0.65, 0.65, 0.65 }))
-    dragNote:SetText("Unlock a HUD to drag it directly on screen. Overflow rows stay collapsed until you expand the section header under the visible top list.")
-    yOff = yOff - dragNote:GetStringHeight() - 12
-
-    return math.abs(yOff) + 80
-end
-
 local function BuildSpecificHUDTab(parent, kind)
     local config = GetHUDDB(kind)
     if not config then
@@ -771,6 +1006,15 @@ local function BuildSpecificHUDTab(parent, kind)
     local header = MedaUI:CreateSectionHeader(parent, title)
     header:SetPoint("TOPLEFT", LEFT_X, yOff)
     yOff = yOff - 44
+
+    local note = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    note:SetPoint("TOPLEFT", LEFT_X, yOff)
+    note:SetPoint("RIGHT", parent, "RIGHT", -12, 0)
+    note:SetJustifyH("LEFT")
+    note:SetWordWrap(true)
+    note:SetTextColor(unpack(MedaUI.Theme.textDim or { 0.65, 0.65, 0.65 }))
+    note:SetText("This overlay follows the current Reminders content selection. While this page is open, a mock HUD appears on screen so you can tune and drag it directly.")
+    yOff = yOff - note:GetStringHeight() - 18
 
     local enableCb = MedaUI:CreateCheckbox(parent, "Enable HUD")
     enableCb:SetPoint("TOPLEFT", LEFT_X, yOff)
@@ -866,7 +1110,8 @@ local function BuildSpecificHUDTab(parent, kind)
     end
     yOff = yOff - 62
 
-    local resetBtn = MedaUI:CreateButton(parent, "Reset Position", 140)
+    local resetLabel = kind == "dispel" and "Reset Dispel HUD" or "Reset Interrupt HUD"
+    local resetBtn = MedaUI:CreateButton(parent, resetLabel, 160)
     resetBtn:SetPoint("TOPLEFT", LEFT_X, yOff)
     resetBtn.OnClick = function()
         R.ResetHUDPosition(kind)
@@ -876,23 +1121,12 @@ local function BuildSpecificHUDTab(parent, kind)
     return math.abs(yOff) + 90
 end
 
-function R.BuildHUDSettingsPage(parent, moduleDB)
+function R.BuildHUDSettingsTab(parent, moduleDB, kind)
     if not parent or not moduleDB then
         return 720
     end
 
     S.db = moduleDB
     EnsureHUDDB(moduleDB)
-
-    local _, tabs = MedaAuras:CreateConfigTabs(parent, {
-        { id = "general", label = "General" },
-        { id = "dispel", label = "Dispel HUD" },
-        { id = "interrupt", label = "Interrupt HUD" },
-    })
-
-    local generalHeight = BuildGeneralHUDTab(tabs.general)
-    local dispelHeight = BuildSpecificHUDTab(tabs.dispel, "dispel")
-    local interruptHeight = BuildSpecificHUDTab(tabs.interrupt, "interrupt")
-
-    return math_max(generalHeight, dispelHeight, interruptHeight, 720)
+    return math_max(BuildSpecificHUDTab(parent, kind), 720)
 end
