@@ -154,7 +154,51 @@ local function GetRenderableInterruptData(info)
     return nil
 end
 
-local function GetRenderablePartyEntries()
+local function NormalizeRemainingCooldown(rem)
+    if not rem or rem <= 0.5 then return 0 end
+    return rem
+end
+
+local function GetPartyCooldownRemaining(info, now)
+    if not info or not now then return 0 end
+    if info.cdEnd and info.cdEnd > now then
+        return NormalizeRemainingCooldown(info.cdEnd - now)
+    end
+    return 0
+end
+
+local function GetPlayerCooldownRemaining(now)
+    if not now or not mySpellID then return 0 end
+
+    local rem = 0
+    if myKickCdEnd > now then
+        rem = myKickCdEnd - now
+        if not myIsPetSpell then
+            local ok, result = pcall(GetSpellCooldownRemaining, mySpellID)
+            if ok and result and result > 0 then
+                rem = result
+            end
+        end
+    end
+
+    return NormalizeRemainingCooldown(rem)
+end
+
+local function SortByNextAvailable(entries)
+    table.sort(entries, function(a, b)
+        if a.remaining ~= b.remaining then
+            return a.remaining < b.remaining
+        end
+
+        if a.isPlayer ~= b.isPlayer then
+            return a.isPlayer and not b.isPlayer
+        end
+
+        return a.name < b.name
+    end)
+end
+
+local function GetRenderablePartyEntries(now)
     local entries = {}
     for name, info in pairs(partyMembers) do
         local data = GetRenderableInterruptData(info)
@@ -163,13 +207,47 @@ local function GetRenderablePartyEntries()
                 name = name,
                 info = info,
                 data = data,
+                remaining = GetPartyCooldownRemaining(info, now or GetTime()),
             }
         end
     end
 
-    table.sort(entries, function(a, b)
-        return a.name < b.name
-    end)
+    if db and db.sortByNextAvailable ~= false then
+        SortByNextAvailable(entries)
+    else
+        table.sort(entries, function(a, b)
+            return a.name < b.name
+        end)
+    end
+
+    return entries
+end
+
+local function GetDisplayEntries(now)
+    local entries = {}
+    local playerData = mySpellID and ALL_INTERRUPTS[mySpellID]
+
+    if playerData then
+        entries[#entries + 1] = {
+            name = myName or "?",
+            info = {
+                class = myClass,
+                baseCd = myBaseCd or playerData.cd,
+            },
+            data = playerData,
+            remaining = GetPlayerCooldownRemaining(now),
+            isPlayer = true,
+        }
+    end
+
+    local renderablePartyEntries = GetRenderablePartyEntries(now)
+    for _, entry in ipairs(renderablePartyEntries) do
+        entries[#entries + 1] = entry
+    end
+
+    if db and db.sortByNextAvailable ~= false then
+        SortByNextAvailable(entries)
+    end
 
     return entries
 end
@@ -633,7 +711,7 @@ UpdateDisplay = function()
     local _, barH, _, _, _, titleH = GetBarLayout()
     local now = GetTime()
     local barIdx = 1
-    local renderablePartyEntries = GetRenderablePartyEntries()
+    local displayEntries = GetDisplayEntries(now)
 
     if now - lastStateDump > 10 then
         lastStateDump = now
@@ -644,59 +722,24 @@ UpdateDisplay = function()
             LogDebug(format("  STATE: %s class=%s spell=%s cd=%.1fs",
                 n, info.class, tostring(info.spellID), rem))
         end
-        LogDebug(format("UpdateDisplay tick: mySpell=%s myCD=%.1f members=%d renderable=%d visible=%s",
-            tostring(mySpellID), myKickCdEnd > now and (myKickCdEnd - now) or 0,
-            memberCount, #renderablePartyEntries, tostring(shouldShowByZone)))
+        LogDebug(format("UpdateDisplay tick: mySpell=%s myCD=%.1f members=%d display=%d visible=%s",
+            tostring(mySpellID), GetPlayerCooldownRemaining(now),
+            memberCount, #displayEntries, tostring(shouldShowByZone)))
     end
 
-    -- Player bar
-    local myData = mySpellID and ALL_INTERRUPTS[mySpellID]
-    if myData and barIdx <= 6 then
-        local bar = bars[barIdx]
-        bar:Show()
-        bar.icon:SetTexture(myData.icon)
-        local col = CLASS_COLORS[myClass] or FALLBACK_WHITE
-        bar.nameText:SetText("|cFFFFFFFF" .. (myName or "?") .. "|r")
-
-        if myKickCdEnd > now then
-            local rem = myKickCdEnd - now
-            if not myIsPetSpell then
-                local ok, result = pcall(GetSpellCooldownRemaining, mySpellID)
-                if ok and result and result > 0 then rem = result end
-            end
-            bar.cdText:SetText(string.format("%.0f", rem))
-            bar.cdText:SetTextColor(1, 1, 1)
-            bar.cdBar:SetMinMaxValues(0, myBaseCd or myData.cd)
-            bar.cdBar:SetValue(rem)
-            bar.cdBar:SetStatusBarColor(col[1], col[2], col[3], 0.85)
-            bar.barBg:SetVertexColor(col[1] * 0.25, col[2] * 0.25, col[3] * 0.25, 0.9)
-        else
-            bar.cdText:SetText(db.showReady and "READY" or "")
-            bar.cdText:SetTextColor(0.2, 1.0, 0.2)
-            bar.cdBar:SetMinMaxValues(0, 1)
-            bar.cdBar:SetValue(0)
-            bar.barBg:SetVertexColor(col[1], col[2], col[3], 0.85)
-        end
-        barIdx = barIdx + 1
-    end
-
-    -- Party bars
-    for _, entry in ipairs(renderablePartyEntries) do
+    for _, entry in ipairs(displayEntries) do
         if barIdx > 6 then break end
-        local name = entry.name
-        local info = entry.info
-        local data = entry.data
         local bar = bars[barIdx]
         bar:Show()
-        bar.icon:SetTexture(data.icon or FALLBACK_INTERRUPT_ICON)
-        local col = CLASS_COLORS[info.class] or FALLBACK_WHITE
-        bar.nameText:SetText("|cFFFFFFFF" .. name .. "|r")
+        bar.icon:SetTexture(entry.data.icon or FALLBACK_INTERRUPT_ICON)
+        local col = CLASS_COLORS[entry.info.class] or FALLBACK_WHITE
+        bar.nameText:SetText("|cFFFFFFFF" .. entry.name .. "|r")
 
-        local rem = 0
-        if info.cdEnd > now then rem = info.cdEnd - now end
-        bar.cdBar:SetMinMaxValues(0, info.baseCd or data.cd or 15)
+        local rem = entry.remaining or 0
+        local maxCd = entry.info.baseCd or entry.data.cd or 15
+        bar.cdBar:SetMinMaxValues(0, maxCd)
 
-        if rem > 0.5 then
+        if rem > 0 then
             bar.cdBar:SetValue(rem)
             bar.cdBar:SetStatusBarColor(col[1], col[2], col[3], 0.85)
             bar.barBg:SetVertexColor(col[1] * 0.25, col[2] * 0.25, col[3] * 0.25, 0.9)
@@ -971,6 +1014,7 @@ local MODULE_DEFAULTS = {
     nameFontSize = 0,
     readyFontSize = 0,
     showReady = true,
+    sortByNextAvailable = true,
     showInDungeon = true,
     showInRaid = false,
     showInOpenWorld = false,
@@ -1104,8 +1148,33 @@ local function UpdatePreview()
 
     local elapsed = GetTime() - pvStartTime
     local _, barH, _, _, _, titleH = GetBarLayout()
+    local previewEntries = {}
 
-    for i, mock in ipairs(PREVIEW_MOCK) do
+    for _, mock in ipairs(PREVIEW_MOCK) do
+        local readyWindow = 5
+        local cycleLen = mock.baseCd + readyWindow
+        local pos = (elapsed + mock.cdOffset) % cycleLen
+        local rem = mock.baseCd - pos
+        if rem < 0 then rem = 0 end
+
+        previewEntries[#previewEntries + 1] = {
+            mock = mock,
+            remaining = NormalizeRemainingCooldown(rem),
+        }
+    end
+
+    if db.sortByNextAvailable ~= false then
+        table.sort(previewEntries, function(a, b)
+            if a.remaining ~= b.remaining then
+                return a.remaining < b.remaining
+            end
+
+            return a.mock.name < b.mock.name
+        end)
+    end
+
+    for i, entry in ipairs(previewEntries) do
+        local mock = entry.mock
         local bar = pvBars[i]
         if not bar then break end
 
@@ -1114,16 +1183,11 @@ local function UpdatePreview()
             bar.icon:SetTexture(data.icon)
             local col = CLASS_COLORS[mock.class] or FALLBACK_WHITE
             bar.nameText:SetText("|cFFFFFFFF" .. mock.name .. "|r")
-
-            local readyWindow = 5
-            local cycleLen = mock.baseCd + readyWindow
-            local pos = (elapsed + mock.cdOffset) % cycleLen
-            local rem = mock.baseCd - pos
-            if rem < 0 then rem = 0 end
+            local rem = entry.remaining or 0
 
             bar.cdBar:SetMinMaxValues(0, mock.baseCd)
 
-            if rem > 0.5 then
+            if rem > 0 then
                 bar.cdBar:SetValue(rem)
                 bar.cdBar:SetStatusBarColor(col[1], col[2], col[3], 0.85)
                 bar.barBg:SetVertexColor(col[1] * 0.25, col[2] * 0.25, col[3] * 0.25, 0.9)
@@ -1246,11 +1310,22 @@ local function BuildSettingsPage(parent, moduleDB)
         RebuildPreview()
     end
 
+    local sortCB = MedaUI:CreateCheckbox(parent, "Sort By Next Available")
+    sortCB:SetPoint("TOPLEFT", 240, yOff)
+    sortCB:SetChecked(moduleDB.sortByNextAvailable ~= false)
+    sortCB.OnValueChanged = function(_, checked)
+        moduleDB.sortByNextAvailable = checked
+        UpdateDisplay()
+        UpdatePreview()
+    end
+    yOff = yOff - 30
+
     local readyCB = MedaUI:CreateCheckbox(parent, "Show READY Text")
-    readyCB:SetPoint("TOPLEFT", 240, yOff)
+    readyCB:SetPoint("TOPLEFT", LEFT_X, yOff)
     readyCB:SetChecked(moduleDB.showReady)
     readyCB.OnValueChanged = function(_, checked)
         moduleDB.showReady = checked
+        UpdateDisplay()
         UpdatePreview()
     end
     yOff = yOff - 40
@@ -1300,7 +1375,7 @@ local function BuildSettingsPage(parent, moduleDB)
         yOff = yOff - 20
     end
 
-    local renderableEntries = GetRenderablePartyEntries()
+    local renderableEntries = GetRenderablePartyEntries(GetTime())
     if #renderableEntries > 0 then
         local partyLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         partyLabel:SetPoint("TOPLEFT", LEFT_X, yOff)

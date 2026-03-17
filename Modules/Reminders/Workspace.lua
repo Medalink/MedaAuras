@@ -35,6 +35,7 @@ local CreateTooltipTextLine
 local CreateTooltipTextBlock
 local AddRecommendationTooltip
 local RenderRecommendationCardGrid
+local RenderDungeonFocusSection
 local GetResultTooltipSpellID
 
 local function GetData(...)
@@ -107,6 +108,18 @@ end
 
 local function ColorSpellNames(...)
     return R.ColorSpellNames(...)
+end
+
+local function GetPreferredStats(...)
+    return R.GetPreferredStats(...)
+end
+
+local function FindPlayerBuff(...)
+    return R.FindPlayerBuff(...)
+end
+
+local function IsStatRecommended(...)
+    return R.IsStatRecommended(...)
 end
 
 local function RunPipeline(...)
@@ -1567,6 +1580,9 @@ local DUNGEON_FOCUS_NPC_HEX = "78d676"
 local DUNGEON_FOCUS_INTERRUPT_HEX = "ff7ac8"
 local DUNGEON_FOCUS_STUN_HEX = "74f2ff"
 local DUNGEON_FOCUS_PRIORITY_HEX = "ffd36b"
+local DUNGEON_FOCUS_COVERED_HEX = "67d66d"
+local DUNGEON_FOCUS_MISSING_HEX = "ff7474"
+local DUNGEON_FOCUS_TALENT_HEX = "ffbe52"
 local GET_SPELL_TEXTURE = _G and _G.GetSpellTexture or nil
 local DUNGEON_FOCUS_DISPEL_HEX = {
     magic = "59b9ff",
@@ -1902,6 +1918,7 @@ local function BuildDungeonRoleFocusModel(ctx, tk, instanceCtx)
         }
     else
         local items = {}
+        local dispelItems = {}
         for _, danger in ipairs(dangers) do
             local controlKind = GetDpsControlKind(danger)
             if controlKind then
@@ -1910,9 +1927,25 @@ local function BuildDungeonRoleFocusModel(ctx, tk, instanceCtx)
                     priorityRank = controlKind == "interrupt" and 1 or 2,
                 })
             end
+
+            if IsHealerFocusDanger(danger) and danger.response ~= "unavailable" then
+                dispelItems[#dispelItems + 1] = CreateDungeonFocusEntry(data, danger, role, {
+                    priorityRank = danger.response == "have" and 1 or 2,
+                })
+            end
         end
 
         table.sort(items, function(a, b)
+            if a.priorityRank ~= b.priorityRank then
+                return a.priorityRank < b.priorityRank
+            end
+            if a.sortWeight ~= b.sortWeight then
+                return a.sortWeight > b.sortWeight
+            end
+            return (a.title or "") < (b.title or "")
+        end)
+
+        table.sort(dispelItems, function(a, b)
             if a.priorityRank ~= b.priorityRank then
                 return a.priorityRank < b.priorityRank
             end
@@ -1929,6 +1962,16 @@ local function BuildDungeonRoleFocusModel(ctx, tk, instanceCtx)
             items = items,
             accent = { HexToColorTriplet(DUNGEON_FOCUS_INTERRUPT_HEX, RECOMMEND_COLOR) },
         }
+
+        if #dispelItems > 0 then
+            sections[#sections + 1] = {
+                key = format("focus:%s:%s:dispels", tostring(ctx and ctx.instanceID or "world"), role),
+                title = "Utility Dispels",
+                subtitle = "If your DPS spec can help with dispels, keep these mechanics visible too.",
+                items = dispelItems,
+                accent = { HexToColorTriplet(DUNGEON_FOCUS_DISPEL_HEX.magic, RECOMMEND_COLOR) },
+            }
+        end
     end
 
     local titles = {
@@ -1948,6 +1991,656 @@ local function BuildDungeonRoleFocusModel(ctx, tk, instanceCtx)
         description = descriptions[role] or "Role-focused dungeon coaching.",
         sections = sections,
     }
+end
+
+local function CompactWhitespace(value)
+    local text = SafeText(value)
+    if not text then return nil end
+
+    text = text:gsub("[%c\r\n\t]+", " ")
+    text = text:gsub("%s+", " ")
+    return SafeText(text)
+end
+
+local function TrimSummary(value, maxLength)
+    local text = CompactWhitespace(value)
+    local limit = maxLength or 180
+    if not text or #text <= limit then
+        return text
+    end
+
+    local trimmed = text:sub(1, math.max(1, limit - 3))
+    trimmed = trimmed:gsub("%s+%S*$", "")
+    return trimmed .. "..."
+end
+
+local function BuildNameList(items, limit)
+    local values = {}
+    local seen = {}
+    local maxItems = limit or #items
+
+    for _, item in ipairs(items or {}) do
+        local text = SafeText(item)
+        if text and not seen[text] then
+            values[#values + 1] = text
+            seen[text] = true
+            if #values >= maxItems then
+                break
+            end
+        end
+    end
+
+    return values
+end
+
+local function JoinNameList(items, limit)
+    local values = BuildNameList(items, limit)
+    if #values == 0 then return nil end
+    return table.concat(values, ", ")
+end
+
+local function GetGroupRoster(results)
+    for _, result in ipairs(results or {}) do
+        if result.roster and #result.roster > 0 then
+            return result.roster
+        end
+    end
+    return {}
+end
+
+local function BuildResultMap(results)
+    local map = {}
+    for _, result in ipairs(results or {}) do
+        map[result.capabilityID] = result
+    end
+    return map
+end
+
+local function GetDungeonCapabilityDangers(instanceCtx, capabilityID)
+    if not instanceCtx or not capabilityID then return {} end
+
+    local dangers = {}
+    for _, danger in ipairs(instanceCtx.dangers or {}) do
+        if danger.capability == capabilityID then
+            dangers[#dangers + 1] = danger
+        end
+    end
+
+    table.sort(dangers, function(a, b)
+        local pa = GetDungeonFocusSeverityWeight(a and a.severity)
+        local pb = GetDungeonFocusSeverityWeight(b and b.severity)
+        if pa ~= pb then
+            return pa > pb
+        end
+        return (a and a.mechanic or "") < (b and b.mechanic or "")
+    end)
+
+    return dangers
+end
+
+local function GetStopPriorityDangers(instanceCtx)
+    if not instanceCtx then return {} end
+
+    local items = {}
+    for index, kick in ipairs(instanceCtx.interruptPriority or {}) do
+        local matched
+        for _, danger in ipairs(instanceCtx.dangers or {}) do
+            local sameSpell = SafeText(danger.mechanic) == SafeText(kick.spell)
+                or SafeText(danger.spellName) == SafeText(kick.spell)
+            local sameMob = SafeText(danger.source) == SafeText(kick.mob)
+            if sameSpell and sameMob then
+                matched = danger
+                break
+            end
+        end
+
+        items[#items + 1] = {
+            priorityRank = index,
+            severity = kick.danger or (matched and matched.severity) or "warning",
+            mechanic = kick.spell,
+            source = kick.mob,
+            encounter = matched and matched.encounter or nil,
+            tip = matched and matched.tip or format("Assign a kick order for %s from %s and hold backup stops.", kick.spell or "the cast", kick.mob or "the mob"),
+            spellID = matched and matched.spellID or nil,
+            type = matched and matched.type or "interrupt",
+            capability = matched and matched.capability or "interrupt",
+            displayID = matched and (matched.displayID or matched.displayId or matched.modelDisplayID) or nil,
+            npcID = matched and (matched.npcID or matched.npcId) or nil,
+        }
+    end
+
+    return items
+end
+
+local function BuildClassRosterMap(roster)
+    local byClass = {}
+    for _, member in ipairs(roster or {}) do
+        local classToken = member.class
+        if classToken then
+            byClass[classToken] = byClass[classToken] or {}
+            byClass[classToken][#byClass[classToken] + 1] = member
+        end
+    end
+    return byClass
+end
+
+local function GetGroupCoverageState(result)
+    if not result then
+        return "Missing", DUNGEON_FOCUS_MISSING_HEX, SEVERITY_COLORS.critical, "unavailable", 5
+    end
+
+    if result.matchCount == 0 then
+        if result.personal then
+            return "Talent", DUNGEON_FOCUS_TALENT_HEX, SEVERITY_COLORS.warning, "canTalent", 5
+        end
+        return "Missing", DUNGEON_FOCUS_MISSING_HEX, SEVERITY_COLORS.critical, "unavailable", 5
+    end
+
+    if result.matchCount == 1 then
+        return "Thin", DUNGEON_FOCUS_PRIORITY_HEX, SEVERITY_COLORS.warning, "have", 4
+    end
+
+    return "Covered", DUNGEON_FOCUS_COVERED_HEX, COVERED_COLOR, "have", 2
+end
+
+local function BuildCoverageNames(matches)
+    local names = {}
+    for _, match in ipairs(matches or {}) do
+        names[#names + 1] = match.name or "Unknown"
+    end
+    return JoinNameList(names, 3)
+end
+
+local function BuildGroupCoverageDetail(result, structured, primaryDanger)
+    local parts = {}
+    local providerNames = BuildCoverageNames(result and result.matches)
+
+    if result and result.matchCount > 0 then
+        if providerNames then
+            if result.matchCount == 1 then
+                parts[#parts + 1] = providerNames .. " is the only current answer."
+            else
+                parts[#parts + 1] = providerNames .. " share this."
+            end
+        end
+        local summary = structured and structured.summary
+        if summary and summary ~= "Coverage available." then
+            parts[#parts + 1] = TrimSummary(summary, 120)
+        end
+    else
+        local gapText = structured and (structured.missingAction or structured.fullGroupWorkaround or structured.summary)
+        if gapText then
+            parts[#parts + 1] = TrimSummary(gapText, 140)
+        end
+    end
+
+    if result and result.personal and result.personal.detail then
+        parts[#parts + 1] = TrimSummary(result.personal.detail, 140)
+    end
+
+    if primaryDanger then
+        local dangerText = primaryDanger.mechanic or primaryDanger.tip
+        if dangerText then
+            local mob = SafeText(primaryDanger.source)
+            local prefix = mob and format("Dungeon pressure from %s: ", mob) or "Dungeon pressure: "
+            parts[#parts + 1] = prefix .. TrimSummary(primaryDanger.tip or primaryDanger.mechanic, 120)
+        end
+    end
+
+    return table.concat(parts, " ")
+end
+
+local function CreateGroupCoverageEntry(data, ctx, result, instanceCtx, extra)
+    if not result then return nil end
+
+    local structured = result.structured or BuildStructuredCapabilityOutput(result, ctx)
+    local capability = result.capability or {}
+    local relatedDangers = GetDungeonCapabilityDangers(instanceCtx, result.capabilityID)
+    local primaryDanger = relatedDangers[1]
+    local actionLabel, actionHex, accent, response, statusWeight = GetGroupCoverageState(result)
+    local providerNames = BuildCoverageNames(result.matches)
+    local mobNames = {}
+
+    for _, danger in ipairs(relatedDangers) do
+        local mob = SafeText(danger.source)
+        if mob and mob ~= "Various" and mob ~= "Environmental" then
+            mobNames[#mobNames + 1] = mob
+        end
+    end
+
+    local fallbackDanger = primaryDanger or {
+        capability = result.capabilityID,
+        dispelType = result.capabilityID and result.capabilityID:match("^dispel_(.+)$") or nil,
+    }
+
+    local entry = CreateDungeonFocusEntry(data, fallbackDanger, "group", {
+        id = extra and extra.id or ("group:" .. tostring(result.capabilityID)),
+        title = capability.label or structured.title or result.capabilityID or "Coverage",
+        mob = JoinNameList(mobNames, 2),
+        encounter = primaryDanger and SafeText(primaryDanger.encounter) or nil,
+        detail = BuildGroupCoverageDetail(result, structured, primaryDanger),
+        icon = (capability.icon and capability.icon > 0 and capability.icon)
+            or (result.matches and result.matches[1] and result.matches[1].icon)
+            or GetDungeonFocusIcon(data, fallbackDanger),
+        spellID = (result.matches and result.matches[1] and result.matches[1].spellID)
+            or (primaryDanger and primaryDanger.spellID)
+            or nil,
+        actionLabel = actionLabel,
+        actionHex = actionHex,
+        accent = accent,
+        response = response,
+        sortWeight = (extra and extra.sortWeight or 0) + statusWeight + GetDungeonFocusSeverityWeight(primaryDanger and primaryDanger.severity),
+        priorityRank = extra and extra.priorityRank or 99,
+        providersNote = BuildCoverageProviderNote(result.matches) or providerNames,
+        groupSummary = structured and structured.summary or nil,
+        talentNote = result.personal and result.personal.detail or nil,
+        missingNote = result.matchCount == 0 and (structured and (structured.missingAction or structured.fullGroupWorkaround) or nil) or nil,
+        npcID = primaryDanger and (primaryDanger.npcID or primaryDanger.npcId) or nil,
+        displayID = primaryDanger and (primaryDanger.displayID or primaryDanger.displayId or primaryDanger.modelDisplayID) or nil,
+    })
+
+    return entry
+end
+
+local function BuildDungeonGroupPriorityItems(ctx, resultMap, instanceCtx)
+    local data = GetData()
+    local ordered = {}
+    local seen = {}
+
+    for _, capabilityID in ipairs(instanceCtx and instanceCtx.dispelPriority or {}) do
+        if resultMap[capabilityID] and not seen[capabilityID] then
+            ordered[#ordered + 1] = capabilityID
+            seen[capabilityID] = true
+        end
+    end
+
+    for _, danger in ipairs(instanceCtx and instanceCtx.dangers or {}) do
+        local capabilityID = danger.capability
+        if capabilityID and resultMap[capabilityID] and not seen[capabilityID] then
+            ordered[#ordered + 1] = capabilityID
+            seen[capabilityID] = true
+        end
+    end
+
+    local items = {}
+    for index, capabilityID in ipairs(ordered) do
+        local entry = CreateGroupCoverageEntry(data, ctx, resultMap[capabilityID], instanceCtx, {
+            id = "group_priority:" .. capabilityID,
+            priorityRank = index,
+            sortWeight = 6,
+        })
+        if entry then
+            items[#items + 1] = entry
+        end
+    end
+
+    table.sort(items, function(a, b)
+        if a.priorityRank ~= b.priorityRank then
+            return a.priorityRank < b.priorityRank
+        end
+        if a.sortWeight ~= b.sortWeight then
+            return a.sortWeight > b.sortWeight
+        end
+        return (a.title or "") < (b.title or "")
+    end)
+
+    return items, seen
+end
+
+local function BuildDungeonGroupGapItems(ctx, resultMap, instanceCtx, skip)
+    local data = GetData()
+    local items = {}
+
+    for capabilityID, result in pairs(resultMap or {}) do
+        if not (skip and skip[capabilityID]) and (result.matchCount <= 1 or result.personal) then
+            local entry = CreateGroupCoverageEntry(data, ctx, result, instanceCtx, {
+                id = "group_gap:" .. capabilityID,
+                sortWeight = 4,
+            })
+            if entry then
+                items[#items + 1] = entry
+            end
+        end
+    end
+
+    table.sort(items, function(a, b)
+        if a.sortWeight ~= b.sortWeight then
+            return a.sortWeight > b.sortWeight
+        end
+        if a.priorityRank ~= b.priorityRank then
+            return a.priorityRank < b.priorityRank
+        end
+        return (a.title or "") < (b.title or "")
+    end)
+
+    return items
+end
+
+local function IsTalentTipRelevant(tipText, capabilityID, wantStops)
+    local text = (tipText or ""):lower()
+    local keywordMap = {
+        dispel_magic = { "magic dispel", "cleanse", "purify", "detox", "expunge", "remove corruption", "purify spirit" },
+        dispel_curse = { "curse", "remove curse", "remove corruption", "purify spirit" },
+        dispel_poison = { "poison", "detox", "expunge", "remove corruption", "poison cleansing" },
+        dispel_disease = { "disease", "cleanse", "purify", "detox", "anti-magic shell" },
+        dispel_bleed = { "bleed", "expunge" },
+        offensive_dispel = { "purge", "spellsteal", "dispel magic", "consume magic" },
+        soothe = { "soothe", "tranquilizing shot", "shiv", "enrage" },
+        bloodlust = { "bloodlust", "heroism", "time warp", "fury of the aspects", "primal rage" },
+        battle_res = { "rebirth", "raise ally", "soulstone", "intercession", "battle res" },
+    }
+
+    for _, keyword in ipairs(keywordMap[capabilityID] or {}) do
+        if text:find(keyword, 1, true) then
+            return true
+        end
+    end
+
+    if wantStops then
+        local stopKeywords = { "interrupt", "kick", "mind freeze", "counterspell", "disrupt", "quell", "rebuke", "spear hand", "muzzle", "stop", "stun", "crowd control" }
+        for _, keyword in ipairs(stopKeywords) do
+            if text:find(keyword, 1, true) then
+                return true
+            end
+        end
+    end
+
+    return false
+end
+
+local function GetTalentTipIcon(tip)
+    local spellID = ResolveSpellID(tip and tip.spell)
+    if spellID then
+        local texture = GET_SPELL_TEXTURE and GET_SPELL_TEXTURE(spellID)
+        if texture then
+            return texture, spellID
+        end
+    end
+    return 236223, spellID
+end
+
+local function BuildDungeonTalentSuggestionItems(instanceCtx, roster, gapItems)
+    if not instanceCtx or not instanceCtx.talentTips then return {} end
+
+    local byClass = BuildClassRosterMap(roster)
+    local gapCapabilities = {}
+    local wantStops = #(instanceCtx.interruptPriority or {}) > 0
+    local items = {}
+    local seen = {}
+
+    for _, entry in ipairs(gapItems or {}) do
+        local capabilityID = entry.id and entry.id:match("^group_gap:(.+)$")
+        if capabilityID then
+            gapCapabilities[capabilityID] = true
+        end
+    end
+
+    for _, tip in ipairs(instanceCtx.talentTips or {}) do
+        local members = byClass[tip.class]
+        if members and #members > 0 then
+            local relevant = false
+            for capabilityID in pairs(gapCapabilities) do
+                if IsTalentTipRelevant(tip.tip, capabilityID, false) then
+                    relevant = true
+                    break
+                end
+            end
+            if not relevant then
+                relevant = IsTalentTipRelevant(tip.tip, nil, wantStops)
+            end
+
+            if relevant then
+                local member = members[1]
+                local signature = table.concat({
+                    tip.class or "",
+                    SafeText(tip.spell) or "",
+                    TrimSummary(tip.tip, 80) or "",
+                }, ":")
+                if not seen[signature] then
+                    local icon, spellID = GetTalentTipIcon(tip)
+                    local memberName = SafeText(member and member.name) or (GetClassLabel(tip.class) or "Group Member")
+                    items[#items + 1] = {
+                        id = "group_talent:" .. signature,
+                        title = memberName .. (tip.spell and tip.spell ~= "" and (" - " .. tip.spell) or " - Utility"),
+                        detail = TrimSummary(tip.tip, 180),
+                        icon = icon,
+                        spellID = spellID,
+                        actionLabel = "Talent",
+                        actionHex = DUNGEON_FOCUS_TALENT_HEX,
+                        accent = SEVERITY_COLORS.warning,
+                        response = "canTalent",
+                        sortWeight = relevant and 4 or 2,
+                        groupSummary = "Current roster utility adjustment",
+                    }
+                    seen[signature] = true
+                end
+            end
+        end
+    end
+
+    table.sort(items, function(a, b)
+        if a.sortWeight ~= b.sortWeight then
+            return a.sortWeight > b.sortWeight
+        end
+        return (a.title or "") < (b.title or "")
+    end)
+
+    return items
+end
+
+local function GetDungeonBuffIcon(buff)
+    local statIcons = {
+        haste = 463531,
+        crit = 132090,
+        vers = 463829,
+        versatility = 463829,
+        mastery = 4620669,
+    }
+
+    local key = SafeText(buff and buff.statType)
+    key = key and key:lower() or nil
+    return statIcons[key] or 132328
+end
+
+local function BuildDungeonBuffItems(instanceCtx)
+    local preferredStats = GetPreferredStats()
+    local items = {}
+
+    for _, buff in ipairs(instanceCtx and instanceCtx.interactiveBuffs or {}) do
+        local active = buff.pattern and FindPlayerBuff(buff.pattern) or false
+        local recommended = IsStatRecommended(buff.statType, preferredStats)
+        local actionLabel
+        local actionHex
+        local accent
+
+        if active then
+            actionLabel = "Active"
+            actionHex = DUNGEON_FOCUS_COVERED_HEX
+            accent = COVERED_COLOR
+        elseif recommended then
+            actionLabel = "Best For You"
+            actionHex = DUNGEON_FOCUS_PRIORITY_HEX
+            accent = RECOMMEND_COLOR
+        else
+            actionLabel = "Get Buff"
+            actionHex = DUNGEON_FOCUS_NPC_HEX
+            accent = SEVERITY_COLORS.info
+        end
+
+        local detailParts = {}
+        if buff.effect then
+            detailParts[#detailParts + 1] = buff.effect .. "."
+        end
+        if buff.location then
+            detailParts[#detailParts + 1] = "Location: " .. buff.location .. "."
+        end
+        if buff.tip then
+            detailParts[#detailParts + 1] = TrimSummary(buff.tip, 140)
+        end
+
+        items[#items + 1] = {
+            id = "group_buff:" .. tostring(buff.object or buff.buff or #items + 1),
+            title = buff.buff or buff.object or "Dungeon Buff",
+            encounter = SafeText(buff.object),
+            detail = table.concat(detailParts, " "),
+            icon = GetDungeonBuffIcon(buff),
+            actionLabel = actionLabel,
+            actionHex = actionHex,
+            accent = accent,
+            groupSummary = "Dungeon interactable buff",
+            sortWeight = active and 5 or (recommended and 4 or 2),
+        }
+    end
+
+    table.sort(items, function(a, b)
+        if a.sortWeight ~= b.sortWeight then
+            return a.sortWeight > b.sortWeight
+        end
+        return (a.title or "") < (b.title or "")
+    end)
+
+    return items
+end
+
+local function BuildDungeonStopItems(instanceCtx)
+    local data = GetData()
+    local items = {}
+
+    for _, stop in ipairs(GetStopPriorityDangers(instanceCtx)) do
+        local actionLabel, actionHex = GetDungeonFocusAction(stop, "dps")
+        items[#items + 1] = CreateDungeonFocusEntry(data, stop, "dps", {
+            id = format("group_stop:%s:%s", SafeText(stop.source) or "mob", SafeText(stop.mechanic) or "cast"),
+            detail = TrimSummary(stop.tip, 160),
+            actionLabel = actionLabel,
+            actionHex = actionHex,
+            priorityRank = stop.priorityRank,
+            sortWeight = 4 + GetDungeonFocusSeverityWeight(stop.severity),
+        })
+    end
+
+    table.sort(items, function(a, b)
+        if a.priorityRank ~= b.priorityRank then
+            return a.priorityRank < b.priorityRank
+        end
+        if a.sortWeight ~= b.sortWeight then
+            return a.sortWeight > b.sortWeight
+        end
+        return (a.title or "") < (b.title or "")
+    end)
+
+    return items
+end
+
+local function BuildDungeonGroupFocusModel(ctx, results, noteLines, instanceCtx)
+    local roster = GetGroupRoster(results)
+    local resultMap = BuildResultMap(results)
+    local sections = {}
+
+    local priorityItems, prioritySeen = BuildDungeonGroupPriorityItems(ctx, resultMap, instanceCtx)
+    local gapItems = BuildDungeonGroupGapItems(ctx, resultMap, instanceCtx, prioritySeen)
+    local talentItems = BuildDungeonTalentSuggestionItems(instanceCtx, roster, gapItems)
+    local stopItems = BuildDungeonStopItems(instanceCtx)
+    local buffItems = BuildDungeonBuffItems(instanceCtx)
+
+    if #priorityItems > 0 then
+        sections[#sections + 1] = {
+            key = format("groupfocus:%s:priority", tostring(ctx and ctx.instanceID or "world")),
+            title = "Shared Coverage",
+            subtitle = "The dungeon asks for these answers first. Cards show who covers them and where the pressure comes from.",
+            items = priorityItems,
+            accent = { HexToColorTriplet(DUNGEON_FOCUS_PRIORITY_HEX, RECOMMEND_COLOR) },
+        }
+    end
+
+    if #gapItems > 0 then
+        sections[#sections + 1] = {
+            key = format("groupfocus:%s:gaps", tostring(ctx and ctx.instanceID or "world")),
+            title = "Thin Or Missing",
+            subtitle = "Roster gaps and one-player bottlenecks that need assignment, talent swaps, or cleaner routing.",
+            items = gapItems,
+            accent = { HexToColorTriplet(DUNGEON_FOCUS_MISSING_HEX, SEVERITY_COLORS.critical) },
+        }
+    end
+
+    if #talentItems > 0 then
+        sections[#sections + 1] = {
+            key = format("groupfocus:%s:talents", tostring(ctx and ctx.instanceID or "world")),
+            title = "Coverage Tweaks",
+            subtitle = "Utility and talent changes your current roster can make to tighten coverage.",
+            items = talentItems,
+            accent = { HexToColorTriplet(DUNGEON_FOCUS_TALENT_HEX, SEVERITY_COLORS.warning) },
+        }
+    end
+
+    if #stopItems > 0 then
+        sections[#sections + 1] = {
+            key = format("groupfocus:%s:stops", tostring(ctx and ctx.instanceID or "world")),
+            title = "Stop Assignments",
+            subtitle = "Shared interrupt and stop targets. Assign these before the pull instead of reacting late.",
+            items = stopItems,
+            accent = { HexToColorTriplet(DUNGEON_FOCUS_INTERRUPT_HEX, RECOMMEND_COLOR) },
+        }
+    end
+
+    if #buffItems > 0 then
+        sections[#sections + 1] = {
+            key = format("groupfocus:%s:buffs", tostring(ctx and ctx.instanceID or "world")),
+            title = "Dungeon Buffs",
+            subtitle = "Interactables and NPC buffs worth grabbing, including where to get them.",
+            items = buffItems,
+            accent = { HexToColorTriplet(DUNGEON_FOCUS_NPC_HEX, RECOMMEND_COLOR) },
+        }
+    end
+
+    return {
+        title = "Group Lens",
+        description = "Group-wide dungeon prep centered on shared coverage, roster bottlenecks, stop assignments, and buff pickups.",
+        notes = noteLines,
+        sections = sections,
+    }
+end
+
+local function RenderDungeonGroupFocusPage(content, yOff, ctx, results, noteLines, instanceCtx)
+    local viewer = GetViewerProfile()
+    local focus = BuildDungeonGroupFocusModel(ctx, results, noteLines, instanceCtx)
+    local hasItems = false
+
+    for _, section in ipairs(focus.sections or {}) do
+        if section.items and #section.items > 0 then
+            hasItems = true
+            break
+        end
+    end
+
+    if not hasItems then
+        return yOff, false
+    end
+
+    if viewer and viewer.mode == "browse" then
+        yOff = AddCard(content, yOff, "Theorycraft View",
+            format("Showing the group through a %s %s lens. Shared coverage treats your slot as this spec.",
+                viewer.specName or "Spec", viewer.classLabel or "Unknown"),
+            SEVERITY_COLORS.info)
+    end
+
+    if focus.notes and #focus.notes > 0 then
+        yOff = AddCard(content, yOff, "Group Briefing", table.concat(focus.notes, "\n"), RECOMMEND_COLOR)
+    end
+
+    if instanceCtx and instanceCtx.talentNotes then
+        yOff = AddCard(content, yOff, "Loadout Focus", instanceCtx.talentNotes, RECOMMEND_COLOR)
+    end
+
+    yOff = AddCard(content, yOff, focus.title, focus.description, RECOMMEND_COLOR)
+
+    for _, section in ipairs(focus.sections or {}) do
+        if section.items and #section.items > 0 then
+            yOff = RenderDungeonFocusSection(content, yOff, section)
+        end
+    end
+
+    S.uiState.workspaceShell:SetContentHeight(math.abs(yOff) + 32)
+    return yOff, true
 end
 
 local function EnsureDungeonFocusTooltipModel(tip)
@@ -2039,6 +2732,23 @@ local function AddDungeonFocusTooltip(tip, entry)
     if entry.detail and entry.detail ~= "" then
         AddTooltipSpacer(tip)
         tip:AddLine(entry.detail, 1, 1, 1, true)
+    end
+
+    if entry.providersNote and entry.providersNote ~= "" then
+        AddTooltipSpacer(tip)
+        tip:AddLine("Coverage: " .. entry.providersNote, 0.75, 0.85, 1.0, true)
+    end
+
+    if entry.groupSummary and entry.groupSummary ~= "" then
+        tip:AddLine(entry.groupSummary, 0.8, 0.8, 0.8, true)
+    end
+
+    if entry.talentNote and entry.talentNote ~= "" then
+        tip:AddLine("Talent swap: " .. entry.talentNote, 1.0, 0.78, 0.35, true)
+    end
+
+    if entry.missingNote and entry.missingNote ~= "" then
+        tip:AddLine("Gap plan: " .. entry.missingNote, 1.0, 0.5, 0.5, true)
     end
 
     if entry.response == "have" then
@@ -2145,7 +2855,7 @@ local function RenderDungeonFocusTile(parent, yOff, entry)
     return yOff - height - 8
 end
 
-local function RenderDungeonFocusSection(parent, yOff, section)
+RenderDungeonFocusSection = function(parent, yOff, section)
     if not section or not section.items or #section.items == 0 then return yOff end
 
     local theme = MedaUI.Theme
@@ -3069,6 +3779,13 @@ local function RenderGroupPage(ctx, scope)
     end
 
     local usedSet = {}
+    if scope == "group" and GetActivityKey(ctx) == "dungeon" then
+        local _, handled = RenderDungeonGroupFocusPage(content, -4, ctx, S.lastResults, notes, instanceCtx)
+        if handled then
+            return usedSet
+        end
+    end
+
     local yOff = RenderGroupCoverageSection(content, -4, ctx, S.lastResults, notes, usedSet)
     yOff = RenderStructuredPageSections(content, yOff, page, usedSet)
     S.uiState.workspaceShell:SetContentHeight(math.abs(yOff) + 32)
