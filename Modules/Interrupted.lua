@@ -10,6 +10,7 @@ local wipe = wipe
 local pcall = pcall
 local unpack = unpack
 local CreateFrame = CreateFrame
+local CreateFont = CreateFont
 local GetSpellBaseCooldown = GetSpellBaseCooldown
 local UnitName = UnitName
 local UnitGroupRolesAssigned = UnitGroupRolesAssigned
@@ -45,6 +46,7 @@ local InterruptResolver   = ns.Services and ns.Services.InterruptResolver
 
 local FALLBACK_WHITE = { 1, 1, 1 }
 local FALLBACK_INTERRUPT_ICON = 134400
+local OUTLINE_MAP = { none = "", outline = "OUTLINE", thick = "THICKOUTLINE" }
 
 -- ============================================================================
 -- State
@@ -65,9 +67,10 @@ local watcherHandle, mobKickHandle
 local reinspectTicker
 local UpdateDisplay
 
-local FONT_FACE = GameFontNormal and GameFontNormal:GetFont() or "Fonts\\FRIZQT__.TTF"
+local DEFAULT_FONT_FACE = GameFontNormal and GameFontNormal:GetFont() or "Fonts\\FRIZQT__.TTF"
 local FONT_FLAGS = "OUTLINE"
 local BAR_TEXTURE = "Interface\\BUTTONS\\WHITE8X8"
+local fontCache = {}
 
 -- ============================================================================
 -- Logging
@@ -76,6 +79,25 @@ local BAR_TEXTURE = "Interface\\BUTTONS\\WHITE8X8"
 local function Log(msg)   MedaAuras.Log(format("[Interrupted] %s", msg)) end
 local function LogDebug(msg) MedaAuras.LogDebug(format("[Interrupted] %s", msg)) end
 local function LogWarn(msg)  MedaAuras.LogWarn(format("[Interrupted] %s", msg)) end
+
+local function GetFontObj(fontValue, size, outline)
+    local path = MedaUI:GetFontPath(fontValue)
+    local flags = OUTLINE_MAP[outline] or outline or FONT_FLAGS
+    local key = (path or "default") .. "_" .. tostring(size) .. "_" .. flags
+    if fontCache[key] then return fontCache[key] end
+
+    local fontObject = CreateFont("MedaAurasInterrupted_" .. key:gsub("[^%w]", "_"))
+    if path then
+        fontObject:SetFont(path, size, flags)
+    else
+        fontObject:CopyFontObject(GameFontNormal)
+        local basePath = select(1, fontObject:GetFont()) or DEFAULT_FONT_FACE
+        fontObject:SetFont(basePath, size, flags)
+    end
+
+    fontCache[key] = fontObject
+    return fontObject
+end
 
 local function GetSpellCooldownRemaining(spellID)
     local cdInfo = C_Spell.GetSpellCooldown(spellID)
@@ -250,6 +272,64 @@ local function GetDisplayEntries(now)
     end
 
     return entries
+end
+
+local function GetReadyDisplayText(baseCd)
+    if db and db.showBaseCooldownWhenReady then
+        return format("%ds", baseCd or 0)
+    end
+
+    if db and db.showReady then
+        return "READY"
+    end
+
+    return ""
+end
+
+local function ResolveBarColor(classToken)
+    if db and db.barColorMode == "custom" then
+        local custom = db.customBarColor or FALLBACK_WHITE
+        return custom[1] or 1, custom[2] or 1, custom[3] or 1
+    end
+
+    local classColor = CLASS_COLORS[classToken] or FALLBACK_WHITE
+    return classColor[1], classColor[2], classColor[3]
+end
+
+local function ResolveNameColor(isPlayer, classToken)
+    if isPlayer and db and db.playerNameColorMode == "custom" then
+        local custom = db.customPlayerNameColor or FALLBACK_WHITE
+        return custom[1] or 1, custom[2] or 1, custom[3] or 1
+    end
+
+    if isPlayer and db and db.playerNameColorMode == "class" then
+        local classColor = CLASS_COLORS[classToken] or FALLBACK_WHITE
+        return classColor[1], classColor[2], classColor[3]
+    end
+
+    return 1, 1, 1
+end
+
+local function GetDetectedPlayerInterrupts()
+    if not InterruptResolver or not InterruptResolver.GetAvailablePlayerInterrupts then
+        return {}
+    end
+
+    local available = InterruptResolver:GetAvailablePlayerInterrupts()
+    local detected = {}
+    for _, entry in ipairs(available or {}) do
+        local spellID = entry.spellID or entry.id
+        local data = spellID and ALL_INTERRUPTS[spellID] or nil
+        detected[#detected + 1] = {
+            spellID = spellID,
+            name = entry.name or (data and data.name) or "Interrupt",
+            cd = entry.baseCD or entry.cd or (data and data.cd) or 0,
+            icon = (data and data.icon) or FALLBACK_INTERRUPT_ICON,
+            pet = entry.pet or false,
+        }
+    end
+
+    return detected
 end
 
 -- ============================================================================
@@ -581,15 +661,20 @@ end
 
 local function GetBarLayout()
     local fw = db.frameWidth
-    local titleH = db.showTitle and 20 or 0
-    local barH = math.max(12, db.barHeight)
-    local iconS = (db.showIcons ~= false) and barH or 0
+    local baseBarH = math.max(12, db.barHeight)
+    local titleFontSize = (db.titleFontSize and db.titleFontSize > 0) and db.titleFontSize or 12
+    local titleH = db.showTitle and math.max(20, titleFontSize + 8) or 0
+    local iconS = 0
+    if db.showIcons ~= false then
+        iconS = (db.iconSize and db.iconSize > 0) and db.iconSize or baseBarH
+    end
+    local barH = math.max(baseBarH, iconS)
     local barW = math.max(60, fw - iconS)
     local autoNameSize = math.max(9, math.floor(barH * 0.45))
     local autoCdSize = math.max(10, math.floor(barH * 0.55))
     local fontSize = (db.nameFontSize and db.nameFontSize > 0) and db.nameFontSize or autoNameSize
     local cdFontSize = (db.readyFontSize and db.readyFontSize > 0) and db.readyFontSize or autoCdSize
-    return barW, barH, iconS, fontSize, cdFontSize, titleH
+    return barW, barH, iconS, fontSize, cdFontSize, titleH, titleFontSize
 end
 
 local function RebuildBars()
@@ -601,11 +686,12 @@ local function RebuildBars()
         end
     end
 
-    local barW, barH, iconS, fontSize, cdFontSize, titleH = GetBarLayout()
+    local barW, barH, iconS, fontSize, cdFontSize, titleH, titleFontSize = GetBarLayout()
     mainFrame:SetWidth(db.frameWidth)
     mainFrame:SetAlpha(db.alpha)
 
     if titleText then
+        titleText:SetFontObject(GetFontObj(db.font or "default", titleFontSize, "outline"))
         if db.showTitle then titleText:Show() else titleText:Hide() end
     end
 
@@ -626,7 +712,7 @@ local function RebuildBars()
         end
 
         local ico = f:CreateTexture(nil, "ARTWORK")
-        ico:SetSize(iconS, barH)
+        ico:SetSize(iconS, iconS)
         ico:SetPoint("LEFT", 0, 0)
         ico:SetTexCoord(0.08, 0.92, 0.08, 0.92)
         if iconS == 0 then ico:Hide() end
@@ -655,7 +741,7 @@ local function RebuildBars()
         content:SetFrameLevel(sb:GetFrameLevel() + 1)
 
         local nm = content:CreateFontString(nil, "OVERLAY")
-        nm:SetFont(FONT_FACE, fontSize, FONT_FLAGS)
+        nm:SetFontObject(GetFontObj(db.font or "default", fontSize, "outline"))
         nm:SetPoint("LEFT", 6, 0)
         nm:SetJustifyH("LEFT")
         nm:SetWidth(barW - 50)
@@ -666,7 +752,7 @@ local function RebuildBars()
         f.nameText = nm
 
         local cdTxt = content:CreateFontString(nil, "OVERLAY")
-        cdTxt:SetFont(FONT_FACE, cdFontSize, FONT_FLAGS)
+        cdTxt:SetFontObject(GetFontObj(db.font or "default", cdFontSize, "outline"))
         cdTxt:SetPoint("RIGHT", -6, 0)
         cdTxt:SetShadowOffset(1, -1)
         cdTxt:SetShadowColor(0, 0, 0, 1)
@@ -708,7 +794,7 @@ local lastStateDump = 0
 UpdateDisplay = function()
     if not mainFrame or not shouldShowByZone then return end
 
-    local _, barH, _, _, _, titleH = GetBarLayout()
+    local _, barH, _, fontSize, _, titleH = GetBarLayout()
     local now = GetTime()
     local barIdx = 1
     local displayEntries = GetDisplayEntries(now)
@@ -732,8 +818,12 @@ UpdateDisplay = function()
         local bar = bars[barIdx]
         bar:Show()
         bar.icon:SetTexture(entry.data.icon or FALLBACK_INTERRUPT_ICON)
-        local col = CLASS_COLORS[entry.info.class] or FALLBACK_WHITE
-        bar.nameText:SetText("|cFFFFFFFF" .. entry.name .. "|r")
+        local barR, barG, barB = ResolveBarColor(entry.info.class)
+        local nameR, nameG, nameB = ResolveNameColor(entry.isPlayer, entry.info.class)
+        local nameOutline = entry.isPlayer and (db.playerNameOutline or "outline") or "outline"
+        bar.nameText:SetFontObject(GetFontObj(db.font or "default", fontSize, nameOutline))
+        bar.nameText:SetText(entry.name)
+        bar.nameText:SetTextColor(nameR, nameG, nameB)
 
         local rem = entry.remaining or 0
         local maxCd = entry.info.baseCd or entry.data.cd or 15
@@ -741,14 +831,14 @@ UpdateDisplay = function()
 
         if rem > 0 then
             bar.cdBar:SetValue(rem)
-            bar.cdBar:SetStatusBarColor(col[1], col[2], col[3], 0.85)
-            bar.barBg:SetVertexColor(col[1] * 0.25, col[2] * 0.25, col[3] * 0.25, 0.9)
+            bar.cdBar:SetStatusBarColor(barR, barG, barB, 0.85)
+            bar.barBg:SetVertexColor(barR * 0.25, barG * 0.25, barB * 0.25, 0.9)
             bar.cdText:SetText(string.format("%.0f", rem))
             bar.cdText:SetTextColor(1, 1, 1)
         else
             bar.cdBar:SetValue(0)
-            bar.barBg:SetVertexColor(col[1], col[2], col[3], 0.85)
-            bar.cdText:SetText(db.showReady and "READY" or "")
+            bar.barBg:SetVertexColor(barR, barG, barB, 0.85)
+            bar.cdText:SetText(GetReadyDisplayText(maxCd))
             bar.cdText:SetTextColor(0.2, 1.0, 0.2)
         end
         barIdx = barIdx + 1
@@ -804,7 +894,7 @@ local function CreateUI()
     bg:SetVertexColor(0.05, 0.05, 0.05, 0.85)
 
     titleText = mainFrame:CreateFontString(nil, "OVERLAY")
-    titleText:SetFont(FONT_FACE, 12, FONT_FLAGS)
+    titleText:SetFontObject(GetFontObj(db.font or "default", (db.titleFontSize and db.titleFontSize > 0) and db.titleFontSize or 12, "outline"))
     titleText:SetPoint("TOP", 0, -3)
     titleText:SetText("|cFF00DDDDInterrupts|r")
     if not db.showTitle then titleText:Hide() end
@@ -1011,10 +1101,19 @@ local MODULE_DEFAULTS = {
     showNames = true,
     growUp = false,
     alpha = 0.9,
+    font = "default",
+    titleFontSize = 12,
     nameFontSize = 0,
     readyFontSize = 0,
+    iconSize = 0,
     showReady = true,
+    showBaseCooldownWhenReady = false,
     sortByNextAvailable = true,
+    barColorMode = "class",
+    customBarColor = { 1, 1, 1 },
+    playerNameColorMode = "default",
+    customPlayerNameColor = { 1, 1, 1 },
+    playerNameOutline = "outline",
     showInDungeon = true,
     showInRaid = false,
     showInOpenWorld = false,
@@ -1061,11 +1160,11 @@ local function CreatePreviewBars()
     pvInner:SetAllPoints()
     pvBars = {}
 
-    local barW, barH, iconS, fontSize, cdFontSize, titleH = GetBarLayout()
+    local barW, barH, iconS, fontSize, cdFontSize, titleH, titleFontSize = GetBarLayout()
 
     if db.showTitle then
         pvTitleText = pvInner:CreateFontString(nil, "OVERLAY")
-        pvTitleText:SetFont(FONT_FACE, 12, FONT_FLAGS)
+        pvTitleText:SetFontObject(GetFontObj(db.font or "default", titleFontSize, "outline"))
         pvTitleText:SetPoint("TOP", 0, -3)
         pvTitleText:SetText("|cFF00DDDDInterrupts|r")
     else
@@ -1089,7 +1188,7 @@ local function CreatePreviewBars()
         end
 
         local ico = f:CreateTexture(nil, "ARTWORK")
-        ico:SetSize(iconS, barH)
+        ico:SetSize(iconS, iconS)
         ico:SetPoint("LEFT", 0, 0)
         ico:SetTexCoord(0.08, 0.92, 0.08, 0.92)
         if iconS == 0 then ico:Hide() end
@@ -1118,7 +1217,7 @@ local function CreatePreviewBars()
         content:SetFrameLevel(sb:GetFrameLevel() + 1)
 
         local nm = content:CreateFontString(nil, "OVERLAY")
-        nm:SetFont(FONT_FACE, fontSize, FONT_FLAGS)
+        nm:SetFontObject(GetFontObj(db.font or "default", fontSize, "outline"))
         nm:SetPoint("LEFT", 6, 0)
         nm:SetJustifyH("LEFT")
         nm:SetWidth(barW - 50)
@@ -1129,7 +1228,7 @@ local function CreatePreviewBars()
         f.nameText = nm
 
         local cdTxt = content:CreateFontString(nil, "OVERLAY")
-        cdTxt:SetFont(FONT_FACE, cdFontSize, FONT_FLAGS)
+        cdTxt:SetFontObject(GetFontObj(db.font or "default", cdFontSize, "outline"))
         cdTxt:SetPoint("RIGHT", -6, 0)
         cdTxt:SetShadowOffset(1, -1)
         cdTxt:SetShadowColor(0, 0, 0, 1)
@@ -1181,22 +1280,23 @@ local function UpdatePreview()
         local data = ALL_INTERRUPTS[mock.spellID]
         if data then
             bar.icon:SetTexture(data.icon)
-            local col = CLASS_COLORS[mock.class] or FALLBACK_WHITE
-            bar.nameText:SetText("|cFFFFFFFF" .. mock.name .. "|r")
+            local barR, barG, barB = ResolveBarColor(mock.class)
+            bar.nameText:SetText(mock.name)
+            bar.nameText:SetTextColor(1, 1, 1)
             local rem = entry.remaining or 0
 
             bar.cdBar:SetMinMaxValues(0, mock.baseCd)
 
             if rem > 0 then
                 bar.cdBar:SetValue(rem)
-                bar.cdBar:SetStatusBarColor(col[1], col[2], col[3], 0.85)
-                bar.barBg:SetVertexColor(col[1] * 0.25, col[2] * 0.25, col[3] * 0.25, 0.9)
+                bar.cdBar:SetStatusBarColor(barR, barG, barB, 0.85)
+                bar.barBg:SetVertexColor(barR * 0.25, barG * 0.25, barB * 0.25, 0.9)
                 bar.cdText:SetText(format("%.0f", rem))
                 bar.cdText:SetTextColor(1, 1, 1)
             else
                 bar.cdBar:SetValue(0)
-                bar.barBg:SetVertexColor(col[1], col[2], col[3], 0.85)
-                bar.cdText:SetText(db.showReady and "READY" or "")
+                bar.barBg:SetVertexColor(barR, barG, barB, 0.85)
+                bar.cdText:SetText(GetReadyDisplayText(mock.baseCd))
                 bar.cdText:SetTextColor(0.2, 1.0, 0.2)
             end
         end
@@ -1246,158 +1346,349 @@ local function BuildSettingsPage(parent, moduleDB)
     end
 
     local LEFT_X = 0
-    local yOff = 0
+    local RIGHT_X = 240
 
-    local header = MedaUI:CreateSectionHeader(parent, "Interrupted")
-    header:SetPoint("TOPLEFT", LEFT_X, yOff)
-    yOff = yOff - 45
-
-    local enableCB = MedaUI:CreateCheckbox(parent, "Enable Module")
-    enableCB:SetPoint("TOPLEFT", LEFT_X, yOff)
-    enableCB:SetChecked(moduleDB.enabled)
-    enableCB.OnValueChanged = function(_, checked)
-        if checked then MedaAuras:EnableModule(MODULE_NAME)
-        else MedaAuras:DisableModule(MODULE_NAME) end
-        MedaAuras:RefreshSidebarDot(MODULE_NAME)
-    end
-    yOff = yOff - 35
-
-    -- Display settings
-    local dispHeader = MedaUI:CreateSectionHeader(parent, "Display")
-    dispHeader:SetPoint("TOPLEFT", LEFT_X, yOff)
-    yOff = yOff - 40
-
-    local titleCB = MedaUI:CreateCheckbox(parent, "Show Title")
-    titleCB:SetPoint("TOPLEFT", LEFT_X, yOff)
-    titleCB:SetChecked(moduleDB.showTitle)
-    titleCB.OnValueChanged = function(_, checked)
-        moduleDB.showTitle = checked
-        if mainFrame then RebuildBars() end
-        RebuildPreview()
-    end
-
-    local lockCB = MedaUI:CreateCheckbox(parent, "Lock Position")
-    lockCB:SetPoint("TOPLEFT", 240, yOff)
-    lockCB:SetChecked(moduleDB.locked)
-    lockCB.OnValueChanged = function(_, checked) moduleDB.locked = checked end
-    yOff = yOff - 30
-
-    local iconsCB = MedaUI:CreateCheckbox(parent, "Show Icons")
-    iconsCB:SetPoint("TOPLEFT", LEFT_X, yOff)
-    iconsCB:SetChecked(moduleDB.showIcons ~= false)
-    iconsCB.OnValueChanged = function(_, checked)
-        moduleDB.showIcons = checked
-        if mainFrame then RebuildBars() end
-        RebuildPreview()
-    end
-
-    local namesCB = MedaUI:CreateCheckbox(parent, "Show Names")
-    namesCB:SetPoint("TOPLEFT", 240, yOff)
-    namesCB:SetChecked(moduleDB.showNames ~= false)
-    namesCB.OnValueChanged = function(_, checked)
-        moduleDB.showNames = checked
-        if mainFrame then RebuildBars() end
-        RebuildPreview()
-    end
-    yOff = yOff - 30
-
-    local growCB = MedaUI:CreateCheckbox(parent, "Grow Upward")
-    growCB:SetPoint("TOPLEFT", LEFT_X, yOff)
-    growCB:SetChecked(moduleDB.growUp)
-    growCB.OnValueChanged = function(_, checked)
-        moduleDB.growUp = checked
-        if mainFrame then RebuildBars() end
-        RebuildPreview()
-    end
-
-    local sortCB = MedaUI:CreateCheckbox(parent, "Sort By Next Available")
-    sortCB:SetPoint("TOPLEFT", 240, yOff)
-    sortCB:SetChecked(moduleDB.sortByNextAvailable ~= false)
-    sortCB.OnValueChanged = function(_, checked)
-        moduleDB.sortByNextAvailable = checked
-        UpdateDisplay()
-        UpdatePreview()
-    end
-    yOff = yOff - 30
-
-    local readyCB = MedaUI:CreateCheckbox(parent, "Show READY Text")
-    readyCB:SetPoint("TOPLEFT", LEFT_X, yOff)
-    readyCB:SetChecked(moduleDB.showReady)
-    readyCB.OnValueChanged = function(_, checked)
-        moduleDB.showReady = checked
-        UpdateDisplay()
-        UpdatePreview()
-    end
-    yOff = yOff - 40
-
-    local alphaSlider = MedaUI:CreateLabeledSlider(parent, "Opacity", 200, 0.3, 1.0, 0.05)
-    alphaSlider:SetPoint("TOPLEFT", LEFT_X, yOff)
-    alphaSlider:SetValue(moduleDB.alpha)
-    alphaSlider.OnValueChanged = function(_, value)
-        moduleDB.alpha = value
-        if mainFrame then mainFrame:SetAlpha(value) end
-        UpdatePreview()
-    end
-    yOff = yOff - 55
-
-    -- Zone visibility
-    local zoneHeader = MedaUI:CreateSectionHeader(parent, "Show In")
-    zoneHeader:SetPoint("TOPLEFT", LEFT_X, yOff)
-    yOff = yOff - 40
-
-    local function ZoneCB(label, key, x, y)
-        local cb = MedaUI:CreateCheckbox(parent, label)
-        cb:SetPoint("TOPLEFT", x, y)
-        cb:SetChecked(moduleDB[key])
-        cb.OnValueChanged = function(_, checked)
-            moduleDB[key] = checked
-            CheckZoneVisibility()
+    local function RefreshVisualLayout()
+        wipe(fontCache)
+        if mainFrame then
+            RebuildBars()
+            UpdateDisplay()
         end
-        return cb
+        RebuildPreview()
     end
 
-    ZoneCB("Dungeons", "showInDungeon", LEFT_X, yOff)
-    ZoneCB("Raids", "showInRaid", 240, yOff)
-    yOff = yOff - 30
-    ZoneCB("Open World", "showInOpenWorld", LEFT_X, yOff)
-    ZoneCB("Arena", "showInArena", 240, yOff)
-    yOff = yOff - 30
-    ZoneCB("Battlegrounds", "showInBG", LEFT_X, yOff)
-    yOff = yOff - 40
-
-    -- Debug info
-    if mySpellID and ALL_INTERRUPTS[mySpellID] then
-        local infoLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        infoLabel:SetPoint("TOPLEFT", LEFT_X, yOff)
-        infoLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
-        infoLabel:SetText(format("Detected: %s (ID %d, CD %ds)",
-            ALL_INTERRUPTS[mySpellID].name, mySpellID, myBaseCd or 0))
-        yOff = yOff - 20
-    end
-
-    local renderableEntries = GetRenderablePartyEntries(GetTime())
-    if #renderableEntries > 0 then
-        local partyLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        partyLabel:SetPoint("TOPLEFT", LEFT_X, yOff)
-        partyLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
-        partyLabel:SetText(format("Tracking %d party member(s)", #renderableEntries))
-        yOff = yOff - 20
-
-        for _, entry in ipairs(renderableEntries) do
-            local trackedLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            trackedLabel:SetPoint("TOPLEFT", LEFT_X + 12, yOff)
-            trackedLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
-            trackedLabel:SetText(format("- %s: %s (%ds)",
-                entry.name,
-                entry.data.name or "Interrupt",
-                entry.info.baseCd or entry.data.cd or 15))
-            yOff = yOff - 18
+    local function RefreshVisualState()
+        if mainFrame then
+            UpdateDisplay()
         end
+        UpdatePreview()
     end
 
-    yOff = yOff - 10
+    local _, tabs = MedaAuras:CreateConfigTabs(parent, {
+        { id = "general", label = "General" },
+        { id = "sizingfont", label = "Sizing & Font" },
+    })
 
-    MedaAuras:SetContentHeight(math.abs(yOff))
+    local generalHeight
+    local sizingHeight
+
+    do
+        local p = tabs["general"]
+        local generalY = 0
+
+        local header = MedaUI:CreateSectionHeader(p, "General")
+        header:SetPoint("TOPLEFT", LEFT_X, generalY)
+        generalY = generalY - 45
+
+        local enableCB = MedaUI:CreateCheckbox(p, "Enable Module")
+        enableCB:SetPoint("TOPLEFT", LEFT_X, generalY)
+        enableCB:SetChecked(moduleDB.enabled)
+        enableCB.OnValueChanged = function(_, checked)
+            if checked then MedaAuras:EnableModule(MODULE_NAME)
+            else MedaAuras:DisableModule(MODULE_NAME) end
+            MedaAuras:RefreshSidebarDot(MODULE_NAME)
+        end
+        generalY = generalY - 35
+
+        local dispHeader = MedaUI:CreateSectionHeader(p, "Display")
+        dispHeader:SetPoint("TOPLEFT", LEFT_X, generalY)
+        generalY = generalY - 40
+
+        local titleCB = MedaUI:CreateCheckbox(p, "Show Title")
+        titleCB:SetPoint("TOPLEFT", LEFT_X, generalY)
+        titleCB:SetChecked(moduleDB.showTitle)
+        titleCB.OnValueChanged = function(_, checked)
+            moduleDB.showTitle = checked
+            RefreshVisualLayout()
+        end
+
+        local lockCB = MedaUI:CreateCheckbox(p, "Lock Position")
+        lockCB:SetPoint("TOPLEFT", RIGHT_X, generalY)
+        lockCB:SetChecked(moduleDB.locked)
+        lockCB.OnValueChanged = function(_, checked) moduleDB.locked = checked end
+        generalY = generalY - 30
+
+        local iconsCB = MedaUI:CreateCheckbox(p, "Show Icons")
+        iconsCB:SetPoint("TOPLEFT", LEFT_X, generalY)
+        iconsCB:SetChecked(moduleDB.showIcons ~= false)
+        iconsCB.OnValueChanged = function(_, checked)
+            moduleDB.showIcons = checked
+            RefreshVisualLayout()
+        end
+
+        local namesCB = MedaUI:CreateCheckbox(p, "Show Names")
+        namesCB:SetPoint("TOPLEFT", RIGHT_X, generalY)
+        namesCB:SetChecked(moduleDB.showNames ~= false)
+        namesCB.OnValueChanged = function(_, checked)
+            moduleDB.showNames = checked
+            RefreshVisualLayout()
+        end
+        generalY = generalY - 30
+
+        local growCB = MedaUI:CreateCheckbox(p, "Grow Upward")
+        growCB:SetPoint("TOPLEFT", LEFT_X, generalY)
+        growCB:SetChecked(moduleDB.growUp)
+        growCB.OnValueChanged = function(_, checked)
+            moduleDB.growUp = checked
+            RefreshVisualLayout()
+        end
+
+        local sortCB = MedaUI:CreateCheckbox(p, "Sort By Next Available")
+        sortCB:SetPoint("TOPLEFT", RIGHT_X, generalY)
+        sortCB:SetChecked(moduleDB.sortByNextAvailable ~= false)
+        sortCB.OnValueChanged = function(_, checked)
+            moduleDB.sortByNextAvailable = checked
+            RefreshVisualState()
+        end
+        generalY = generalY - 30
+
+        local readyCB = MedaUI:CreateCheckbox(p, "Show READY Text")
+        readyCB:SetPoint("TOPLEFT", LEFT_X, generalY)
+        readyCB:SetChecked(moduleDB.showReady)
+        readyCB.OnValueChanged = function(_, checked)
+            moduleDB.showReady = checked
+            RefreshVisualState()
+        end
+
+        local readyCdCB = MedaUI:CreateCheckbox(p, "Show Base Cooldown When Ready")
+        readyCdCB:SetPoint("TOPLEFT", RIGHT_X, generalY)
+        readyCdCB:SetChecked(moduleDB.showBaseCooldownWhenReady == true)
+        readyCdCB.OnValueChanged = function(_, checked)
+            moduleDB.showBaseCooldownWhenReady = checked
+            RefreshVisualState()
+        end
+        generalY = generalY - 40
+
+        local alphaSlider = MedaUI:CreateLabeledSlider(p, "Opacity", 200, 0.3, 1.0, 0.05)
+        alphaSlider:SetPoint("TOPLEFT", LEFT_X, generalY)
+        alphaSlider:SetValue(moduleDB.alpha)
+        alphaSlider.OnValueChanged = function(_, value)
+            moduleDB.alpha = value
+            if mainFrame then mainFrame:SetAlpha(value) end
+            UpdatePreview()
+        end
+        generalY = generalY - 55
+
+        local colorHeader = MedaUI:CreateSectionHeader(p, "Colors")
+        colorHeader:SetPoint("TOPLEFT", LEFT_X, generalY)
+        generalY = generalY - 45
+
+        local barColorDD = MedaUI:CreateLabeledDropdown(p, "Bar Color", 200, {
+            { value = "class", label = "Class Color" },
+            { value = "custom", label = "Custom" },
+        })
+        barColorDD:SetPoint("TOPLEFT", LEFT_X, generalY)
+        barColorDD:SetSelected(moduleDB.barColorMode or "class")
+
+        local barColorPicker = MedaUI:CreateLabeledColorPicker(p, "Custom Bar Color")
+        barColorPicker:SetPoint("TOPLEFT", RIGHT_X, generalY)
+        local barColor = moduleDB.customBarColor or { 1, 1, 1 }
+        barColorPicker:SetColor(barColor[1], barColor[2], barColor[3])
+        barColorPicker:SetAlpha((moduleDB.barColorMode or "class") == "custom" and 1 or 0.4)
+        barColorPicker.OnColorChanged = function(_, r, g, b)
+            moduleDB.customBarColor = { r, g, b }
+            RefreshVisualState()
+        end
+        barColorDD.OnValueChanged = function(_, value)
+            moduleDB.barColorMode = value
+            barColorPicker:SetAlpha(value == "custom" and 1 or 0.4)
+            RefreshVisualState()
+        end
+        generalY = generalY - 55
+
+        local playerNameColorDD = MedaUI:CreateLabeledDropdown(p, "Player Name Color", 200, {
+            { value = "default", label = "Default White" },
+            { value = "class", label = "Class Color" },
+            { value = "custom", label = "Custom" },
+        })
+        playerNameColorDD:SetPoint("TOPLEFT", LEFT_X, generalY)
+        playerNameColorDD:SetSelected(moduleDB.playerNameColorMode or "default")
+
+        local playerNameColorPicker = MedaUI:CreateLabeledColorPicker(p, "Custom Player Name")
+        playerNameColorPicker:SetPoint("TOPLEFT", RIGHT_X, generalY)
+        local playerNameColor = moduleDB.customPlayerNameColor or { 1, 1, 1 }
+        playerNameColorPicker:SetColor(playerNameColor[1], playerNameColor[2], playerNameColor[3])
+        playerNameColorPicker:SetAlpha((moduleDB.playerNameColorMode or "default") == "custom" and 1 or 0.4)
+        playerNameColorPicker.OnColorChanged = function(_, r, g, b)
+            moduleDB.customPlayerNameColor = { r, g, b }
+            RefreshVisualState()
+        end
+        playerNameColorDD.OnValueChanged = function(_, value)
+            moduleDB.playerNameColorMode = value
+            playerNameColorPicker:SetAlpha(value == "custom" and 1 or 0.4)
+            RefreshVisualState()
+        end
+        generalY = generalY - 55
+
+        local zoneHeader = MedaUI:CreateSectionHeader(p, "Show In")
+        zoneHeader:SetPoint("TOPLEFT", LEFT_X, generalY)
+        generalY = generalY - 40
+
+        local function ZoneCB(label, key, x, y)
+            local cb = MedaUI:CreateCheckbox(p, label)
+            cb:SetPoint("TOPLEFT", x, y)
+            cb:SetChecked(moduleDB[key])
+            cb.OnValueChanged = function(_, checked)
+                moduleDB[key] = checked
+                CheckZoneVisibility()
+            end
+            return cb
+        end
+
+        ZoneCB("Dungeons", "showInDungeon", LEFT_X, generalY)
+        ZoneCB("Raids", "showInRaid", RIGHT_X, generalY)
+        generalY = generalY - 30
+        ZoneCB("Open World", "showInOpenWorld", LEFT_X, generalY)
+        ZoneCB("Arena", "showInArena", RIGHT_X, generalY)
+        generalY = generalY - 30
+        ZoneCB("Battlegrounds", "showInBG", LEFT_X, generalY)
+        generalY = generalY - 40
+
+        local detectedInterrupts = GetDetectedPlayerInterrupts()
+        if #detectedInterrupts > 0 then
+            local detectedHeader = MedaUI:CreateSectionHeader(p, "Detected Interrupts")
+            detectedHeader:SetPoint("TOPLEFT", LEFT_X, generalY)
+            generalY = generalY - 45
+
+            local detectedFrame = CreateFrame("Frame", nil, p)
+            detectedFrame:SetPoint("TOPLEFT", LEFT_X, generalY)
+            detectedFrame:SetSize(440, 28 + (#detectedInterrupts * 22))
+
+            local detectedBg = detectedFrame:CreateTexture(nil, "BACKGROUND")
+            detectedBg:SetAllPoints()
+            detectedBg:SetTexture(BAR_TEXTURE)
+            detectedBg:SetVertexColor(0.08, 0.08, 0.08, 0.85)
+
+            local detectedName = detectedFrame:CreateFontString(nil, "OVERLAY")
+            detectedName:SetFontObject(GetFontObj(moduleDB.font or "default", 13, moduleDB.playerNameOutline or "outline"))
+            detectedName:SetPoint("TOPLEFT", 10, -8)
+            detectedName:SetText(myName or UnitName("player") or "Player")
+            do
+                local r, g, b = ResolveNameColor(true, myClass)
+                detectedName:SetTextColor(r, g, b)
+            end
+
+            local detectedLabel = detectedFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            detectedLabel:SetPoint("TOPRIGHT", -10, -10)
+            detectedLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
+            detectedLabel:SetText(format("%d detected", #detectedInterrupts))
+
+            local rowY = -30
+            for _, entry in ipairs(detectedInterrupts) do
+                local icon = detectedFrame:CreateTexture(nil, "ARTWORK")
+                icon:SetSize(16, 16)
+                icon:SetPoint("TOPLEFT", 10, rowY)
+                icon:SetTexture(entry.icon)
+                icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+                local spellLabel = detectedFrame:CreateFontString(nil, "OVERLAY")
+                spellLabel:SetFontObject(GetFontObj(moduleDB.font or "default", 11, "outline"))
+                spellLabel:SetPoint("LEFT", icon, "RIGHT", 8, 0)
+                spellLabel:SetTextColor(unpack(MedaUI.Theme.text))
+                spellLabel:SetText(entry.pet and format("%s  |cFF8FD3FFPet|r", entry.name) or entry.name)
+
+                local cdLabel = detectedFrame:CreateFontString(nil, "OVERLAY")
+                cdLabel:SetFontObject(GetFontObj(moduleDB.font or "default", 11, "outline"))
+                cdLabel:SetPoint("RIGHT", detectedFrame, "TOPRIGHT", -10, rowY - 1)
+                cdLabel:SetJustifyH("RIGHT")
+                cdLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
+                cdLabel:SetText(format("%ds", entry.cd or 0))
+
+                rowY = rowY - 22
+            end
+
+            generalY = generalY - (30 + (#detectedInterrupts * 22))
+        end
+
+        local renderableEntries = GetRenderablePartyEntries(GetTime())
+        if #renderableEntries > 0 then
+            local partyLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            partyLabel:SetPoint("TOPLEFT", LEFT_X, generalY)
+            partyLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
+            partyLabel:SetText(format("Tracking %d party member(s)", #renderableEntries))
+            generalY = generalY - 20
+
+            for _, entry in ipairs(renderableEntries) do
+                local trackedLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+                trackedLabel:SetPoint("TOPLEFT", LEFT_X + 12, generalY)
+                trackedLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
+                trackedLabel:SetText(format("- %s: %s (%ds)",
+                    entry.name,
+                    entry.data.name or "Interrupt",
+                    entry.info.baseCd or entry.data.cd or 15))
+                generalY = generalY - 18
+            end
+        end
+
+        generalHeight = math.abs(generalY - 10)
+    end
+
+    do
+        local p = tabs["sizingfont"]
+        local sizingY = 0
+
+        local sizeHeader = MedaUI:CreateSectionHeader(p, "Sizing & Font")
+        sizeHeader:SetPoint("TOPLEFT", LEFT_X, sizingY)
+        sizingY = sizingY - 45
+
+        local fontPicker = MedaUI:CreateLabeledDropdown(p, "Font", 200, MedaUI:GetFontList(), "font")
+        fontPicker:SetPoint("TOPLEFT", LEFT_X, sizingY)
+        fontPicker:SetSelected(moduleDB.font or "default")
+        fontPicker.OnValueChanged = function(_, value)
+            moduleDB.font = value
+            RefreshVisualLayout()
+        end
+
+        local playerOutlineDD = MedaUI:CreateLabeledDropdown(p, "Player Name Outline", 200, {
+            { value = "none", label = "None" },
+            { value = "outline", label = "Outline" },
+            { value = "thick", label = "Thick Outline" },
+        })
+        playerOutlineDD:SetPoint("TOPLEFT", RIGHT_X, sizingY)
+        playerOutlineDD:SetSelected(moduleDB.playerNameOutline or "outline")
+        playerOutlineDD.OnValueChanged = function(_, value)
+            moduleDB.playerNameOutline = value
+            RefreshVisualState()
+        end
+        sizingY = sizingY - 55
+
+        local titleSizeSlider = MedaUI:CreateLabeledSlider(p, "Title Text Size", 200, 8, 32, 1)
+        titleSizeSlider:SetPoint("TOPLEFT", LEFT_X, sizingY)
+        titleSizeSlider:SetValue(moduleDB.titleFontSize or 12)
+        titleSizeSlider.OnValueChanged = function(_, value)
+            moduleDB.titleFontSize = value
+            RefreshVisualLayout()
+        end
+
+        local nameSizeSlider = MedaUI:CreateLabeledSlider(p, "Name Text Size", 200, 0, 48, 1)
+        nameSizeSlider:SetPoint("TOPLEFT", RIGHT_X, sizingY)
+        nameSizeSlider:SetValue(moduleDB.nameFontSize or 0)
+        nameSizeSlider.OnValueChanged = function(_, value)
+            moduleDB.nameFontSize = value
+            RefreshVisualLayout()
+        end
+        sizingY = sizingY - 55
+
+        local cdSizeSlider = MedaUI:CreateLabeledSlider(p, "Cooldown/Ready Text Size", 200, 0, 48, 1)
+        cdSizeSlider:SetPoint("TOPLEFT", LEFT_X, sizingY)
+        cdSizeSlider:SetValue(moduleDB.readyFontSize or 0)
+        cdSizeSlider.OnValueChanged = function(_, value)
+            moduleDB.readyFontSize = value
+            RefreshVisualLayout()
+        end
+
+        local iconSizeSlider = MedaUI:CreateLabeledSlider(p, "Icon Size", 200, 0, 48, 1)
+        iconSizeSlider:SetPoint("TOPLEFT", RIGHT_X, sizingY)
+        iconSizeSlider:SetValue(moduleDB.iconSize or 0)
+        iconSizeSlider.OnValueChanged = function(_, value)
+            moduleDB.iconSize = value
+            RefreshVisualLayout()
+        end
+
+        sizingHeight = math.abs(sizingY - 70)
+    end
+
+    MedaAuras:SetContentHeight(math.max(generalHeight, sizingHeight, 700))
 end
 
 -- ============================================================================

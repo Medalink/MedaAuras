@@ -91,6 +91,15 @@ function InterruptResolver:ResolvePlayerInterrupt()
     local specIndex = GetSpecialization()
     local specID = specIndex and GetSpecializationInfo(specIndex) or nil
 
+    local available = self:GetAvailablePlayerInterrupts()
+    return available[1], specID, classToken
+end
+
+function InterruptResolver:GetAvailablePlayerInterrupts()
+    local _, classToken = UnitClass("player")
+    local specIndex = GetSpecialization()
+    local specID = specIndex and GetSpecializationInfo(specIndex) or nil
+
     local candidates
     if specID then
         candidates = self:GetSpecInterruptCandidates(specID)
@@ -98,11 +107,17 @@ function InterruptResolver:ResolvePlayerInterrupt()
         candidates = InterruptData:GetPlayerClassInterruptCandidates(classToken)
     end
 
+    local available = {}
+    local seen = {}
     for _, entry in ipairs(candidates or {}) do
         if IsSpellAvailable(entry) then
-            return entry, specID, classToken
+            local key = (entry.name or tostring(entry.spellID or entry.id or "")) .. ":" .. tostring(entry.baseCD or entry.cd or "")
+            if not seen[key] then
+                seen[key] = true
+                available[#available + 1] = entry
+            end
         end
     end
 
-    return nil, specID, classToken
+    return available, specID, classToken
 end
