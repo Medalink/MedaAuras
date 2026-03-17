@@ -6,7 +6,7 @@ D.groupCompDisplay[#D.groupCompDisplay + 1] = {
     id           = "dispel_matrix",
     label        = "Dispel Coverage",
     description  = "Shows which dispel types your group can handle.",
-    capabilities = { "dispel_curse", "dispel_poison", "dispel_disease", "dispel_magic" },
+    capabilities = { "dispel_curse", "dispel_poison", "dispel_disease", "dispel_magic", "dispel_bleed" },
 }
 
 D.groupCompDisplay[#D.groupCompDisplay + 1] = {

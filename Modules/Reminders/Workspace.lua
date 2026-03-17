@@ -24,6 +24,7 @@ local GetActivityKey
 local GetClassLabel
 local EnsurePersonalSchema
 local EnsureSpecRegistry
+local GetLivePlayerProfile
 local GetViewerProfile
 local BuildStructuredCapabilityOutput
 local BuildPerspectiveSummary
@@ -278,12 +279,17 @@ local function GetDefaultSpecForClassRole(classToken, role)
 end
 
 local function BuildRoleDropdownItems(classToken)
-    local roles = GetSupportedRolesForClass(classToken)
+    local supported = {}
+    for _, role in ipairs(GetSupportedRolesForClass(classToken)) do
+        supported[role] = true
+    end
+
     local items = {}
-    for _, role in ipairs(roles) do
+    for _, role in ipairs({ "tank", "healer", "dps" }) do
         items[#items + 1] = {
             value = role,
             label = ROLE_LABELS[role] or role,
+            disabled = not supported[role],
         }
     end
     return items
@@ -307,13 +313,19 @@ local function BuildClassDropdownItems()
 end
 
 local function BuildSpecDropdownItems(classToken, role)
+    local data = GetData()
+    EnsureSpecRegistry(data)
+
     local items = {}
-    for _, spec in ipairs(GetSpecsForRole(classToken, role)) do
+    local specs = data and data.specRegistry and data.specRegistry.byClass and data.specRegistry.byClass[classToken] or {}
+    for _, spec in ipairs(specs) do
         items[#items + 1] = {
             value = spec.specID,
-            label = spec.specName,
+            label = format("%s (%s)", spec.specName, ROLE_LABELS[spec.role] or spec.role or "Role"),
+            disabled = role ~= nil and spec.role ~= role,
         }
     end
+    table.sort(items, function(a, b) return (a.label or "") < (b.label or "") end)
     return items
 end
 
@@ -328,7 +340,7 @@ local function SyncViewerToolbar()
 
     local roleItems = BuildRoleDropdownItems(viewer.classToken)
     toolbar.roleDropdown:SetOptions(roleItems)
-    toolbar.roleDropdown:SetEnabled(#roleItems > 1)
+    toolbar.roleDropdown:SetEnabled(#roleItems > 0)
     toolbar.roleDropdown:SetSelected(viewer.role)
 
     local classItems = BuildClassDropdownItems()
@@ -337,12 +349,19 @@ local function SyncViewerToolbar()
 
     local specItems = BuildSpecDropdownItems(viewer.classToken, viewer.role)
     toolbar.specDropdown:SetOptions(specItems)
-    if #specItems > 1 then
-        toolbar.specDropdown:Show()
-        toolbar.specDropdown:SetEnabled(true)
-        toolbar.specDropdown:SetSelected(viewer.specID)
-    else
-        toolbar.specDropdown:Hide()
+    toolbar.specDropdown:Show()
+    toolbar.specDropdown:SetEnabled(#specItems > 0)
+    toolbar.specDropdown:SetSelected(viewer.specID)
+
+    if toolbar.liveResetButton then
+        local live = GetLivePlayerProfile()
+        if viewer.mode == "browse" and live and live.specID then
+            toolbar.liveResetButton:Show()
+            toolbar.liveResetButton:SetEnabled(true)
+        else
+            toolbar.liveResetButton:Hide()
+            toolbar.liveResetButton:SetEnabled(false)
+        end
     end
 
     S.uiState.suppressToolbarCallbacks = false
@@ -668,7 +687,7 @@ EnsureSpecRegistry = function(data)
     end
 end
 
-local function GetLivePlayerProfile()
+GetLivePlayerProfile = function()
     local _, classToken = UnitClass("player")
     local specIndex = GetSpecialization()
     local specID = specIndex and GetSpecializationInfo(specIndex)
@@ -1390,6 +1409,119 @@ GetResultTooltipSpellID = function(result)
     return conflicted and nil or found
 end
 
+local function FormatProviderTargets(targets)
+    if type(targets) ~= "table" or #targets == 0 then return nil end
+
+    local seen = {}
+    local ordered = {}
+    for _, target in ipairs(targets) do
+        local text = SafeText(target)
+        if text and not seen[text] then
+            seen[text] = true
+            ordered[#ordered + 1] = text
+        end
+    end
+
+    if #ordered == 0 then return nil end
+    return table.concat(ordered, "/")
+end
+
+local function FormatProviderMeta(match)
+    if not match then return nil end
+
+    local parts = {}
+    local targets = FormatProviderTargets(match.dispelTargets)
+    if targets then
+        parts[#parts + 1] = targets
+    end
+    if match.rangeText and match.rangeText ~= "" then
+        parts[#parts + 1] = match.rangeText
+    end
+    if match.castTimeMS ~= nil then
+        parts[#parts + 1] = match.castTimeMS <= 0 and "Instant" or format("%.1fs cast", match.castTimeMS / 1000)
+    end
+    if match.cooldownMS and match.cooldownMS > 0 then
+        parts[#parts + 1] = format("%.1fs CD", match.cooldownMS / 1000)
+    end
+
+    if #parts == 0 then return nil end
+    return table.concat(parts, ", ")
+end
+
+local function BuildCoverageProviderNote(matches)
+    if not matches or #matches == 0 then return nil end
+
+    local summaries = {}
+    local seen = {}
+    for _, match in ipairs(matches) do
+        local label = SafeText(match.spellName) or "Unknown spell"
+        local meta = FormatProviderMeta(match)
+        local summary = meta and format("%s (%s)", label, meta) or label
+        if not seen[summary] then
+            seen[summary] = true
+            summaries[#summaries + 1] = summary
+        end
+    end
+
+    if #summaries == 0 then return nil end
+    if #summaries == 1 then return summaries[1] end
+    return format("%s  +%d more", summaries[1], #summaries - 1)
+end
+
+local function AddCoverageTooltip(tip, result)
+    if not tip or not result then return end
+
+    local capability = result.capability
+    local title = capability and capability.label or "Capability"
+    local spellID = GetResultTooltipSpellID(result)
+    BeginSpellTooltip(tip, spellID, title)
+
+    if capability and capability.description and capability.description ~= "" then
+        AddTooltipSpacer(tip)
+        tip:AddLine(capability.description, 1, 1, 1, true)
+    end
+
+    local matches = result.matches or {}
+    AddTooltipSpacer(tip)
+    if #matches > 0 then
+        tip:AddLine(format("Coverage: %d provider%s", #matches, #matches == 1 and "" or "s"), 0.4, 0.8, 1.0)
+        for _, match in ipairs(matches) do
+            AddTooltipSpacer(tip)
+            tip:AddDoubleLine(match.name or "Unknown", match.spellName or "Unknown spell", 1, 1, 1, 0.75, 0.82, 1.0)
+
+            local classLabel = GetClassLabel(match.class)
+            local specMeta = match.specID and SPEC_META_BY_ID[match.specID] or nil
+            local classLine = classLabel
+            if specMeta and specMeta.specName then
+                classLine = classLine .. " - " .. specMeta.specName
+            end
+            if classLine and classLine ~= "" then
+                tip:AddLine(classLine, 0.65, 0.65, 0.65)
+            end
+
+            local meta = FormatProviderMeta(match)
+            if meta then
+                tip:AddLine(meta, 0.75, 0.75, 0.75, true)
+            end
+
+            local note = FilterNoteBySource(match.note)
+            if note and note ~= "" then
+                tip:AddLine(note, 0.9, 0.9, 0.9, true)
+            end
+        end
+    else
+        local detail = result.output and (result.output.banner or result.output.detail)
+        if detail and detail ~= "" then
+            tip:AddLine(detail, 1, 1, 1, true)
+        end
+        local suggestion = result.output and result.output.suggestion
+        if suggestion and suggestion ~= "" then
+            AddTooltipSpacer(tip)
+            tip:AddLine(suggestion, 0.95, 0.8, 0.45, true)
+        end
+    end
+end
+
 local function AddCard(parent, yOff, title, body, accent)
     local width = GetContentWidth() - 8
     local card = CreateFrame("Frame", nil, parent, "BackdropTemplate")
@@ -1427,6 +1559,684 @@ local function AddCard(parent, yOff, title, body, accent)
     local height = 18 + bodyFS:GetStringHeight() + 20
     card:SetHeight(height)
     return yOff - height - 8
+end
+
+local DUNGEON_FOCUS_LIMIT = 5
+local DUNGEON_FOCUS_MOB_HEX = "ffcb96"
+local DUNGEON_FOCUS_NPC_HEX = "78d676"
+local DUNGEON_FOCUS_INTERRUPT_HEX = "ff7ac8"
+local DUNGEON_FOCUS_STUN_HEX = "74f2ff"
+local DUNGEON_FOCUS_PRIORITY_HEX = "ffd36b"
+local GET_SPELL_TEXTURE = _G and _G.GetSpellTexture or nil
+local DUNGEON_FOCUS_DISPEL_HEX = {
+    magic = "59b9ff",
+    curse = "bb7fff",
+    poison = "51d66f",
+    disease = "d6a160",
+    bleed = "e26f6f",
+    enrage = "ffb357",
+}
+
+local function HexToColorTriplet(hex, fallback)
+    if type(hex) ~= "string" or #hex ~= 6 then
+        return unpack(fallback or { 1, 1, 1 })
+    end
+
+    local r = tonumber(hex:sub(1, 2), 16)
+    local g = tonumber(hex:sub(3, 4), 16)
+    local b = tonumber(hex:sub(5, 6), 16)
+    if not r or not g or not b then
+        return unpack(fallback or { 1, 1, 1 })
+    end
+
+    return r / 255, g / 255, b / 255
+end
+
+local function GetDungeonFocusSeverityWeight(severity)
+    local weights = {
+        critical = 6,
+        high = 5,
+        warning = 4,
+        medium = 3,
+        info = 2,
+        low = 1,
+    }
+    return weights[severity] or 0
+end
+
+local function GetDungeonFocusAccent(severity)
+    return SEVERITY_COLORS[severity] or RECOMMEND_COLOR
+end
+
+local function GetDangerTextBlob(danger)
+    if not danger then return "" end
+
+    local parts = {
+        SafeText(danger.mechanic),
+        SafeText(danger.tip),
+        SafeText(danger.source),
+        SafeText(danger.encounter),
+    }
+    return table.concat(parts, " "):lower()
+end
+
+local function GetDispelTypeKey(danger)
+    if not danger then return nil end
+    if type(danger.dispelType) == "string" and danger.dispelType ~= "" then
+        return danger.dispelType:lower()
+    end
+    if type(danger.capability) == "string" and danger.capability:match("^dispel_") then
+        return danger.capability:gsub("^dispel_", ""):lower()
+    end
+    return nil
+end
+
+local function GetDungeonFocusAction(danger, role)
+    local dispelType = GetDispelTypeKey(danger)
+    if dispelType then
+        return format("%s Dispel", dispelType:gsub("^%l", string.upper)), DUNGEON_FOCUS_DISPEL_HEX[dispelType] or "59b9ff"
+    end
+
+    if danger and danger.capability == "offensive_dispel" then
+        return "Purge", DUNGEON_FOCUS_DISPEL_HEX.magic
+    end
+
+    if danger and danger.capability == "soothe" then
+        return "Soothe", DUNGEON_FOCUS_DISPEL_HEX.enrage
+    end
+
+    local text = GetDangerTextBlob(danger)
+    if role == "tank" then
+        if text:find("tank buster", 1, true)
+            or text:find("major defensive", 1, true)
+            or text:find("tank:", 1, true) then
+            return "Tank Buster", DUNGEON_FOCUS_PRIORITY_HEX
+        end
+        if text:find("frontal", 1, true) then
+            return "Frontal", DUNGEON_FOCUS_PRIORITY_HEX
+        end
+        return "Danger", DUNGEON_FOCUS_PRIORITY_HEX
+    end
+
+    if danger and (danger.type == "interrupt" or danger.capability == "interrupt") then
+        return "Interrupt", DUNGEON_FOCUS_INTERRUPT_HEX
+    end
+
+    if text:find("stun", 1, true) then
+        return "Stun", DUNGEON_FOCUS_STUN_HEX
+    end
+
+    if text:find("crowd control", 1, true)
+        or text:find(" cc ", 1, true)
+        or text:find("incap", 1, true)
+        or text:find("stop", 1, true) then
+        return "CC", DUNGEON_FOCUS_STUN_HEX
+    end
+
+    return "Priority", DUNGEON_FOCUS_PRIORITY_HEX
+end
+
+local function GetDungeonFocusIcon(data, danger)
+    if not danger then return 136116 end
+    if type(danger.icon) == "number" and danger.icon > 0 then
+        return danger.icon
+    end
+    if danger.spellID then
+        local texture = GET_SPELL_TEXTURE and GET_SPELL_TEXTURE(danger.spellID)
+        if texture then return texture end
+    end
+
+    local spellID = ResolveSpellID(danger.mechanic)
+    if spellID then
+        local texture = GET_SPELL_TEXTURE and GET_SPELL_TEXTURE(spellID)
+        if texture then return texture end
+    end
+
+    local capability = data and data.capabilities and danger.capability and data.capabilities[danger.capability] or nil
+    if capability and type(capability.icon) == "number" and capability.icon > 0 then
+        return capability.icon
+    end
+
+    if danger.type == "interrupt" or danger.capability == "interrupt" then
+        return 132357
+    end
+
+    local dispelType = GetDispelTypeKey(danger)
+    if dispelType == "magic" then return 135894 end
+    if dispelType == "curse" then return 135952 end
+    if dispelType == "poison" then return 136068 end
+    if dispelType == "disease" then return 135935 end
+    if dispelType == "bleed" then return 4630445 end
+
+    return 136116
+end
+
+local function IsHealerFocusDanger(danger)
+    if not danger then return false end
+    return GetDispelTypeKey(danger) ~= nil
+        or danger.capability == "offensive_dispel"
+        or danger.capability == "soothe"
+        or danger.type == "dispel"
+end
+
+local function IsTankFocusDanger(danger)
+    if not danger then return false end
+
+    local text = GetDangerTextBlob(danger)
+    if text:find("tank buster", 1, true)
+        or text:find("major defensive", 1, true)
+        or text:find("tank:", 1, true)
+        or text:find("active mitigation", 1, true)
+        or text:find("physical damage taken", 1, true)
+        or text:find("frontal", 1, true)
+        or text:find("slash", 1, true)
+        or text:find("smash", 1, true)
+        or text:find("cleave", 1, true)
+        or text:find("strike", 1, true) then
+        return true
+    end
+
+    return danger.severity == "critical" and danger.type ~= "dispel" and danger.type ~= "interrupt"
+end
+
+local function GetDpsControlKind(danger)
+    if not danger then return nil end
+    if danger.type == "interrupt" or danger.capability == "interrupt" then
+        return "interrupt"
+    end
+
+    local text = GetDangerTextBlob(danger)
+    if text:find("stun", 1, true) then
+        return "stun"
+    end
+    if text:find("crowd control", 1, true)
+        or text:find(" cc ", 1, true)
+        or text:find("incap", 1, true)
+        or text:find("stop", 1, true) then
+        return "cc"
+    end
+    return nil
+end
+
+local function CreateDungeonFocusEntry(data, danger, role, extra)
+    local actionLabel, actionHex = GetDungeonFocusAction(danger, role)
+    local entry = {
+        id = extra and extra.id or format("%s:%s:%s", role or "role", SafeText(danger and danger.source) or "mob", SafeText(danger and danger.mechanic) or "mechanic"),
+        danger = danger,
+        title = SafeText(danger and danger.mechanic) or "Priority",
+        mob = SafeText(danger and danger.source),
+        encounter = SafeText(danger and danger.encounter),
+        detail = SafeText(danger and danger.tip),
+        spellID = danger and danger.spellID or ResolveSpellID(danger and danger.mechanic),
+        icon = GetDungeonFocusIcon(data, danger),
+        actionLabel = actionLabel,
+        actionHex = actionHex,
+        accent = GetDungeonFocusAccent(danger and danger.severity),
+        sortWeight = GetDungeonFocusSeverityWeight(danger and danger.severity),
+        priorityRank = extra and extra.priorityRank or 99,
+        response = danger and danger.response or nil,
+        npcID = danger and (danger.npcID or danger.npcId) or nil,
+        displayID = danger and (danger.displayID or danger.displayId or danger.modelDisplayID) or nil,
+    }
+
+    if extra then
+        for key, value in pairs(extra) do
+            entry[key] = value
+        end
+    end
+
+    return entry
+end
+
+local function BuildTankMobSection(data, dangers)
+    local buckets = {}
+    for _, danger in ipairs(dangers or {}) do
+        local mob = SafeText(danger.source)
+        if mob and mob ~= "" and mob ~= "Various" and mob ~= "Environmental" then
+            local current = buckets[mob]
+            local weight = GetDungeonFocusSeverityWeight(danger.severity)
+            if not current or weight > current.sortWeight then
+                buckets[mob] = CreateDungeonFocusEntry(data, danger, "tank", {
+                    id = "tank_mob:" .. mob,
+                    title = mob,
+                    detail = SafeText(danger.mechanic) and format("%s: %s", danger.mechanic, SafeText(danger.tip) or "") or SafeText(danger.tip),
+                    actionLabel = "Danger Mob",
+                    actionHex = DUNGEON_FOCUS_PRIORITY_HEX,
+                    sortWeight = weight,
+                })
+            end
+        end
+    end
+
+    local items = {}
+    for _, entry in pairs(buckets) do
+        items[#items + 1] = entry
+    end
+    table.sort(items, function(a, b)
+        if a.sortWeight ~= b.sortWeight then
+            return a.sortWeight > b.sortWeight
+        end
+        return (a.title or "") < (b.title or "")
+    end)
+    return items
+end
+
+local function BuildDungeonRoleFocusModel(ctx, tk, instanceCtx)
+    local data = GetData()
+    local profile = GetViewerProfile()
+    local role = profile and profile.role or "dps"
+    local dangers = tk and tk.dangers or {}
+    local sections = {}
+
+    if role == "healer" then
+        local priorityMap = {}
+        for index, capabilityID in ipairs(instanceCtx and instanceCtx.dispelPriority or {}) do
+            priorityMap[capabilityID] = index
+        end
+
+        local items = {}
+        for _, danger in ipairs(dangers) do
+            if IsHealerFocusDanger(danger) then
+                items[#items + 1] = CreateDungeonFocusEntry(data, danger, role, {
+                    priorityRank = priorityMap[danger.capability] or 99,
+                })
+            end
+        end
+
+        table.sort(items, function(a, b)
+            if a.priorityRank ~= b.priorityRank then
+                return a.priorityRank < b.priorityRank
+            end
+            if a.sortWeight ~= b.sortWeight then
+                return a.sortWeight > b.sortWeight
+            end
+            return (a.title or "") < (b.title or "")
+        end)
+
+        sections[#sections + 1] = {
+            key = format("focus:%s:%s:dispels", tostring(ctx and ctx.instanceID or "world"), role),
+            title = "Critical Dispels",
+            subtitle = "Only the clears that matter. Each card shows the debuff, the caster, and the response.",
+            items = items,
+            accent = { HexToColorTriplet(DUNGEON_FOCUS_DISPEL_HEX.magic, RECOMMEND_COLOR) },
+        }
+    elseif role == "tank" then
+        local tankBusters = {}
+        local supportDangers = {}
+
+        for _, danger in ipairs(dangers) do
+            if IsTankFocusDanger(danger) then
+                tankBusters[#tankBusters + 1] = danger
+            end
+            if danger.severity == "critical" or danger.severity == "high" then
+                supportDangers[#supportDangers + 1] = danger
+            end
+        end
+
+        local busterItems = {}
+        for _, danger in ipairs(tankBusters) do
+            busterItems[#busterItems + 1] = CreateDungeonFocusEntry(data, danger, role)
+        end
+        table.sort(busterItems, function(a, b)
+            if a.sortWeight ~= b.sortWeight then
+                return a.sortWeight > b.sortWeight
+            end
+            return (a.title or "") < (b.title or "")
+        end)
+
+        local mobItems = BuildTankMobSection(data, (#supportDangers > 0 and supportDangers) or tankBusters)
+
+        sections[#sections + 1] = {
+            key = format("focus:%s:%s:busters", tostring(ctx and ctx.instanceID or "world"), role),
+            title = "Tank Busters",
+            subtitle = "Big hits first. These are the swings and frontals that need personals or mitigation.",
+            items = busterItems,
+            accent = { HexToColorTriplet(DUNGEON_FOCUS_PRIORITY_HEX, RECOMMEND_COLOR) },
+        }
+        sections[#sections + 1] = {
+            key = format("focus:%s:%s:mobs", tostring(ctx and ctx.instanceID or "world"), role),
+            title = "Dangerous Mobs",
+            subtitle = "Trash and boss units that deserve the most respect in your route.",
+            items = mobItems,
+            accent = { HexToColorTriplet(DUNGEON_FOCUS_MOB_HEX, RECOMMEND_COLOR) },
+        }
+    else
+        local items = {}
+        for _, danger in ipairs(dangers) do
+            local controlKind = GetDpsControlKind(danger)
+            if controlKind then
+                items[#items + 1] = CreateDungeonFocusEntry(data, danger, role, {
+                    controlKind = controlKind,
+                    priorityRank = controlKind == "interrupt" and 1 or 2,
+                })
+            end
+        end
+
+        table.sort(items, function(a, b)
+            if a.priorityRank ~= b.priorityRank then
+                return a.priorityRank < b.priorityRank
+            end
+            if a.sortWeight ~= b.sortWeight then
+                return a.sortWeight > b.sortWeight
+            end
+            return (a.title or "") < (b.title or "")
+        end)
+
+        sections[#sections + 1] = {
+            key = format("focus:%s:%s:stops", tostring(ctx and ctx.instanceID or "world"), role),
+            title = "Interrupt / Stop Targets",
+            subtitle = "High-value casts and mobs to kick, stun, or crowd control before they get away.",
+            items = items,
+            accent = { HexToColorTriplet(DUNGEON_FOCUS_INTERRUPT_HEX, RECOMMEND_COLOR) },
+        }
+    end
+
+    local titles = {
+        healer = "Healer Lens",
+        tank = "Tank Lens",
+        dps = "DPS Lens",
+    }
+    local descriptions = {
+        healer = "Front-load dispels. Ignore the noise and solve the debuffs that wipe keys.",
+        tank = "Focus on tank busters and the mobs that make pulls unstable.",
+        dps = "Focus on stops. Prioritize the casts and mobs that actually punish the group.",
+    }
+
+    return {
+        role = role,
+        title = titles[role] or "Dungeon Lens",
+        description = descriptions[role] or "Role-focused dungeon coaching.",
+        sections = sections,
+    }
+end
+
+local function EnsureDungeonFocusTooltipModel(tip)
+    if not tip then return nil end
+    if tip.MedaAurasMobModel then return tip.MedaAurasMobModel end
+
+    local model = CreateFrame("PlayerModel", nil, tip)
+    model:SetSize(118, 118)
+    model:SetPoint("TOPLEFT", tip, "TOPRIGHT", 10, -8)
+    model:SetFrameStrata(tip:GetFrameStrata())
+    model:Hide()
+    tip.MedaAurasMobModel = model
+
+    tip:HookScript("OnHide", function(self)
+        if self.MedaAurasMobModel then
+            self.MedaAurasMobModel:Hide()
+            if self.MedaAurasMobModel.ClearModel then
+                pcall(self.MedaAurasMobModel.ClearModel, self.MedaAurasMobModel)
+            end
+        end
+    end)
+
+    return model
+end
+
+local function AttachDungeonFocusTooltipModel(tip, entry)
+    if not tip then return end
+
+    local model = EnsureDungeonFocusTooltipModel(tip)
+    if not model then return end
+
+    local displayID = entry and entry.displayID or nil
+    if not displayID then
+        model:Hide()
+        return
+    end
+
+    if model.ClearModel then
+        pcall(model.ClearModel, model)
+    end
+
+    local ok = false
+    if model.SetDisplayInfo then
+        ok = pcall(model.SetDisplayInfo, model, displayID)
+    end
+
+    if ok then
+        if model.SetPortraitZoom then pcall(model.SetPortraitZoom, model, 0) end
+        if model.SetCamDistanceScale then pcall(model.SetCamDistanceScale, model, 1.2) end
+        model:Show()
+    else
+        model:Hide()
+    end
+end
+
+local function AddDungeonFocusTooltip(tip, entry)
+    if not tip or not entry then return end
+
+    local danger = entry.danger or {}
+    local title = entry.title or danger.mechanic or entry.mob or "Priority"
+    BeginSpellTooltip(tip, entry.spellID or danger.spellID or danger.mechanic, title)
+
+    AddTooltipSpacer(tip)
+    if entry.actionLabel and entry.actionLabel ~= "" then
+        local r, g, b = HexToColorTriplet(entry.actionHex, { 1, 1, 1 })
+        tip:AddLine(entry.actionLabel, r, g, b)
+    end
+
+    if entry.mob and entry.mob ~= "" then
+        local r, g, b = HexToColorTriplet(DUNGEON_FOCUS_MOB_HEX, { 1, 0.8, 0.6 })
+        tip:AddLine("Mob: " .. entry.mob, r, g, b)
+    end
+
+    if entry.encounter and entry.encounter ~= "" then
+        local r, g, b = HexToColorTriplet(DUNGEON_FOCUS_NPC_HEX, { 0.5, 0.9, 0.5 })
+        tip:AddLine("Encounter: " .. entry.encounter, r, g, b)
+    end
+
+    if danger.dispelType and danger.dispelType ~= "" then
+        local dispelHex = DUNGEON_FOCUS_DISPEL_HEX[danger.dispelType:lower()] or DUNGEON_FOCUS_DISPEL_HEX.magic
+        local r, g, b = HexToColorTriplet(dispelHex, { 0.4, 0.8, 1.0 })
+        tip:AddLine("Dispel Type: " .. danger.dispelType, r, g, b)
+    end
+
+    if danger.boosted then
+        tip:AddLine("Affix boosted", 1, 0.35, 0.35)
+    end
+
+    if entry.detail and entry.detail ~= "" then
+        AddTooltipSpacer(tip)
+        tip:AddLine(entry.detail, 1, 1, 1, true)
+    end
+
+    if entry.response == "have" then
+        AddTooltipSpacer(tip)
+        tip:AddLine("You already cover this.", 0.3, 0.85, 0.3)
+    elseif entry.response == "canTalent" then
+        AddTooltipSpacer(tip)
+        tip:AddLine("You can talent into coverage for this.", 1.0, 0.75, 0.25)
+    elseif entry.response == "unavailable" then
+        AddTooltipSpacer(tip)
+        tip:AddLine("Your current profile does not cover this.", 0.7, 0.7, 0.7)
+    end
+
+    AttachDungeonFocusTooltipModel(tip, entry)
+end
+
+local function RenderDungeonFocusTile(parent, yOff, entry)
+    local theme = MedaUI.Theme
+    local tile = CreateFrame("Button", nil, parent, "BackdropTemplate")
+    tile:SetPoint("TOPLEFT", 10, yOff)
+    tile:SetPoint("RIGHT", parent, "RIGHT", -10, 0)
+    tile:SetBackdrop(MedaUI:CreateBackdrop(true))
+    tile:SetBackdropColor(theme.backgroundLight[1], theme.backgroundLight[2], theme.backgroundLight[3], 0.6)
+    tile:SetBackdropBorderColor(theme.border[1], theme.border[2], theme.border[3], theme.border[4] or 0.6)
+
+    local accent = entry.accent or RECOMMEND_COLOR
+    local accentBar = tile:CreateTexture(nil, "ARTWORK")
+    accentBar:SetColorTexture(accent[1], accent[2], accent[3], 1)
+    accentBar:SetPoint("TOPLEFT", 0, 0)
+    accentBar:SetPoint("BOTTOMLEFT", 0, 0)
+    accentBar:SetWidth(4)
+
+    local iconFrame = CreateFrame("Frame", nil, tile, "BackdropTemplate")
+    iconFrame:SetSize(46, 46)
+    iconFrame:SetPoint("TOPLEFT", 12, -12)
+    iconFrame:SetBackdrop(MedaUI:CreateBackdrop(true))
+    iconFrame:SetBackdropColor(0, 0, 0, 0.55)
+    iconFrame:SetBackdropBorderColor(accent[1], accent[2], accent[3], 0.9)
+
+    local icon = iconFrame:CreateTexture(nil, "ARTWORK")
+    icon:SetAllPoints()
+    icon:SetTexture(entry.icon or 136116)
+    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+    local titleFS = tile:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    titleFS:SetPoint("TOPLEFT", iconFrame, "TOPRIGHT", 12, -2)
+    titleFS:SetPoint("RIGHT", tile, "RIGHT", -120, 0)
+    titleFS:SetJustifyH("LEFT")
+    titleFS:SetWordWrap(true)
+    titleFS:SetTextColor(unpack(theme.text or { 0.95, 0.95, 0.95, 1 }))
+    titleFS:SetText(entry.title or "Priority")
+
+    local badge = CreateFrame("Frame", nil, tile, "BackdropTemplate")
+    badge:SetBackdrop(MedaUI:CreateBackdrop(true))
+    badge:SetBackdropColor(0, 0, 0, 0.55)
+    local br, bg, bb = HexToColorTriplet(entry.actionHex, RECOMMEND_COLOR)
+    badge:SetBackdropBorderColor(br, bg, bb, 0.95)
+
+    local badgeText = badge:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    badgeText:SetPoint("CENTER", 0, 0)
+    badgeText:SetTextColor(br, bg, bb)
+    badgeText:SetText(entry.actionLabel or "Priority")
+    badge:SetSize(math.max(74, badgeText:GetStringWidth() + 18), 22)
+    badge:SetPoint("TOPRIGHT", tile, "TOPRIGHT", -12, -12)
+
+    local mobButton = CreateFrame("Button", nil, tile)
+    mobButton:SetPoint("TOPLEFT", titleFS, "BOTTOMLEFT", 0, -6)
+    mobButton:SetPoint("RIGHT", tile, "RIGHT", -12, 0)
+    mobButton:SetHeight(18)
+
+    local mobFS = mobButton:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    mobFS:SetAllPoints()
+    mobFS:SetJustifyH("LEFT")
+    mobFS:SetWordWrap(false)
+    local mobText = ""
+    if entry.mob and entry.mob ~= "" then
+        mobText = "|cff" .. DUNGEON_FOCUS_MOB_HEX .. entry.mob .. "|r"
+    end
+    if entry.encounter and entry.encounter ~= "" then
+        local spacer = mobText ~= "" and "  " or ""
+        mobText = mobText .. spacer .. "|cff" .. DUNGEON_FOCUS_NPC_HEX .. entry.encounter .. "|r"
+    end
+    mobFS:SetText(mobText)
+
+    local detailFS = tile:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    detailFS:SetPoint("TOPLEFT", mobButton, "BOTTOMLEFT", 0, -6)
+    detailFS:SetPoint("RIGHT", tile, "RIGHT", -12, 0)
+    detailFS:SetJustifyH("LEFT")
+    detailFS:SetWordWrap(true)
+    detailFS:SetTextColor(unpack(theme.textDim or { 0.78, 0.78, 0.78, 1 }))
+    detailFS:SetText(entry.detail or "")
+
+    BindTooltip(tile, function(_, tip)
+        AddDungeonFocusTooltip(tip, entry)
+    end)
+
+    BindTooltip(mobButton, function(_, tip)
+        AddDungeonFocusTooltip(tip, entry)
+    end)
+
+    local height = math.max(74, 22 + titleFS:GetStringHeight() + detailFS:GetStringHeight() + 34)
+    tile:SetHeight(height)
+
+    return yOff - height - 8
+end
+
+local function RenderDungeonFocusSection(parent, yOff, section)
+    if not section or not section.items or #section.items == 0 then return yOff end
+
+    local theme = MedaUI.Theme
+    local card = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+    card:SetPoint("TOPLEFT", 4, yOff)
+    card:SetPoint("RIGHT", parent, "RIGHT", -4, 0)
+    card:SetBackdrop(MedaUI:CreateBackdrop(true))
+    card:SetBackdropColor(theme.backgroundLight[1], theme.backgroundLight[2], theme.backgroundLight[3], 0.5)
+
+    local accent = section.accent or RECOMMEND_COLOR
+    local ar = accent[1] or RECOMMEND_COLOR[1]
+    local ag = accent[2] or RECOMMEND_COLOR[2]
+    local ab = accent[3] or RECOMMEND_COLOR[3]
+    card:SetBackdropBorderColor(ar, ag, ab, 0.85)
+
+    local titleFS = card:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    titleFS:SetPoint("TOPLEFT", 10, -8)
+    titleFS:SetTextColor(ar, ag, ab)
+    titleFS:SetText(section.title or "Focus")
+
+    local countFS = card:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    countFS:SetPoint("LEFT", titleFS, "RIGHT", 8, 0)
+    countFS:SetTextColor(unpack(theme.textDim or { 0.7, 0.7, 0.7, 1 }))
+    countFS:SetText(format("%d shown", math.min(#section.items, DUNGEON_FOCUS_LIMIT)))
+
+    local subtitleFS = card:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    subtitleFS:SetPoint("TOPLEFT", titleFS, "BOTTOMLEFT", 0, -4)
+    subtitleFS:SetPoint("RIGHT", card, "RIGHT", -10, 0)
+    subtitleFS:SetJustifyH("LEFT")
+    subtitleFS:SetWordWrap(true)
+    subtitleFS:SetTextColor(unpack(theme.textDim or { 0.72, 0.72, 0.72, 1 }))
+    subtitleFS:SetText(section.subtitle or "")
+
+    local expanded = S.playerSectionExpanded[section.key] or false
+    local shown = expanded and #section.items or math.min(#section.items, DUNGEON_FOCUS_LIMIT)
+    local innerY = -(subtitleFS:GetStringHeight() + 28)
+
+    for index = 1, shown do
+        innerY = RenderDungeonFocusTile(card, innerY, section.items[index])
+    end
+
+    if #section.items > DUNGEON_FOCUS_LIMIT then
+        local toggle = MedaUI:CreateExpandToggle(card, {
+            hiddenCount = #section.items - DUNGEON_FOCUS_LIMIT,
+            expanded = expanded,
+            onToggle = function(expandedState)
+                S.playerSectionExpanded[section.key] = expandedState
+                RunPipeline(false)
+            end,
+        })
+        toggle:SetPoint("TOPLEFT", 10, innerY)
+        toggle:SetPoint("RIGHT", card, "RIGHT", -10, 0)
+        innerY = innerY - toggle:GetHeight()
+    end
+
+    local height = math.abs(innerY) + 12
+    card:SetHeight(height)
+    return yOff - height - 8
+end
+
+local function RenderDungeonRoleFocusPage(content, yOff, ctx, tk, instanceCtx, viewer)
+    local focus = BuildDungeonRoleFocusModel(ctx, tk, instanceCtx)
+    local hasItems = false
+    for _, section in ipairs(focus.sections or {}) do
+        if section.items and #section.items > 0 then
+            hasItems = true
+            break
+        end
+    end
+
+    if not hasItems then
+        return yOff, false
+    end
+
+    if viewer and viewer.mode == "browse" then
+        yOff = AddCard(content, yOff, "Theorycraft View",
+            format("Showing %s %s as your viewer profile. Dungeon focus is being simulated for this role.",
+                viewer.specName or "Spec", viewer.classLabel or "Unknown"),
+            SEVERITY_COLORS.info)
+    end
+
+    yOff = AddCard(content, yOff, focus.title, focus.description, RECOMMEND_COLOR)
+
+    for _, section in ipairs(focus.sections or {}) do
+        if section.items and #section.items > 0 then
+            yOff = RenderDungeonFocusSection(content, yOff, section)
+        end
+    end
+
+    S.uiState.workspaceShell:SetContentHeight(math.abs(yOff) + 32)
+    return yOff, true
 end
 
 local function GetSpecRecommendations(ctx)
@@ -2076,6 +2886,13 @@ local function RenderYouPage(ctx)
         return usedSet
     end
 
+    if GetActivityKey(ctx) == "dungeon" then
+        local _, handled = RenderDungeonRoleFocusPage(content, yOff, ctx, tk, instanceCtx, viewer)
+        if handled then
+            return usedSet
+        end
+    end
+
     if viewer and viewer.mode == "browse" then
         yOff = AddCard(content, yOff, "Theorycraft View",
             format("Showing %s %s as your viewer profile. Availability checks are simulated for this spec.", viewer.specName or "Spec", viewer.classLabel or "Unknown"),
@@ -2188,13 +3005,14 @@ local function RenderGroupCoverageSection(content, yOff, ctx, results, noteLines
                     row:SetAccentColor(accent[1], accent[2], accent[3])
                     if result.matchCount > 0 then
                         row:SetStatus(FormatProviderText(result.matches) or "Covered")
-                        if result.matches[1] and result.matches[1].note then
-                            row:SetNote(FilterNoteBySource(result.matches[1].note))
-                        end
+                        row:SetNote(BuildCoverageProviderNote(result.matches) or FilterNoteBySource(result.matches[1] and result.matches[1].note))
                     else
                         row:SetStatus(structured.status == "missing" and "Missing" or "Covered", accent[1], accent[2], accent[3])
                         row:SetNote(FilterNoteBySource(structured.fullGroupWorkaround or structured.missingAction or structured.summary))
                     end
+                    row:SetTooltipFunc(function(_, tip)
+                        AddCoverageTooltip(tip, result)
+                    end)
                     yOff = yOff - row:GetHeight() - 8
                 end
             end

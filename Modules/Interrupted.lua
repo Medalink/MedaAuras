@@ -10,12 +10,14 @@ local wipe = wipe
 local pcall = pcall
 local unpack = unpack
 local CreateFrame = CreateFrame
+local GetSpellBaseCooldown = GetSpellBaseCooldown
 local UnitName = UnitName
-local UnitGUID = UnitGUID
+local UnitGroupRolesAssigned = UnitGroupRolesAssigned
 local UnitExists = UnitExists
 local IsInGroup = IsInGroup
 local C_Spell = C_Spell
 local C_Timer = C_Timer
+local C_Traits = C_Traits
 
 if MedaAuras and MedaAuras.Log then
     MedaAuras.Log("[Interrupted] File loaded OK")
@@ -35,18 +37,14 @@ local MODULE_STABILITY = "experimental"
 
 local ID = ns.InterruptData
 local ALL_INTERRUPTS      = ID.ALL_INTERRUPTS
-local CLASS_DEFAULTS      = ID.CLASS_DEFAULTS
-local CLASS_INTERRUPT_LIST = ID.CLASS_INTERRUPT_LIST
-local SPEC_OVERRIDES      = ID.SPEC_OVERRIDES
-local SPEC_NO_INTERRUPT   = ID.SPEC_NO_INTERRUPT
-local HEALER_KEEPS_KICK   = ID.HEALER_KEEPS_KICK
 local CD_REDUCTION_TALENTS = ID.CD_REDUCTION_TALENTS
 local CD_ON_KICK_TALENTS  = ID.CD_ON_KICK_TALENTS
-local SPEC_EXTRA_KICKS    = ID.SPEC_EXTRA_KICKS
 local SPELL_ALIASES       = ID.SPELL_ALIASES
 local CLASS_COLORS        = ID.CLASS_COLORS
+local InterruptResolver   = ns.Services and ns.Services.InterruptResolver
 
 local FALLBACK_WHITE = { 1, 1, 1 }
+local FALLBACK_INTERRUPT_ICON = 134400
 
 -- ============================================================================
 -- State
@@ -57,7 +55,6 @@ local partyMembers = {}     -- [name] = { class, spellID, baseCd, cdEnd, onKickR
 local noInterruptPlayers = {} -- [name] = true
 local myName, myClass, mySpellID, myBaseCd, myIsPetSpell
 local myKickCdEnd = 0
-local myExtraKicks = {}
 
 local mainFrame, titleText, resizeHandle
 local bars = {}
@@ -66,6 +63,7 @@ local isResizing = false
 local shouldShowByZone = true
 local watcherHandle, mobKickHandle
 local reinspectTicker
+local UpdateDisplay
 
 local FONT_FACE = GameFontNormal and GameFontNormal:GetFont() or "Fonts\\FRIZQT__.TTF"
 local FONT_FLAGS = "OUTLINE"
@@ -87,6 +85,95 @@ local function GetSpellCooldownRemaining(spellID)
     return nil
 end
 
+local function GetCachedSpecID(unit)
+    local inspector = ns.Services and ns.Services.GroupInspector
+    if not inspector or not inspector.GetUnitInfo then return nil end
+
+    local info = inspector:GetUnitInfo(unit)
+    return info and info.specID or nil
+end
+
+local function ApplyInterruptEntry(info, classToken, entry)
+    if not info or not entry then return false end
+
+    local spellID = entry.spellID or entry.id
+    local baseCd = entry.baseCD or entry.cd or 15
+    local isPetSpell = entry.pet or false
+    local changed = info.class ~= classToken
+        or info.spellID ~= spellID
+        or info.baseCd ~= baseCd
+        or info.isPetSpell ~= isPetSpell
+
+    info.class = classToken
+    info.spellID = spellID
+    info.spellName = entry.name or (spellID and ALL_INTERRUPTS[spellID] and ALL_INTERRUPTS[spellID].name) or "Interrupt"
+    info.baseCd = baseCd
+    info.isPetSpell = isPetSpell
+
+    return changed
+end
+
+local function TrackPartyMember(name, classToken, entry)
+    local info = partyMembers[name]
+    if not info then
+        info = { cdEnd = 0 }
+        partyMembers[name] = info
+    end
+
+    local changed = ApplyInterruptEntry(info, classToken, entry)
+    noInterruptPlayers[name] = nil
+    return info, changed
+end
+
+local function GetRenderableInterruptData(info)
+    if not info then return nil end
+
+    local spellID = info.spellID
+    local data = spellID and ALL_INTERRUPTS[spellID] or nil
+    if not data and spellID then
+        local aliased = SPELL_ALIASES[spellID]
+        data = aliased and ALL_INTERRUPTS[aliased] or nil
+    end
+
+    if data then
+        return {
+            name = data.name,
+            cd = info.baseCd or data.cd or 15,
+            icon = data.icon or FALLBACK_INTERRUPT_ICON,
+        }
+    end
+
+    if spellID or info.baseCd or info.spellName then
+        return {
+            name = info.spellName or (spellID and ("Spell " .. spellID)) or "Interrupt",
+            cd = info.baseCd or 15,
+            icon = FALLBACK_INTERRUPT_ICON,
+        }
+    end
+
+    return nil
+end
+
+local function GetRenderablePartyEntries()
+    local entries = {}
+    for name, info in pairs(partyMembers) do
+        local data = GetRenderableInterruptData(info)
+        if data then
+            entries[#entries + 1] = {
+                name = name,
+                info = info,
+                data = data,
+            }
+        end
+    end
+
+    table.sort(entries, function(a, b)
+        return a.name < b.name
+    end)
+
+    return entries
+end
+
 -- ============================================================================
 -- Find own interrupt spell
 -- ============================================================================
@@ -102,63 +189,27 @@ local function FindMyInterrupt()
     local specID = specIndex and GetSpecializationInfo(specIndex)
     LogDebug(format("  specIndex=%s specID=%s", tostring(specIndex), tostring(specID)))
 
-    if specID and SPEC_NO_INTERRUPT[specID] then
-        LogDebug(format("  specID %d is in SPEC_NO_INTERRUPT, no interrupt for this spec", specID))
-        mySpellID = nil
-        myBaseCd = nil
-        myIsPetSpell = false
+    mySpellID = nil
+    myBaseCd = nil
+    myIsPetSpell = false
+
+    if not InterruptResolver then
+        LogWarn("InterruptResolver unavailable; player interrupt cannot be resolved")
         return
     end
 
-    mySpellID = nil
-    myIsPetSpell = false
-
-    if specID and SPEC_OVERRIDES[specID] then
-        local ov = SPEC_OVERRIDES[specID]
-        LogDebug(format("  Spec override found: %s (id=%d, isPet=%s)", ov.name, ov.id, tostring(ov.isPet)))
-        if ov.isPet then
-            local known = IsSpellKnown(ov.id, true) or IsSpellKnown(ov.id)
-            if not known then
-                local ok, r = pcall(IsPlayerSpell, ov.id)
-                if ok and r then known = true end
-            end
-            if not known and ov.petSpellID then
-                local ok, r = pcall(IsSpellKnown, ov.petSpellID, true)
-                if ok and r then known = true end
-            end
-            LogDebug(format("  Pet spell known=%s", tostring(known)))
-            if known then
-                mySpellID = ov.id
-                myBaseCd = ov.cd
-                myIsPetSpell = true
-            end
-        else
-            mySpellID = ov.id
-            myBaseCd = ov.cd
+    local entry = InterruptResolver:ResolvePlayerInterrupt()
+    if not entry then
+        local specData = specID and ID:GetSpecData(specID) or nil
+        if specData and specData.hasInterrupt == false then
+            LogDebug(format("  specID %d has no interrupt", specID))
         end
+        return
     end
 
-    local spellList = CLASS_INTERRUPT_LIST[myClass]
-    if spellList then
-        LogDebug(format("  Checking CLASS_INTERRUPT_LIST for %s (%d spells)", tostring(myClass), #spellList))
-        for _, sid in ipairs(spellList) do
-            local known = IsSpellKnown(sid) or IsSpellKnown(sid, true)
-            if not known then
-                local ok, r = pcall(IsPlayerSpell, sid)
-                if ok and r then known = true end
-            end
-            LogDebug(format("    spellID %d known=%s", sid, tostring(known)))
-            if known and not mySpellID then
-                mySpellID = sid
-                if not myBaseCd then
-                    myBaseCd = ALL_INTERRUPTS[sid] and ALL_INTERRUPTS[sid].cd or 15
-                end
-                LogDebug(format("    -> selected as primary interrupt"))
-            end
-        end
-    else
-        LogDebug(format("  No CLASS_INTERRUPT_LIST for class=%s", tostring(myClass)))
-    end
+    mySpellID = entry.spellID
+    myBaseCd = entry.baseCD or entry.cd
+    myIsPetSpell = entry.pet or false
 
     if mySpellID then
         local ok, ms = pcall(GetSpellBaseCooldown, mySpellID)
@@ -186,28 +237,31 @@ local function AutoRegisterParty()
             local name = UnitName(u)
             local _, cls = UnitClass(u)
             local role = UnitGroupRolesAssigned(u)
-            local hasDefault = cls and CLASS_DEFAULTS[cls] ~= nil
+            local specID = GetCachedSpecID(u)
+            local entry, source
+            if InterruptResolver then
+                entry, source = InterruptResolver:ResolvePartyPrimaryInterrupt(cls, specID, role)
+            end
+            local hasDefault = entry ~= nil or source == "spec_no_interrupt" or source == "role_no_interrupt"
             LogDebug(format("  %s: name=%s class=%s role=%s hasDefault=%s already=%s noKick=%s",
                 u, tostring(name), tostring(cls), tostring(role),
                 tostring(hasDefault),
                 tostring(name and partyMembers[name] ~= nil),
                 tostring(name and noInterruptPlayers[name] ~= nil)))
-            if name and cls and CLASS_DEFAULTS[cls] then
-                if not partyMembers[name] and not noInterruptPlayers[name] then
-                    if role == "HEALER" and not HEALER_KEEPS_KICK[cls] then
-                        noInterruptPlayers[name] = true
-                        LogDebug(format("    -> marked as healer (no kick): %s", name))
-                    else
-                        local kick = CLASS_DEFAULTS[cls]
-                        partyMembers[name] = {
-                            class = cls,
-                            spellID = kick.id,
-                            baseCd = kick.cd,
-                            cdEnd = 0,
-                        }
-                        Log(format("Auto-registered %s (%s) %s CD=%d",
-                            name, cls, kick.name, kick.cd))
+            if name and cls then
+                if source == "spec_no_interrupt" or source == "role_no_interrupt" then
+                    partyMembers[name] = nil
+                    noInterruptPlayers[name] = true
+                    LogDebug(format("    -> %s has no interrupt (%s)", name, source))
+                elseif entry then
+                    local _, changed = TrackPartyMember(name, cls, entry)
+                    if changed then
+                        Log(format("Auto-registered %s (%s) %s CD=%d [%s]",
+                            name, cls, entry.name, entry.baseCD or entry.cd or 15, source))
                     end
+                else
+                    noInterruptPlayers[name] = nil
+                    LogDebug(format("    -> waiting for exact interrupt data for %s (%s)", name, cls))
                 end
             end
         else
@@ -219,6 +273,7 @@ local function AutoRegisterParty()
     for _ in pairs(partyMembers) do count = count + 1 end
     LogDebug(format("  Total tracked: %d party members, %d no-kick",
         count, (function() local n=0 for _ in pairs(noInterruptPlayers) do n=n+1 end return n end)()))
+    UpdateDisplay()
 end
 
 local function CleanPartyList()
@@ -241,6 +296,7 @@ local function CleanPartyList()
     if removed > 0 then
         LogDebug(format("CleanPartyList: removed %d member(s)", removed))
     end
+    UpdateDisplay()
 end
 
 -- ============================================================================
@@ -250,41 +306,23 @@ end
 local function ScanTalentsForMember(unit, name, class, specID)
     LogDebug(format("ScanTalentsForMember: unit=%s name=%s class=%s specID=%s",
         tostring(unit), tostring(name), tostring(class), tostring(specID)))
-    local info = partyMembers[name]
-    if not info then
-        LogDebug(format("  -> %s not in partyMembers, skipping talent scan", tostring(name)))
+
+    if not InterruptResolver then
+        LogWarn("InterruptResolver unavailable during talent scan")
         return
     end
 
-    if SPEC_NO_INTERRUPT[specID] then
+    local primary, source = InterruptResolver:ResolvePartyPrimaryInterrupt(class, specID)
+    if source == "spec_no_interrupt" or not primary then
         partyMembers[name] = nil
         noInterruptPlayers[name] = true
-        LogDebug(format("%s has no interrupt (specID=%d), removed", name, specID))
+        LogDebug(format("%s has no interrupt (specID=%d), removed", name, specID or -1))
+        UpdateDisplay()
         return
     end
 
-    local defaultKick = CLASS_DEFAULTS[class]
-    if defaultKick then
-        info.spellID = defaultKick.id
-        info.baseCd = defaultKick.cd
-    end
+    local info = TrackPartyMember(name, class, primary)
     info.onKickReduction = nil
-
-    local ov = SPEC_OVERRIDES[specID]
-    if ov then
-        local apply = true
-        if ov.isPet then
-            local petUnit
-            local idx = unit:match("party(%d)")
-            if idx then petUnit = "partypet" .. idx end
-            if petUnit and not UnitExists(petUnit) then apply = false end
-        end
-        if apply then
-            info.spellID = ov.id
-            info.baseCd = ov.cd
-            LogDebug(format("Spec override for %s: %s CD=%d", name, ov.name, ov.cd))
-        end
-    end
 
     local configID = -1
     local ok, configInfo = pcall(C_Traits.GetConfigInfo, configID)
@@ -333,6 +371,7 @@ local function ScanTalentsForMember(unit, name, class, specID)
             end
         end
     end
+    UpdateDisplay()
 end
 
 -- ============================================================================
@@ -354,33 +393,42 @@ local function OnPartyInterruptDetected(name, spellID, unit)
         Log(format("  -> %s existing member, CD set to %ds (ends at %.1f)", name, baseCd, info.cdEnd))
     else
         if noInterruptPlayers[name] then
-            LogDebug(format("  -> %s is in noInterruptPlayers, ignoring", name))
-            return
+            LogDebug(format("  -> %s was marked no-kick, clearing due to observed interrupt", name))
+            noInterruptPlayers[name] = nil
         end
         local ok, _, cls = pcall(UnitClass, unit)
+        local role = UnitGroupRolesAssigned(unit)
+        local specID = GetCachedSpecID(unit)
+        local expected
+        if InterruptResolver then
+            expected = InterruptResolver:ResolvePartyPrimaryInterrupt(cls, specID, role)
+        end
         LogDebug(format("  -> %s not in partyMembers, UnitClass(%s): ok=%s cls=%s",
             name, tostring(unit), tostring(ok), tostring(cls)))
-        if ok and cls and CLASS_DEFAULTS[cls] then
-            local role = UnitGroupRolesAssigned(unit)
-            if role == "HEALER" and not HEALER_KEEPS_KICK[cls] then
-                noInterruptPlayers[name] = true
-                LogDebug(format("  -> %s is healer, marked as no-kick", name))
+        if ok and cls then
+            local kickData = ALL_INTERRUPTS[resolvedID]
+            if not kickData then
+                LogWarn(format("  -> Could not register %s: spell %s not in interrupt data", name, tostring(resolvedID)))
                 return
             end
-            local kickData = ALL_INTERRUPTS[resolvedID]
-            partyMembers[name] = {
-                class = cls,
+
+            local newInfo = partyMembers[name] or {}
+            local baseCd = expected and (expected.baseCD or expected.cd) or kickData.cd or 15
+            ApplyInterruptEntry(newInfo, cls, {
                 spellID = resolvedID,
-                baseCd = kickData and kickData.cd or 15,
-                cdEnd = now + (kickData and kickData.cd or 15),
-                lastKickTime = now,
-            }
+                baseCD = baseCd,
+                pet = expected and expected.pet or false,
+            })
+            newInfo.cdEnd = now + baseCd
+            newInfo.lastKickTime = now
+            partyMembers[name] = newInfo
             Log(format("  -> Late-registered %s (%s) from cast, CD=%d",
-                name, cls, kickData and kickData.cd or 15))
+                name, cls, baseCd))
         else
-            LogWarn(format("  -> Could not register %s: UnitClass failed or no default", name))
+            LogWarn(format("  -> Could not register %s: UnitClass failed", name))
         end
     end
+    UpdateDisplay()
 end
 
 -- ============================================================================
@@ -409,6 +457,7 @@ local function OnMobKickConfirmed(name)
 
     Log(format("CONFIRMED KICK: %s -> CD %ds%s",
         name, cd, reduction > 0 and format(" (base %d -%d on-kick)", baseCd, reduction) or ""))
+    UpdateDisplay()
 end
 
 -- ============================================================================
@@ -578,12 +627,13 @@ end
 
 local lastStateDump = 0
 
-local function UpdateDisplay()
+UpdateDisplay = function()
     if not mainFrame or not shouldShowByZone then return end
 
     local _, barH, _, _, _, titleH = GetBarLayout()
     local now = GetTime()
     local barIdx = 1
+    local renderablePartyEntries = GetRenderablePartyEntries()
 
     if now - lastStateDump > 10 then
         lastStateDump = now
@@ -594,9 +644,9 @@ local function UpdateDisplay()
             LogDebug(format("  STATE: %s class=%s spell=%s cd=%.1fs",
                 n, info.class, tostring(info.spellID), rem))
         end
-        LogDebug(format("UpdateDisplay tick: mySpell=%s myCD=%.1f members=%d visible=%s",
+        LogDebug(format("UpdateDisplay tick: mySpell=%s myCD=%.1f members=%d renderable=%d visible=%s",
             tostring(mySpellID), myKickCdEnd > now and (myKickCdEnd - now) or 0,
-            memberCount, tostring(shouldShowByZone)))
+            memberCount, #renderablePartyEntries, tostring(shouldShowByZone)))
     end
 
     -- Player bar
@@ -631,34 +681,34 @@ local function UpdateDisplay()
     end
 
     -- Party bars
-    for name, info in pairs(partyMembers) do
+    for _, entry in ipairs(renderablePartyEntries) do
         if barIdx > 6 then break end
-        local data = ALL_INTERRUPTS[info.spellID]
-        if data then
-            local bar = bars[barIdx]
-            bar:Show()
-            bar.icon:SetTexture(data.icon)
-            local col = CLASS_COLORS[info.class] or FALLBACK_WHITE
-            bar.nameText:SetText("|cFFFFFFFF" .. name .. "|r")
+        local name = entry.name
+        local info = entry.info
+        local data = entry.data
+        local bar = bars[barIdx]
+        bar:Show()
+        bar.icon:SetTexture(data.icon or FALLBACK_INTERRUPT_ICON)
+        local col = CLASS_COLORS[info.class] or FALLBACK_WHITE
+        bar.nameText:SetText("|cFFFFFFFF" .. name .. "|r")
 
-            local rem = 0
-            if info.cdEnd > now then rem = info.cdEnd - now end
-            bar.cdBar:SetMinMaxValues(0, info.baseCd or data.cd)
+        local rem = 0
+        if info.cdEnd > now then rem = info.cdEnd - now end
+        bar.cdBar:SetMinMaxValues(0, info.baseCd or data.cd or 15)
 
-            if rem > 0.5 then
-                bar.cdBar:SetValue(rem)
-                bar.cdBar:SetStatusBarColor(col[1], col[2], col[3], 0.85)
-                bar.barBg:SetVertexColor(col[1] * 0.25, col[2] * 0.25, col[3] * 0.25, 0.9)
-                bar.cdText:SetText(string.format("%.0f", rem))
-                bar.cdText:SetTextColor(1, 1, 1)
-            else
-                bar.cdBar:SetValue(0)
-                bar.barBg:SetVertexColor(col[1], col[2], col[3], 0.85)
-                bar.cdText:SetText(db.showReady and "READY" or "")
-                bar.cdText:SetTextColor(0.2, 1.0, 0.2)
-            end
-            barIdx = barIdx + 1
+        if rem > 0.5 then
+            bar.cdBar:SetValue(rem)
+            bar.cdBar:SetStatusBarColor(col[1], col[2], col[3], 0.85)
+            bar.barBg:SetVertexColor(col[1] * 0.25, col[2] * 0.25, col[3] * 0.25, 0.9)
+            bar.cdText:SetText(string.format("%.0f", rem))
+            bar.cdText:SetTextColor(1, 1, 1)
+        else
+            bar.cdBar:SetValue(0)
+            bar.barBg:SetVertexColor(col[1], col[2], col[3], 0.85)
+            bar.cdText:SetText(db.showReady and "READY" or "")
+            bar.cdText:SetTextColor(0.2, 1.0, 0.2)
         end
+        barIdx = barIdx + 1
     end
 
     for i = barIdx, 6 do
@@ -797,6 +847,7 @@ local function SetupRosterEvents()
             end
         elseif event == "PLAYER_ENTERING_WORLD" then
             CheckZoneVisibility()
+            FindMyInterrupt()
             AutoRegisterParty()
         elseif event == "SPELLS_CHANGED" then
             FindMyInterrupt()
@@ -805,18 +856,7 @@ local function SetupRosterEvents()
                 FindMyInterrupt()
             end
         elseif event == "ROLE_CHANGED_INFORM" then
-            for i = 1, 4 do
-                local u = "party" .. i
-                if UnitExists(u) then
-                    local name = UnitName(u)
-                    local _, cls = UnitClass(u)
-                    local role = UnitGroupRolesAssigned(u)
-                    if name and role == "HEALER" and cls ~= "SHAMAN" and partyMembers[name] then
-                        partyMembers[name] = nil
-                        noInterruptPlayers[name] = true
-                    end
-                end
-            end
+            AutoRegisterParty()
         end
     end)
 end
@@ -840,6 +880,7 @@ local function OnInitialize(moduleDB)
     LogDebug(format("  ns.InterruptData=%s", tostring(ns.InterruptData ~= nil)))
     LogDebug(format("  ns.Services.PartySpellWatcher=%s", tostring(ns.Services.PartySpellWatcher ~= nil)))
     LogDebug(format("  ns.Services.GroupInspector=%s", tostring(ns.Services.GroupInspector ~= nil)))
+    LogDebug(format("  ns.Services.InterruptResolver=%s", tostring(ns.Services.InterruptResolver ~= nil)))
 
     LogDebug("  Step 1: FindMyInterrupt")
     FindMyInterrupt()
@@ -1259,14 +1300,24 @@ local function BuildSettingsPage(parent, moduleDB)
         yOff = yOff - 20
     end
 
-    local partyCount = 0
-    for _ in pairs(partyMembers) do partyCount = partyCount + 1 end
-    if partyCount > 0 then
+    local renderableEntries = GetRenderablePartyEntries()
+    if #renderableEntries > 0 then
         local partyLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         partyLabel:SetPoint("TOPLEFT", LEFT_X, yOff)
         partyLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
-        partyLabel:SetText(format("Tracking %d party member(s)", partyCount))
+        partyLabel:SetText(format("Tracking %d party member(s)", #renderableEntries))
         yOff = yOff - 20
+
+        for _, entry in ipairs(renderableEntries) do
+            local trackedLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            trackedLabel:SetPoint("TOPLEFT", LEFT_X + 12, yOff)
+            trackedLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
+            trackedLabel:SetText(format("- %s: %s (%ds)",
+                entry.name,
+                entry.data.name or "Interrupt",
+                entry.info.baseCd or entry.data.cd or 15))
+            yOff = yOff - 18
+        end
     end
 
     yOff = yOff - 10

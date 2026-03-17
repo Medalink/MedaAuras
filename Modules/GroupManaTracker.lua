@@ -11,6 +11,7 @@ local pcall = pcall
 local unpack = unpack
 local UnitPower = UnitPower
 local UnitPowerMax = UnitPowerMax
+local UnitPowerType = UnitPowerType
 local UnitName = UnitName
 local UnitGUID = UnitGUID
 local UnitExists = UnitExists
@@ -32,6 +33,7 @@ local MAX_PARTY = 4
 local MAX_RAID = 40
 local TICKER_INTERVAL = 0.5
 local SCAN_INTERVAL = 6
+local SETTINGS_MIGRATION_VERSION = 1
 
 local CLASS_ICON_ATLAS = "Interface\\GLUES\\CHARACTERCREATE\\UI-CHARACTERCREATE-CLASSES"
 local ROLE_ICON_ATLAS = "Interface\\LFGFrame\\UI-LFG-ICON-PORTRAITROLES"
@@ -87,12 +89,15 @@ local isEnabled = false
 local drinkingHealers = {}
 local prevDrinkingSet = {}
 local newDrinkingBuf = {}
+local alertPreviewActive = false
+local alertManualVisibleUntil = 0
 
 -- ============================================================================
 -- Helpers
 -- ============================================================================
 
 local DRINK_BUFFS = {"Food & Drink", "Drinking", "Refreshment"}
+local DRINK_KEYWORDS = {"drink", "refreshment", "food"}
 
 local function IsUsableNumber(val)
     if val == nil then return false end
@@ -110,6 +115,23 @@ local function IsDrinking(unit)
             if clean then return true end
         end
     end
+
+    if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
+        for i = 1, 40 do
+            local ok, data = pcall(C_UnitAuras.GetAuraDataByIndex, unit, i, "HELPFUL")
+            if ok and data and data.name then
+                local lowerOk, lowerName = pcall(strlower, data.name)
+                if lowerOk and lowerName then
+                    for _, keyword in ipairs(DRINK_KEYWORDS) do
+                        if strfind(lowerName, keyword, 1, true) then
+                            return true
+                        end
+                    end
+                end
+            end
+        end
+    end
+
     return false
 end
 
@@ -151,8 +173,27 @@ local function IsGroupInCombat()
 end
 
 -- ============================================================================
--- Healer Scanning
+-- Roster Scanning
 -- ============================================================================
+
+local function ShouldTrackManaUnit(unit)
+    local role = UnitGroupRolesAssigned(unit)
+    if role == "HEALER" then
+        return true, role
+    end
+
+    if not db or db.includeNonHealers ~= true then
+        return false, role
+    end
+
+    local powerType = UnitPowerType(unit)
+    local isManaUser = IsUsableNumber(powerType) and powerType == MANA_POWER_TYPE
+    if not isManaUser then
+        return false, role
+    end
+
+    return true, role
+end
 
 local function ScanHealers()
     wipe(healers)
@@ -165,20 +206,14 @@ local function ScanHealers()
     local limit = inRaid and numGroup or MAX_PARTY
     local unitPrefix = inRaid and "raid" or "party"
 
-    local function AddUnit(unit, selfOnly)
+    local function AddUnit(unit)
         if not UnitExists(unit) then return end
         local guid = UnitGUID(unit)
         if not guid or healers[guid] then return end
 
-        local role = UnitGroupRolesAssigned(unit)
-
-        if selfOnly then
-            if role ~= "HEALER" then return end
-        else
-            local powerType = UnitPowerType(unit)
-            local isManaUser = IsUsableNumber(powerType) and powerType == MANA_POWER_TYPE
-            if role ~= "HEALER" and not isManaUser then return end
-            if role ~= "HEALER" and UnitIsDeadOrGhost(unit) then return end
+        local shouldTrack, role = ShouldTrackManaUnit(unit)
+        if not shouldTrack then
+            return
         end
 
         local name = UnitName(unit)
@@ -194,13 +229,13 @@ local function ScanHealers()
     end
 
     if db.showSelf then
-        AddUnit("player", true)
+        AddUnit("player")
     end
 
     for i = 1, limit do
         local unit = unitPrefix .. i
         if not UnitIsUnit(unit, "player") then
-            AddUnit(unit, false)
+            AddUnit(unit)
         end
     end
 end
@@ -426,6 +461,7 @@ end
 local function ShowAlert(text)
     EnsureAlertFrame()
     ApplyAlertStyle()
+    alertPreviewActive = false
     alertFrame:RestorePosition(db.alertPoint)
     alertFrame:Show(text, db.alertDuration or 3)
 
@@ -441,7 +477,55 @@ local function ShowAlert(text)
 end
 
 local function HideAlert()
+    alertManualVisibleUntil = 0
     if alertFrame then alertFrame:Dismiss() end
+end
+
+local function ShowAlertPreview(moduleDB)
+    if not moduleDB then return end
+
+    db = moduleDB
+    EnsureAlertFrame()
+    ApplyAlertStyle()
+    alertPreviewActive = true
+    alertManualVisibleUntil = 0
+    alertFrame:RestorePosition(moduleDB.alertPoint)
+    alertFrame:SetLocked(false)
+    alertFrame:SetShowBar(moduleDB.alertShowBar ~= false)
+    alertFrame:ShowPreview("Healer Drinking (Preview)")
+    alertFrame:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        moduleDB.alertPoint = self:SavePosition()
+    end)
+end
+
+local function HideAlertPreview(moduleDB)
+    if not alertFrame then return end
+
+    alertPreviewActive = false
+    alertFrame:DismissPreview()
+    if moduleDB then
+        alertFrame:SetLocked(moduleDB.alertLocked or false)
+    end
+end
+
+local function TestLiveAlert(moduleDB, text)
+    if moduleDB then
+        db = moduleDB
+    end
+    if not db then return end
+
+    alertPreviewActive = false
+    alertManualVisibleUntil = GetTime() + (db.alertDuration or 3)
+    ShowAlert(text or "Group Mana Tracker Alert Test")
+end
+
+local function ShouldKeepVisibleAlert()
+    if alertPreviewActive then
+        return true
+    end
+
+    return alertManualVisibleUntil > GetTime()
 end
 
 -- ============================================================================
@@ -635,9 +719,9 @@ local function UpdateDrinkingAlert()
         if not suppress then
             local text
             if drinkCount == 1 then
-                text = (lastName or "Healer") .. " is drinking"
+                text = (lastName or (db.includeNonHealers and "Player" or "Healer")) .. " is drinking"
             else
-                text = drinkCount .. " healers drinking"
+                text = drinkCount .. (db.includeNonHealers and " players drinking" or " healers drinking")
             end
             ShowAlert(text)
         end
@@ -650,6 +734,18 @@ local function UpdateDrinkingAlert()
     wipe(drinkingHealers)
     for guid, name in pairs(newDrinking) do
         drinkingHealers[guid] = name
+    end
+end
+
+local function MigrateSettings(moduleDB)
+    if not moduleDB then return end
+
+    local version = moduleDB.settingsVersion or 0
+    if version < SETTINGS_MIGRATION_VERSION then
+        if moduleDB.alertOnlyInCombat == true then
+            moduleDB.alertOnlyInCombat = false
+        end
+        moduleDB.settingsVersion = SETTINGS_MIGRATION_VERSION
     end
 end
 
@@ -671,7 +767,7 @@ local function OnTick()
         if displayFrame and displayFrame:IsShown() and db.showManaList ~= false then
             displayFrame:Hide()
         end
-        if IsAlertVisible() then HideAlert() end
+        if IsAlertVisible() and not ShouldKeepVisibleAlert() then HideAlert() end
         return
     end
 
@@ -699,6 +795,7 @@ local function OnEvent(self, event, arg1)
         scanTickCounter = 0
         ScanHealers()
         UpdateDisplay()
+        UpdateDrinkingAlert()
     elseif event == "UNIT_POWER_UPDATE" then
         if db.showManaList == false then return end
         if not displayFrame or not displayFrame:IsShown() then return end
@@ -753,6 +850,7 @@ local function StartModule()
     RegisterEvents()
     ScanHealers()
     UpdateDisplay()
+    UpdateDrinkingAlert()
 
     if not updateTicker then
         updateTicker = C_Timer.NewTicker(TICKER_INTERVAL, OnTick)
@@ -785,11 +883,13 @@ local function StopModule()
 end
 
 local function OnInitialize(moduleDB)
+    MigrateSettings(moduleDB)
     db = moduleDB
     StartModule()
 end
 
 local function OnEnable(moduleDB)
+    MigrateSettings(moduleDB)
     db = moduleDB
     StartModule()
 end
@@ -836,6 +936,10 @@ local slashCommands = {
         db.framePoint = nil
         if displayFrame then RestorePosition() end
         print("|cff00ccffMedaAuras:|r Group Mana Tracker position reset.")
+    end,
+    ["alerttest"] = function(moduleDB)
+        TestLiveAlert(moduleDB, "Healer Drinking (Live Test)")
+        print("|cff00ccffMedaAuras:|r Group Mana Tracker live alert test shown.")
     end,
 }
 
@@ -1071,16 +1175,7 @@ local function BuildSettingsPage(parent, moduleDB)
 
     DestroyFloatingPreview()
     CreateFloatingPreview()
-    EnsureAlertFrame()
-    ApplyAlertStyle()
-    alertFrame:RestorePosition(moduleDB.alertPoint)
-    alertFrame:SetLocked(false)
-    alertFrame:SetShowBar(moduleDB.alertShowBar ~= false)
-    alertFrame:ShowPreview("Healer Drinking (Preview)")
-    alertFrame:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        if db then db.alertPoint = self:SavePosition() end
-    end)
+    ShowAlertPreview(moduleDB)
 
     local tabBar, tabs = MedaAuras:CreateConfigTabs(parent, {
         { id = "general",    label = "General" },
@@ -1121,15 +1216,27 @@ local function BuildSettingsPage(parent, moduleDB)
         lockCB.OnValueChanged = function(_, checked) moduleDB.locked = checked end
         yOff = yOff - 30
 
-        local showSelfCB = MedaUI:CreateCheckbox(p, "Show Self (if healer)")
+        local showSelfCB = MedaUI:CreateCheckbox(p, "Show Self")
         showSelfCB:SetPoint("TOPLEFT", LEFT_X, yOff)
         showSelfCB:SetChecked(moduleDB.showSelf)
         showSelfCB.OnValueChanged = function(_, checked)
             moduleDB.showSelf = checked
             if isEnabled then ScanHealers(); UpdateDisplay() end
         end
+        local includeNonHealersCB = MedaUI:CreateCheckbox(p, "Include Non-Healers")
+        includeNonHealersCB:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        includeNonHealersCB:SetChecked(moduleDB.includeNonHealers == true)
+        includeNonHealersCB.OnValueChanged = function(_, checked)
+            moduleDB.includeNonHealers = checked
+            if isEnabled then
+                ScanHealers()
+                UpdateDisplay()
+            end
+        end
+        yOff = yOff - 30
+
         local showMaxCB = MedaUI:CreateCheckbox(p, "Show Max Mana")
-        showMaxCB:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        showMaxCB:SetPoint("TOPLEFT", LEFT_X, yOff)
         showMaxCB:SetChecked(moduleDB.showMaxMana)
         showMaxCB.OnValueChanged = function(_, checked)
             moduleDB.showMaxMana = checked
@@ -1396,12 +1503,10 @@ local function BuildSettingsPage(parent, moduleDB)
         alertEnCB.OnValueChanged = function(_, checked)
             moduleDB.alertEnabled = checked
             if checked then
-                EnsureAlertFrame()
-                lv()
-                alertFrame:ShowPreview("Healer Drinking (Preview)")
+                ShowAlertPreview(moduleDB)
             else
                 HideAlert()
-                if alertFrame then alertFrame:DismissPreview() end
+                HideAlertPreview(moduleDB)
             end
             pv()
         end
@@ -1409,7 +1514,7 @@ local function BuildSettingsPage(parent, moduleDB)
 
         local alertCombatCB = MedaUI:CreateCheckbox(p, "Only Alert During Combat")
         alertCombatCB:SetPoint("TOPLEFT", LEFT_X, yOff)
-        alertCombatCB:SetChecked(moduleDB.alertOnlyInCombat ~= false)
+        alertCombatCB:SetChecked(moduleDB.alertOnlyInCombat == true)
         alertCombatCB.OnValueChanged = function(_, checked)
             moduleDB.alertOnlyInCombat = checked
         end
@@ -1437,6 +1542,11 @@ local function BuildSettingsPage(parent, moduleDB)
         soundPreviewBtn:SetScript("OnClick", function()
             local path = MedaUI:GetSoundPath(moduleDB.alertSound)
             if path then MedaUI:PlaySoundPath(path) end
+        end)
+        local liveAlertTestBtn = MedaUI:CreateButton(p, "Test Alert", 84, 24)
+        liveAlertTestBtn:SetPoint("LEFT", soundPreviewBtn, "RIGHT", 8, 0)
+        liveAlertTestBtn:SetScript("OnClick", function()
+            TestLiveAlert(moduleDB, "Healer Drinking (Live Test)")
         end)
         yOff = yOff - 55
 
@@ -1523,12 +1633,7 @@ local function BuildSettingsPage(parent, moduleDB)
         alertResetBtn:SetPoint("TOPLEFT", LEFT_X, yOff)
         alertResetBtn:SetScript("OnClick", function()
             moduleDB.alertPoint = nil
-            if alertFrame then
-                alertFrame:RestorePosition(nil)
-                if alertFrame:IsShown() then
-                    alertFrame:ShowPreview("Healer Drinking (Preview)")
-                end
-            end
+            ShowAlertPreview(moduleDB)
         end)
     end
 
@@ -1540,10 +1645,7 @@ local function BuildSettingsPage(parent, moduleDB)
     sentinel:Show()
     sentinel:SetScript("OnHide", function()
         DestroyFloatingPreview()
-        if alertFrame then
-            alertFrame:DismissPreview()
-            alertFrame:SetLocked(moduleDB.alertLocked or false)
-        end
+        HideAlertPreview(moduleDB)
     end)
 end
 
@@ -1555,6 +1657,7 @@ local MODULE_DEFAULTS = {
     enabled = false,
     locked = false,
     showSelf = true,
+    includeNonHealers = false,
     showMaxMana = false,
     showManaList = true,
 
@@ -1592,7 +1695,7 @@ local MODULE_DEFAULTS = {
 
     -- drinking alert
     alertEnabled = true,
-    alertOnlyInCombat = true,
+    alertOnlyInCombat = false,
     alertDuration = 3,
     alertScale = 1.0,
     alertFont = "default",
@@ -1618,8 +1721,8 @@ MedaAuras:RegisterModule({
     version = MODULE_VERSION,
     stability = MODULE_STABILITY,
     author = "Medalink",
-    description = "Displays healer mana for your group using visual tainted-value rendering.",
-    sidebarDesc = "Shows healer mana bars for your group in dungeons and raids.",
+    description = "Displays healer mana for your group, with optional non-healer mana users.",
+    sidebarDesc = "Shows healer mana bars for your group, with an option to include other mana users.",
     defaults = MODULE_DEFAULTS,
     OnInitialize = OnInitialize,
     OnEnable = OnEnable,
@@ -1630,6 +1733,10 @@ MedaAuras:RegisterModule({
     buildPage = function(_, parent)
         BuildSettingsPage(parent, MedaAuras:GetModuleDB(MODULE_NAME))
         return 820
+    end,
+    onPageCacheRestore = function(pageName)
+        if pageName ~= "settings" then return end
+        ShowAlertPreview(MedaAuras:GetModuleDB(MODULE_NAME))
     end,
     slashCommands = slashCommands,
 })

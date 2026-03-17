@@ -285,6 +285,17 @@ local function TriggerMatches(trigger, ctx)
             return false
         end
 
+        if trigger.instanceNames then
+            local found = false
+            for _, name in ipairs(trigger.instanceNames) do
+                if name == ctx.instanceName then
+                    found = true
+                    break
+                end
+            end
+            if not found then return false end
+        end
+
         if trigger.instanceIDs then
             local found = false
             for _, id in ipairs(trigger.instanceIDs) do
@@ -511,6 +522,11 @@ local function QueryProvidersForRoster(providersList, roster, profile)
                             spellID = provider.spellID,
                             spellName = provider.spellName,
                             note = provider.note,
+                            icon = provider.icon,
+                            rangeText = provider.rangeText,
+                            castTimeMS = provider.castTimeMS,
+                            cooldownMS = provider.cooldownMS,
+                            dispelTargets = provider.dispelTargets,
                         }
                     end
                 end
@@ -715,6 +731,7 @@ GetFullGroupWorkaround = function(capabilityID)
         soothe = "No in-group enrage removal. Save crowd control, kiting, and defensives for enrage windows.",
         dispel_magic = "No in-group magic dispel. Use personals and movement to cover mechanics that would normally be dispelled.",
         dispel_disease = "No in-group disease dispel. Use defensives, self-cleanses, and route carefully through disease-heavy pulls.",
+        dispel_bleed = "No in-group bleed removal. Respect heavy physical DoTs and pre-plan externals, personals, and kiting for bleed windows.",
         dispel_poison = "No in-group poison dispel. Respect poison-heavy packs and use personals or self-cleanses where available.",
         dispel_curse = "No in-group curse dispel. Plan defensives and interrupts around curse-heavy casts instead of assuming a cleanse.",
     }
@@ -1027,6 +1044,7 @@ local DISPEL_COLORS = {
     dispel_curse   = "9933cc",   -- purple
     dispel_poison  = "00cc44",   -- green
     dispel_disease = "cc8833",   -- brown
+    dispel_bleed   = "cc4444",   -- red
 }
 local SPELL_COLOR_DEFAULT = "00ccff" -- cyan fallback
 
@@ -1237,6 +1255,7 @@ local function RenderPlayerTab(content)
             dispel_curse  = 135952,
             dispel_poison = 136068,
             dispel_disease = 135935,
+            dispel_bleed = 4630445,
             offensive_dispel = 135739,
             soothe = 132163,
         }

@@ -4,6 +4,8 @@ local MedaUI = LibStub("MedaUI-2.0")
 
 local format = format
 local GetTime = GetTime
+local IsPlayerSpell = IsPlayerSpell
+local IsSpellKnown = IsSpellKnown
 local UnitExists = UnitExists
 local pcall = pcall
 local pairs = pairs
@@ -27,6 +29,7 @@ local MODULE_STABILITY = "stable"   -- "experimental" | "beta" | "stable"
 -- ============================================================================
 
 local INTERRUPTS = ns.InterruptData.INTERRUPTS
+local InterruptResolver = ns.Services and ns.Services.InterruptResolver
 
 -- ============================================================================
 -- State
@@ -152,19 +155,22 @@ local function DetectInterrupt()
     local _, classToken = UnitClass("player")
     MedaAuras.LogDebug(format("[FIH] DetectInterrupt: player class = %s", tostring(classToken)))
 
-    for _, info in ipairs(INTERRUPTS) do
-        if info.class == classToken then
-            local known = IsSpellAvailable(info)
-            MedaAuras.LogDebug(format("[FIH] Checking %s (ID %d, class %s, pet %s): known = %s",
-                info.name, info.id, info.class, tostring(info.pet or false), tostring(known)))
-            if known then
-                MedaAuras.Log(format("[FIH] Detected interrupt: %s (ID %d)", info.name, info.id))
-                return info
-            end
+    if InterruptResolver then
+        local entry = InterruptResolver:ResolvePlayerInterrupt()
+        if entry then
+            MedaAuras.Log(format("[FIH] Detected interrupt: %s (ID %d)", entry.name, entry.spellID))
+            return {
+                id = entry.spellID,
+                name = entry.name,
+                class = classToken,
+                baseCD = entry.baseCD or entry.cd,
+                pet = entry.pet,
+                altIDs = entry.altIDs,
+            }
         end
     end
 
-    MedaAuras.LogDebug("[FIH] No class match, trying fallback (all classes)")
+    MedaAuras.LogDebug("[FIH] Resolver had no result, trying legacy scan")
     for _, info in ipairs(INTERRUPTS) do
         local known = IsSpellAvailable(info)
         if known then

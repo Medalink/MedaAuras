@@ -223,3 +223,24 @@ D.rules[#D.rules + 1] = {
     },
 }
 
+D.rules[#D.rules + 1] = {
+    id      = "grudgepit_bleed",
+    trigger = {
+        type         = "instance",
+        instanceType = "delve",
+    },
+    checks = {
+        {
+            capability = "dispel_bleed",
+            overrides = {
+                none = {
+                    severity   = "warning",
+                    banner     = "The Grudge Pit: Rending Strikes is much safer with bleed removal.",
+                    detail     = "Pit Fighters apply Rending Strikes, a heavy bleed DoT. You can live it without a cleanse, but bleed removal gives you far more room on aggressive pulls.",
+                    suggestion = "A Preservation Evoker can clear Rending Strikes with Expunge.",
+                },
+            },
+        },
+    },
+}
+

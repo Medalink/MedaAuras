@@ -42,6 +42,7 @@ Services\SpellCastTracker.lua
 Services\CooldownTimer.lua
 Services\UnitPriority.lua
 Services\GroupInspector.lua
+Services\InterruptResolver.lua
 Services\MapPinProvider.xml
 Services\MapPinProvider.lua
 Services\PartySpellWatcher.lua

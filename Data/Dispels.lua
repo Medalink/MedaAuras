@@ -15,7 +15,7 @@ D.capabilities.dispel_curse = {
             specID    = nil,
             spellID   = 475,
             spellName = "Remove Curse",
-            note      = "No cooldown. Can rapidly cleanse overlapping curses.",
+            note      = "No cooldown. Can rapidly cleanse overlapping curses. [IV: Removes curses from friendly targets. Curses have a purple debuff\nicon border.]",
             icon      = 136082,
             rangeText = "Long",
             castTimeMS = 0,
@@ -106,7 +106,7 @@ D.capabilities.dispel_poison = {
             specID    = 65,
             spellID   = 4987,
             spellName = "Cleanse",
-            note      = "Holy only. Also removes magic and disease. 8 sec CD.",
+            note      = "Holy only. Also removes magic and disease. 8 sec CD. [Wowhead: Dispel Venomous Spit with Cleanse on cooldown and be ready to spot heal people with multiple stacks.]",
             icon      = 135949,
             rangeText = "Long",
             castTimeMS = 0,
@@ -118,7 +118,7 @@ D.capabilities.dispel_poison = {
             specID    = 270,
             spellID   = 115450,
             spellName = "Detox",
-            note      = "Mistweaver only. Also removes magic. 8 sec CD.",
+            note      = "Mistweaver only. Also removes magic. 8 sec CD. [IV: Mistweaver's Magic dispel. We should always be augmented by our talentImproved Detox, causing it to also remove Poisons and Diseases.]",
             icon      = 460692,
             rangeText = "Long",
             castTimeMS = 0,
@@ -135,7 +135,7 @@ D.capabilities.dispel_poison = {
             rangeText = "Medium-Short",
             castTimeMS = 0,
             cooldownMS = 8000,
-            dispelTargets = { "Poison" },
+            dispelTargets = { "Poison", "Bleed" },
         },
     },
 
@@ -185,7 +185,7 @@ D.capabilities.dispel_disease = {
             specID    = 65,
             spellID   = 4987,
             spellName = "Cleanse",
-            note      = "Holy only. Also removes magic and poison. 8 sec CD.",
+            note      = "Holy only. Also removes magic and poison. 8 sec CD. [Wowhead: Dispel Venomous Spit with Cleanse on cooldown and be ready to spot heal people with multiple stacks.]",
             icon      = 135949,
             rangeText = "Long",
             castTimeMS = 0,
@@ -197,7 +197,7 @@ D.capabilities.dispel_disease = {
             specID    = 270,
             spellID   = 115450,
             spellName = "Detox",
-            note      = "Mistweaver Detox also removes magic. 8 sec CD.",
+            note      = "Mistweaver Detox also removes magic. 8 sec CD. [IV: Mistweaver's Magic dispel. We should always be augmented by our talentImproved Detox, causing it to also remove Poisons and Diseases.]",
             icon      = 460692,
             rangeText = "Long",
             castTimeMS = 0,
@@ -263,6 +263,57 @@ D.capabilities.dispel_disease = {
     },
 }
 
+D.capabilities.dispel_bleed = {
+    label       = "Bleed Removal",
+    description = "Ability to remove Bleed debuffs from friendly targets. Rare, but valuable when physical DoTs would otherwise force heavy defensive usage.",
+    icon        = 4630445,
+    color       = { 0.85, 0.25, 0.25 },
+    tags        = { "dispel", "bleed" },
+
+    providers = {
+        {
+            class     = "EVOKER",
+            specID    = 1468,
+            spellID   = 365585,
+            spellName = "Expunge",
+            note      = "Preservation only. Also removes poison. 8 sec CD.",
+            icon      = 4630445,
+            rangeText = "Medium-Short",
+            castTimeMS = 0,
+            cooldownMS = 8000,
+            dispelTargets = { "Poison", "Bleed" },
+        },
+    },
+
+    conditions = {
+        none = {
+            severity    = "warning",
+            banner      = "No bleed removal in group!",
+            panelStatus = "NONE",
+            detail      = "Nobody in your group can remove bleed effects. This is usually manageable, but some physical DoTs are much safer with a bleed cleanse.",
+            suggestion  = "If the route or delve has dangerous bleeds, a Preservation Evoker can cover them with Expunge.",
+        },
+        single = {
+            severity    = nil,
+            banner      = nil,
+            panelStatus = nil,
+            detail      = "One bleed dispeller is available.",
+            suggestion  = nil,
+        },
+        adequate = {
+            severity    = nil,
+            banner      = nil,
+            panelStatus = nil,
+            detail      = "Bleed removal is covered.",
+            suggestion  = nil,
+        },
+    },
+
+    thresholds = { none = 0, single = 1, adequate = 1 },
+
+    personalReminder = nil,
+}
+
 D.capabilities.dispel_magic = {
     label       = "Magic Removal",
     description = "Ability to remove Magic debuffs from friendly targets.",
@@ -300,7 +351,7 @@ D.capabilities.dispel_magic = {
             specID    = 65,
             spellID   = 4987,
             spellName = "Cleanse",
-            note      = "Holy only. Also removes poison and disease. 8 sec CD.",
+            note      = "Holy only. Also removes poison and disease. 8 sec CD. [Wowhead: Dispel Venomous Spit with Cleanse on cooldown and be ready to spot heal people with multiple stacks.]",
             icon      = 135949,
             rangeText = "Long",
             castTimeMS = 0,
@@ -312,7 +363,7 @@ D.capabilities.dispel_magic = {
             specID    = 270,
             spellID   = 115450,
             spellName = "Detox",
-            note      = "Mistweaver only. Also removes poison. 8 sec CD.",
+            note      = "Mistweaver only. Also removes poison. 8 sec CD. [IV: Mistweaver's Magic dispel. We should always be augmented by our talentImproved Detox, causing it to also remove Poisons and Diseases.]",
             icon      = 460692,
             rangeText = "Long",
             castTimeMS = 0,

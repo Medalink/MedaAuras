@@ -363,6 +363,18 @@ local function CreateUI()
     local toolbar = S.uiState.workspaceShell:GetToolbar()
     S.uiState.toolbar = {}
 
+    local liveResetButton = MedaUI:CreateButton(toolbar, "Use My Spec", 110)
+    liveResetButton:SetPoint("TOPLEFT", toolbar, "TOPLEFT", 0, 0)
+    liveResetButton.OnClick = function()
+        local live = GetLivePlayerProfile()
+        if not live then return end
+        SetViewerState(live.classToken, live.role, live.specID, "live")
+        SyncViewerToolbar()
+        RunPipeline(false)
+    end
+    liveResetButton:Hide()
+    S.uiState.toolbar.liveResetButton = liveResetButton
+
     local contextDropdown = MedaUI:CreateDropdown(toolbar, 220, BuildContextDropdownItems())
     contextDropdown:SetPoint("TOPRIGHT", toolbar, "TOPRIGHT", 0, 0)
     contextDropdown.OnValueChanged = function(_, val)
@@ -695,6 +707,11 @@ local function QueryProvidersPreview(providersList, fakeGroup)
                         spellID   = provider.spellID,
                         spellName = provider.spellName,
                         note      = provider.note,
+                        icon      = provider.icon,
+                        rangeText = provider.rangeText,
+                        castTimeMS = provider.castTimeMS,
+                        cooldownMS = provider.cooldownMS,
+                        dispelTargets = provider.dispelTargets,
                     }
                 end
             end

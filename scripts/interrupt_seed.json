@@ -1,0 +1,217 @@
+{
+  "allInterrupts": [
+    { "spellID": 351338, "class": "EVOKER", "focusScan": true },
+    { "spellID": 1766, "class": "ROGUE", "focusScan": true },
+    { "spellID": 6552, "class": "WARRIOR", "focusScan": true },
+    { "spellID": 2139, "class": "MAGE", "focusScan": true },
+    { "spellID": 57994, "class": "SHAMAN", "focusScan": true },
+    { "spellID": 106839, "class": "DRUID", "focusScan": true },
+    { "spellID": 78675, "class": "DRUID", "focusScan": true },
+    { "spellID": 96231, "class": "PALADIN", "focusScan": true },
+    { "spellID": 47528, "class": "DEATHKNIGHT", "focusScan": true },
+    { "spellID": 147362, "class": "HUNTER", "focusScan": true },
+    { "spellID": 187707, "class": "HUNTER", "focusScan": true },
+    { "spellID": 282220, "class": "HUNTER", "icon": 1376045, "focusScan": false },
+    { "spellID": 183752, "class": "DEMONHUNTER", "focusScan": true },
+    { "spellID": 116705, "class": "MONK", "focusScan": true },
+    { "spellID": 15487, "class": "PRIEST", "focusScan": true },
+    {
+      "spellID": 119910,
+      "class": "WARLOCK",
+      "baseCD": 24,
+      "pet": true,
+      "altIDs": [19647, 119898, 1276467, 89766],
+      "focusScan": true
+    },
+    {
+      "spellID": 19647,
+      "class": "WARLOCK",
+      "pet": true,
+      "altIDs": [119910, 119898, 1276467, 89766],
+      "focusScan": true
+    },
+    {
+      "spellID": 89766,
+      "class": "WARLOCK",
+      "pet": true,
+      "altIDs": [119910, 19647, 119898, 1276467],
+      "focusScan": true
+    },
+    {
+      "spellID": 1276467,
+      "class": "WARLOCK",
+      "baseCD": 25,
+      "altIDs": [119910, 19647, 89766],
+      "focusScan": true
+    },
+    {
+      "spellID": 119914,
+      "class": "WARLOCK",
+      "pet": true,
+      "baseCD": 30,
+      "altIDs": [119910, 19647, 89766, 1276467],
+      "focusScan": false
+    },
+    {
+      "spellID": 132409,
+      "class": "WARLOCK",
+      "baseCD": 25,
+      "name": "Fel Ravager / Spell Lock",
+      "altIDs": [119910, 19647, 89766, 1276467],
+      "focusScan": false
+    }
+  ],
+  "classInterruptOrder": {
+    "WARRIOR": [6552],
+    "ROGUE": [1766],
+    "MAGE": [2139],
+    "SHAMAN": [57994],
+    "DRUID": [106839, 78675],
+    "DEATHKNIGHT": [47528],
+    "PALADIN": [96231],
+    "DEMONHUNTER": [183752],
+    "MONK": [116705],
+    "PRIEST": [15487],
+    "HUNTER": [147362, 187707, 282220],
+    "WARLOCK": [19647, 132409, 119914, 119910],
+    "EVOKER": [351338]
+  },
+  "specCapabilities": {
+    "71":   { "class": "WARRIOR",     "role": "DAMAGER", "primary": { "spellID": 6552 } },
+    "72":   { "class": "WARRIOR",     "role": "DAMAGER", "primary": { "spellID": 6552 } },
+    "73":   { "class": "WARRIOR",     "role": "TANK",    "primary": { "spellID": 6552 } },
+    "62":   { "class": "MAGE",        "role": "DAMAGER", "primary": { "spellID": 2139 } },
+    "63":   { "class": "MAGE",        "role": "DAMAGER", "primary": { "spellID": 2139 } },
+    "64":   { "class": "MAGE",        "role": "DAMAGER", "primary": { "spellID": 2139 } },
+    "65":   { "class": "PALADIN",     "role": "HEALER",  "hasInterrupt": false },
+    "66":   { "class": "PALADIN",     "role": "TANK",    "primary": { "spellID": 96231 } },
+    "70":   { "class": "PALADIN",     "role": "DAMAGER", "primary": { "spellID": 96231 } },
+    "102":  { "class": "DRUID",       "role": "DAMAGER", "primary": { "spellID": 78675 } },
+    "103":  { "class": "DRUID",       "role": "DAMAGER", "primary": { "spellID": 106839 } },
+    "104":  { "class": "DRUID",       "role": "TANK",    "primary": { "spellID": 106839 } },
+    "105":  { "class": "DRUID",       "role": "HEALER",  "hasInterrupt": false },
+    "250":  { "class": "DEATHKNIGHT", "role": "TANK",    "primary": { "spellID": 47528 } },
+    "251":  { "class": "DEATHKNIGHT", "role": "DAMAGER", "primary": { "spellID": 47528 } },
+    "252":  { "class": "DEATHKNIGHT", "role": "DAMAGER", "primary": { "spellID": 47528 } },
+    "253":  { "class": "HUNTER",      "role": "DAMAGER", "primary": { "spellID": 147362 } },
+    "254":  { "class": "HUNTER",      "role": "DAMAGER", "primary": { "spellID": 147362 } },
+    "255":  { "class": "HUNTER",      "role": "DAMAGER", "primary": { "spellID": 187707 } },
+    "256":  { "class": "PRIEST",      "role": "HEALER",  "hasInterrupt": false },
+    "257":  { "class": "PRIEST",      "role": "HEALER",  "hasInterrupt": false },
+    "258":  { "class": "PRIEST",      "role": "DAMAGER", "primary": { "spellID": 15487 } },
+    "259":  { "class": "ROGUE",       "role": "DAMAGER", "primary": { "spellID": 1766 } },
+    "260":  { "class": "ROGUE",       "role": "DAMAGER", "primary": { "spellID": 1766 } },
+    "261":  { "class": "ROGUE",       "role": "DAMAGER", "primary": { "spellID": 1766 } },
+    "262":  { "class": "SHAMAN",      "role": "DAMAGER", "primary": { "spellID": 57994 } },
+    "263":  { "class": "SHAMAN",      "role": "DAMAGER", "primary": { "spellID": 57994 } },
+    "264":  { "class": "SHAMAN",      "role": "HEALER",  "primary": { "spellID": 57994, "baseCD": 30 } },
+    "265":  {
+      "class": "WARLOCK",
+      "role": "DAMAGER",
+      "primary": { "spellID": 19647, "pet": true },
+      "alternates": [{ "spellID": 119910, "pet": true }]
+    },
+    "266":  {
+      "class": "WARLOCK",
+      "role": "DAMAGER",
+      "primary": { "spellID": 119914, "baseCD": 30, "pet": true, "petSpellID": 89766 },
+      "extras": [{ "spellID": 132409, "baseCD": 25, "name": "Fel Ravager / Spell Lock", "talentCheck": 1276467 }]
+    },
+    "267":  {
+      "class": "WARLOCK",
+      "role": "DAMAGER",
+      "primary": { "spellID": 19647, "pet": true },
+      "alternates": [{ "spellID": 119910, "pet": true }]
+    },
+    "268":  { "class": "MONK",        "role": "TANK",    "primary": { "spellID": 116705 } },
+    "269":  { "class": "MONK",        "role": "DAMAGER", "primary": { "spellID": 116705 } },
+    "270":  { "class": "MONK",        "role": "HEALER",  "primary": { "spellID": 116705 } },
+    "577":  { "class": "DEMONHUNTER", "role": "DAMAGER", "primary": { "spellID": 183752 } },
+    "581":  { "class": "DEMONHUNTER", "role": "TANK",    "primary": { "spellID": 183752 } },
+    "1467": { "class": "EVOKER",      "role": "DAMAGER", "primary": { "spellID": 351338 } },
+    "1468": { "class": "EVOKER",      "role": "HEALER",  "primary": { "spellID": 351338 } },
+    "1473": { "class": "EVOKER",      "role": "DAMAGER", "primary": { "spellID": 351338 } }
+  },
+  "roleFallbacks": {
+    "WARRIOR": {
+      "TANK": { "spellID": 6552 },
+      "DAMAGER": { "spellID": 6552 }
+    },
+    "MAGE": {
+      "DAMAGER": { "spellID": 2139 }
+    },
+    "PALADIN": {
+      "HEALER": { "hasInterrupt": false },
+      "TANK": { "spellID": 96231 },
+      "DAMAGER": { "spellID": 96231 }
+    },
+    "DRUID": {
+      "HEALER": { "hasInterrupt": false },
+      "TANK": { "spellID": 106839 }
+    },
+    "DEATHKNIGHT": {
+      "TANK": { "spellID": 47528 },
+      "DAMAGER": { "spellID": 47528 }
+    },
+    "PRIEST": {
+      "HEALER": { "hasInterrupt": false },
+      "DAMAGER": { "spellID": 15487 }
+    },
+    "ROGUE": {
+      "DAMAGER": { "spellID": 1766 }
+    },
+    "SHAMAN": {
+      "HEALER": { "spellID": 57994, "baseCD": 30 },
+      "DAMAGER": { "spellID": 57994 }
+    },
+    "MONK": {
+      "TANK": { "spellID": 116705 },
+      "HEALER": { "spellID": 116705 },
+      "DAMAGER": { "spellID": 116705 }
+    },
+    "DEMONHUNTER": {
+      "TANK": { "spellID": 183752 },
+      "DAMAGER": { "spellID": 183752 }
+    },
+    "EVOKER": {
+      "HEALER": { "spellID": 351338 },
+      "DAMAGER": { "spellID": 351338 }
+    }
+  },
+  "classFallbacks": {
+    "WARRIOR": { "spellID": 6552 },
+    "MAGE": { "spellID": 2139 },
+    "DEATHKNIGHT": { "spellID": 47528 },
+    "ROGUE": { "spellID": 1766 },
+    "MONK": { "spellID": 116705 },
+    "DEMONHUNTER": { "spellID": 183752 },
+    "EVOKER": { "spellID": 351338 }
+  },
+  "cdReductionTalents": {
+    "388039": { "affects": 147362, "reduction": 2, "name": "Lone Survivor" },
+    "412713": { "affects": 351338, "pctReduction": 10, "name": "Interwoven Threads" }
+  },
+  "cdOnKickTalents": {
+    "378848": { "reduction": 3, "name": "Coldthirst" }
+  },
+  "spellAliases": {
+    "1276467": 132409,
+    "282220": 187707,
+    "119910": 19647
+  },
+  "classColors": {
+    "WARRIOR": [0.78, 0.61, 0.43],
+    "ROGUE": [1.0, 0.96, 0.41],
+    "MAGE": [0.41, 0.8, 0.94],
+    "SHAMAN": [0.0, 0.44, 0.87],
+    "DRUID": [1.0, 0.49, 0.04],
+    "DEATHKNIGHT": [0.77, 0.12, 0.23],
+    "PALADIN": [0.96, 0.55, 0.73],
+    "DEMONHUNTER": [0.64, 0.19, 0.79],
+    "MONK": [0.0, 1.0, 0.59],
+    "PRIEST": [1.0, 1.0, 1.0],
+    "HUNTER": [0.67, 0.83, 0.45],
+    "WARLOCK": [0.58, 0.51, 0.79],
+    "EVOKER": [0.2, 0.58, 0.5]
+  }
+}
