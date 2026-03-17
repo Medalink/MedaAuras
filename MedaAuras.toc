@@ -54,6 +54,7 @@ Modules\GroupManaTracker.lua
 Modules\ManaTracker.lua
 Modules\Reminders\Core.lua
 Modules\Reminders\Workspace.lua
+Modules\Reminders\HUDs.lua
 Modules\Reminders\Init.lua
 Modules\GoneFishin.lua
 Modules\ShutIt.lua

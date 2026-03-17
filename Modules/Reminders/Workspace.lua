@@ -3916,6 +3916,7 @@ R.BuildRoleDropdownItems = BuildRoleDropdownItems
 R.BuildClassDropdownItems = BuildClassDropdownItems
 R.BuildSpecDropdownItems = BuildSpecDropdownItems
 R.SyncViewerToolbar = SyncViewerToolbar
+R.GetEffectiveContext = GetEffectiveContext
 R.GetSpecMeta = GetSpecMeta
 R.GetLivePlayerProfile = GetLivePlayerProfile
 R.EnsureViewerState = EnsureViewerState

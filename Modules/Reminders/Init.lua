@@ -223,6 +223,10 @@ RunPipeline = function(clearDismiss)
         RenderCurrentPage()
     end
 
+    if R.RefreshHUDs then
+        R.RefreshHUDs()
+    end
+
     -- Auto-show panel only when inside an instance (not in cities/open world)
     if S.db.autoShowInInstance ~= false and S.coveragePanel and not S.dismissed and S.lastContext and S.lastContext.inInstance then
         S.coveragePanel:Show()
@@ -557,6 +561,7 @@ local function StopModule()
 
     if S.coveragePanel then S.coveragePanel:Hide() end
     if S.copyPopup then S.copyPopup:Hide() end
+    if R.HideHUDs then R.HideHUDs() end
 
     ReleaseRows()
     ReleaseSectionHeaders()
@@ -576,6 +581,7 @@ end
 
 local function OnInitialize(moduleDB)
     S.db = moduleDB
+    if R.EnsureHUDDB then R.EnsureHUDDB(S.db) end
 
     if not S.db._sizeMigrated then
         if (S.db.panelWidth or 0) <= 440 then S.db.panelWidth = 920 end
@@ -600,6 +606,7 @@ end
 
 local function OnEnable(moduleDB)
     S.db = moduleDB
+    if R.EnsureHUDDB then R.EnsureHUDDB(S.db) end
     StartModule()
 end
 
@@ -1067,15 +1074,20 @@ end
 
 local function BuildPage(pageName, parent)
     local moduleDB = S.db or MedaAuras:GetModuleDB(MODULE_NAME)
+    local height = 500
     if pageName == "tracking" then
-        BuildTrackingPage(parent, moduleDB)
+        height = BuildTrackingPage(parent, moduleDB)
     elseif pageName == "sources" then
-        BuildSourcesPage(parent, moduleDB)
+        height = BuildSourcesPage(parent, moduleDB)
     elseif pageName == "appearance" then
-        BuildAppearancePage(parent, moduleDB)
+        height = BuildAppearancePage(parent, moduleDB)
+    elseif pageName == "huds" and R.BuildHUDSettingsPage then
+        height = R.BuildHUDSettingsPage(parent, moduleDB)
     end
-    RunPreview()
-    return 500
+    if pageName ~= "huds" then
+        RunPreview()
+    end
+    return height
 end
 
 -- ============================================================================
@@ -1168,6 +1180,35 @@ local MODULE_DEFAULTS = {
 
     showInterrupts = true,
     showAffixTips  = true,
+    huds = {
+        dispel = {
+            enabled = true,
+            showIcons = true,
+            locked = false,
+            filterMode = "mine",
+            font = "default",
+            outline = "outline",
+            titleSize = 13,
+            detailSize = 11,
+            iconSize = 18,
+            topX = 6,
+            expanded = false,
+            point = nil,
+        },
+        interrupt = {
+            enabled = true,
+            showIcons = true,
+            locked = false,
+            font = "default",
+            outline = "outline",
+            titleSize = 13,
+            detailSize = 11,
+            iconSize = 18,
+            topX = 6,
+            expanded = false,
+            point = nil,
+        },
+    },
 }
 
 MedaAuras:RegisterModule({
@@ -1189,11 +1230,13 @@ MedaAuras:RegisterModule({
         { id = "tracking", label = "Tracking" },
         { id = "sources", label = "Sources" },
         { id = "appearance", label = "Appearance" },
+        { id = "huds", label = "HUDs" },
     },
     pageHeights   = {
         tracking = 500,
         sources = 500,
         appearance = 500,
+        huds = 720,
     },
     buildPage     = BuildPage,
     slashCommands = slashCommands,
