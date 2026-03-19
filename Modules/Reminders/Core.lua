@@ -2187,12 +2187,31 @@ local function ReleasePrepHeaders()
     wipe(S.prepHeaders)
 end
 
+local function IsCleanAuraString(value)
+    if type(value) ~= "string" then return false end
+    return pcall(function()
+        return value == value
+    end)
+end
+
 FindPlayerBuff = function(pattern)
-    for i = 1, 40 do
-        local aura = C_UnitAuras.GetBuffDataByIndex("player", i)
-        if not aura then break end
-        if aura.name and aura.name:match(pattern) then return true, aura.name end
+    if type(pattern) ~= "string" or pattern == "" then
+        return false, nil
     end
+
+    for i = 1, 40 do
+        local ok, aura = pcall(C_UnitAuras.GetBuffDataByIndex, "player", i)
+        if not ok or not aura then break end
+
+        local name = aura.name
+        if type(name) == "string" then
+            local matchedOk, matched = pcall(strmatch, name, pattern)
+            if matchedOk and matched then
+                return true, IsCleanAuraString(name) and name or "Active"
+            end
+        end
+    end
+
     return false, nil
 end
 
