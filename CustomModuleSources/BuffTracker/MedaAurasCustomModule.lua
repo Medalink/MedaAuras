@@ -19,7 +19,7 @@ local wipe = wipe
 
 local MODULE_ID = "padding"
 local MODULE_NAME = "Padding"
-local MODULE_VERSION = "0.4"
+local MODULE_VERSION = "0.6"
 local MODULE_AUTHOR = "Medalink"
 local MODULE_DESCRIPTION = "Shows one draggable icon per configured player buff with countdown timers."
 
@@ -41,6 +41,8 @@ local state = {
     eventFrame = nil,
     elapsed = 0,
 }
+
+local IsSettingsPreviewVisible
 
 local MODULE_DEFAULTS = {
     enabled = false,
@@ -382,7 +384,7 @@ local function BuildRuntimeDisplays(db)
         end
     end
 
-    if #displays == 0 and state.configPreviewActive then
+    if #displays == 0 and IsSettingsPreviewVisible() then
         if #state.trackedSpells == 0 then
             displays[1] = {
                 entry = {
@@ -408,10 +410,31 @@ local function BuildRuntimeDisplays(db)
     return displays
 end
 
+function IsSettingsPreviewVisible()
+    if not state.configPreviewActive then
+        return false
+    end
+
+    if not MedaAuras or not MedaAuras.GetActiveSettingsSelection then
+        return false
+    end
+
+    local activeModuleId = MedaAuras:GetActiveSettingsSelection()
+    if not activeModuleId then
+        return false
+    end
+
+    if MedaAuras.GetCustomModuleKey then
+        return activeModuleId == MedaAuras:GetCustomModuleKey(MODULE_ID)
+    end
+
+    return false
+end
+
 local function RefreshRuntimeDisplay()
     local db = state.db
     local host = EnsureRuntimeHost()
-    local allowPreview = db and state.configPreviewActive
+    local allowPreview = db and IsSettingsPreviewVisible()
 
     if not db or (not db.enabled and not allowPreview) then
         wipe(state.runtimeDisplays)
@@ -529,7 +552,7 @@ end
 local function OnDisable()
     UnregisterEvents()
     wipe(state.runtimeDisplays)
-    if state.runtimeHost and not state.configPreviewActive then
+    if state.runtimeHost and not IsSettingsPreviewVisible() then
         state.runtimeHost:Hide()
         state.runtimeHost:SetScript("OnUpdate", nil)
     end

@@ -38,7 +38,7 @@ end
 -- ============================================================================
 
 local MODULE_NAME      = "Cracked"
-local MODULE_VERSION   = "0.1"
+local MODULE_VERSION   = "0.2"
 local MODULE_STABILITY = "experimental"
 
 -- ============================================================================
