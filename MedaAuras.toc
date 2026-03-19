@@ -40,6 +40,7 @@ Data\ProphecyTemplates.lua
 # Shared Services (load before modules)
 Services\SpellCastTracker.lua
 Services\CooldownTimer.lua
+Services\KnownSpellTracker.lua
 Services\UnitPriority.lua
 Services\GroupInspector.lua
 Services\GroupAuraTracker.lua

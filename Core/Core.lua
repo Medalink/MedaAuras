@@ -88,33 +88,33 @@ local function InitDebug()
     end
 end
 
-local function Log(msg)
+local function Log(msg, sourceInfo)
     if debugAPI then
-        debugAPI:Print("MedaAuras", tostring(msg))
+        debugAPI:Print("MedaAuras", tostring(msg), sourceInfo)
     end
 end
 
-local function LogDebug(msg)
+local function LogDebug(msg, sourceInfo)
     if debugEnabled and debugAPI then
-        debugAPI:DebugMsg("MedaAuras", tostring(msg))
+        debugAPI:DebugMsg("MedaAuras", tostring(msg), sourceInfo)
     end
 end
 
-local function LogWarn(msg)
+local function LogWarn(msg, sourceInfo)
     if debugAPI then
-        debugAPI:Warn("MedaAuras", tostring(msg))
+        debugAPI:Warn("MedaAuras", tostring(msg), sourceInfo)
     end
 end
 
-local function LogError(msg)
+local function LogError(msg, sourceInfo)
     if debugAPI then
-        debugAPI:Error("MedaAuras", tostring(msg))
+        debugAPI:Error("MedaAuras", tostring(msg), sourceInfo)
     end
 end
 
-local function LogTable(tbl, name, maxDepth)
+local function LogTable(tbl, name, maxDepth, sourceInfo)
     if debugAPI then
-        debugAPI:Table("MedaAuras", tbl, name, maxDepth or 3)
+        debugAPI:Table("MedaAuras", tbl, name, maxDepth or 3, sourceInfo)
     end
 end
 

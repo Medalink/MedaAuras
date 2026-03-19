@@ -23,7 +23,6 @@ local IsInGroup = IsInGroup
 local IsInRaid = IsInRaid
 local IsInInstance = IsInInstance
 local C_Timer = C_Timer
-local GetSpellTexture = _G and _G.GetSpellTexture or nil
 local IsSpellKnown = _G and _G.IsSpellKnown or nil
 local IsPlayerSpell = IsPlayerSpell
 local GetSpecialization = GetSpecialization
@@ -93,6 +92,7 @@ local activeSettingsPaneId = "all"
 local IsCategoryEnabled
 local UpdateDisplay
 local RebuildPaneBars
+local catalogPreviewEnabled = false
 
 local MAX_BARS = 15
 
@@ -136,6 +136,21 @@ local PANE_TITLES = {
     personal = "Minor Personals",
     buffs = "Group Buffs",
 }
+local CLASS_DISPLAY_NAMES = {
+    WARRIOR = "Warrior",
+    DEATHKNIGHT = "Death Knight",
+    DEMONHUNTER = "Demon Hunter",
+    SHAMAN = "Shaman",
+    PRIEST = "Priest",
+    EVOKER = "Evoker",
+    DRUID = "Druid",
+    PALADIN = "Paladin",
+    MONK = "Monk",
+    HUNTER = "Hunter",
+    MAGE = "Mage",
+    ROGUE = "Rogue",
+    WARLOCK = "Warlock",
+}
 local LEGACY_STYLE_KEYS = {
     "frameWidth",
     "barHeight",
@@ -178,6 +193,17 @@ end
 sort(GROUP_BUFF_WATCH_SPELLS, function(a, b)
     return a.spellID < b.spellID
 end)
+
+do
+    local totalTracked = 0
+    for _ in pairs(ALL_DEFENSIVES) do
+        totalTracked = totalTracked + 1
+    end
+    for _ in pairs(GROUP_BUFFS) do
+        totalTracked = totalTracked + 1
+    end
+    MAX_BARS = math.max(MAX_BARS, totalTracked)
+end
 
 -- ============================================================================
 -- Logging
@@ -371,7 +397,121 @@ local function BuildEntryLabel(style, playerName, spellName)
     return table.concat(parts, " - ")
 end
 
+local function BuildCatalogPreviewEntries(now)
+    local entries = {}
+    local spellIDs = {}
+    local index = 0
+
+    for spellID in pairs(ALL_DEFENSIVES) do
+        spellIDs[#spellIDs + 1] = spellID
+    end
+
+    table.sort(spellIDs, function(a, b)
+        local left = ALL_DEFENSIVES[a]
+        local right = ALL_DEFENSIVES[b]
+        local leftPriority = CATEGORY_INFO[left.category] and CATEGORY_INFO[left.category].priority or 99
+        local rightPriority = CATEGORY_INFO[right.category] and CATEGORY_INFO[right.category].priority or 99
+        if leftPriority ~= rightPriority then
+            return leftPriority < rightPriority
+        end
+        return left.name < right.name
+    end)
+
+    for _, spellID in ipairs(spellIDs) do
+        local defData = ALL_DEFENSIVES[spellID]
+        local categoryInfo = CATEGORY_INFO[defData.category]
+        local stateMode = index % 3
+        local activeDuration = math.max(3, math.min(defData.duration or 0, 12))
+        local activeEnd = 0
+        local activeStart = nil
+        local activeRenderMode = "none"
+        local cdEnd = 0
+
+        if stateMode == 0 and activeDuration > 0 then
+            activeEnd = now + activeDuration - ((index % 4) * 0.6)
+            activeStart = activeEnd - activeDuration
+            activeRenderMode = "timer"
+        elseif stateMode == 1 then
+            cdEnd = now + math.max(8, math.min((defData.cd or 0) * 0.65, 120))
+        end
+
+        entries[#entries + 1] = {
+            name = CLASS_DISPLAY_NAMES[defData.class] or defData.class or "Class",
+            class = defData.class,
+            spellID = spellID,
+            spellName = defData.name,
+            icon = defData.icon or DEFAULT_SPELL_ICON,
+            category = defData.category,
+            catPriority = categoryInfo and categoryInfo.priority or 99,
+            isActive = activeRenderMode ~= "none",
+            isOnCd = activeRenderMode == "none" and cdEnd > now,
+            isReady = activeRenderMode == "none" and cdEnd <= now,
+            activeStart = activeStart,
+            activeEnd = activeEnd,
+            activeDuration = activeDuration,
+            activeRenderMode = activeRenderMode,
+            activeSource = "catalog",
+            cdEnd = cdEnd,
+            baseCd = defData.cd or 0,
+            duration = defData.duration or 0,
+            unit = nil,
+            isPlayer = false,
+        }
+        index = index + 1
+    end
+
+    local buffKeys = {}
+    for buffKey in pairs(GROUP_BUFFS) do
+        buffKeys[#buffKeys + 1] = buffKey
+    end
+    table.sort(buffKeys, function(a, b)
+        local left = GROUP_BUFFS[a]
+        local right = GROUP_BUFFS[b]
+        if (left.order or 99) ~= (right.order or 99) then
+            return (left.order or 99) < (right.order or 99)
+        end
+        return left.label < right.label
+    end)
+
+    for buffIndex, buffKey in ipairs(buffKeys) do
+        local buffData = GROUP_BUFFS[buffKey]
+        entries[#entries + 1] = {
+            entryKind = "missingBuff",
+            spellName = buffData.label,
+            icon = buffData.icon or DEFAULT_SPELL_ICON,
+            category = "buffs",
+            count = (buffIndex % 3) + 1,
+            summary = buffIndex % 2 == 0 and "Tank, Mage" or "Healer",
+            order = buffData.order or 99,
+        }
+    end
+
+    table.sort(entries, function(a, b)
+        if (a.entryKind == "missingBuff") ~= (b.entryKind == "missingBuff") then
+            return a.entryKind ~= "missingBuff"
+        end
+        if (a.catPriority or 99) ~= (b.catPriority or 99) then
+            return (a.catPriority or 99) < (b.catPriority or 99)
+        end
+        if a.entryKind == "missingBuff" and b.entryKind == "missingBuff" then
+            return (a.order or 99) < (b.order or 99)
+        end
+        if a.isActive ~= b.isActive then
+            return a.isActive
+        end
+        if a.isOnCd ~= b.isOnCd then
+            return a.isOnCd
+        end
+        return (a.spellName or "") < (b.spellName or "")
+    end)
+
+    return entries
+end
+
 local function IsPaneEnabled(paneId)
+    if catalogPreviewEnabled and showInSettings then
+        return true
+    end
     if paneId == "all" then
         return true
     end
@@ -629,6 +769,7 @@ end
 
 local function EndSettingsLivePreview()
     showInSettings = false
+    catalogPreviewEnabled = false
     settingsPreviewCleanup = nil
     UpdateMainFrameVisibility()
 end
@@ -1520,6 +1661,10 @@ end
 -- ============================================================================
 
 local function CollectDisplayEntries()
+    if catalogPreviewEnabled and showInSettings then
+        return BuildCatalogPreviewEntries(GetTime())
+    end
+
     local cooldownEntries = {}
     local missingBuffEntries = {}
     local now = GetTime()
@@ -1607,7 +1752,7 @@ local function CollectDisplayEntries()
                     class = cls,
                     spellID = spellID,
                     spellName = cd.displayName or defData.name,
-                    icon = cd.displayIcon or defData.icon or (GetSpellTexture and GetSpellTexture(spellID)) or DEFAULT_SPELL_ICON,
+                    icon = cd.displayIcon or defData.icon or DEFAULT_SPELL_ICON,
                     category = defData.category,
                     catPriority = catInfo and catInfo.priority or 99,
                     isActive = isActive,
@@ -2286,7 +2431,7 @@ local function UpdatePreview()
         else
             local defData = ALL_DEFENSIVES[mock.spellID]
             if defData then
-                bar.icon:SetTexture(defData.icon)
+                bar.icon:SetTexture(defData.icon or DEFAULT_SPELL_ICON)
                 local col = CLASS_COLORS[mock.class] or FALLBACK_WHITE
 
                 if style.showPlayerName == false and not style.showSpellName then
@@ -2614,6 +2759,21 @@ local function BuildSettingsPage(parent, moduleDB)
         stateLabel:SetPoint("TOPLEFT", LEFT_X, yOff)
         yOff = yOff - 24
 
+        local previewButton
+        local previewLabel
+        if paneId == "all" then
+            previewButton = MedaUI:CreateButton(p, "Show Full Catalog Preview", 210)
+            previewButton:SetPoint("TOPLEFT", LEFT_X, yOff)
+
+            previewLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            previewLabel:SetPoint("TOPLEFT", previewButton, "BOTTOMLEFT", 0, -8)
+            previewLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
+            previewLabel:SetWidth(420)
+            previewLabel:SetJustifyH("LEFT")
+            previewLabel:SetText("Populate the live Cracked panes with every defensive and group buff we track.")
+            yOff = yOff - 56
+        end
+
         local fontDD = MedaUI:CreateLabeledDropdown(p, "Font", 200, MedaUI:GetFontList(), "font")
         fontDD:SetPoint("TOPLEFT", LEFT_X, yOff)
         local alphaSlider = MedaUI:CreateLabeledSlider(p, "Opacity", 200, 0.3, 1.0, 0.05)
@@ -2666,6 +2826,20 @@ local function BuildSettingsPage(parent, moduleDB)
                 stateLabel:SetText("Editing this tab updates the shared source used by linked panes.")
             end
 
+            if previewButton then
+                previewButton:SetText(catalogPreviewEnabled and "Hide Full Catalog Preview" or "Show Full Catalog Preview")
+                previewButton:SetEnabled(moduleDB.enabled and next(paneFrames) ~= nil)
+                if previewLabel then
+                    if not moduleDB.enabled then
+                        previewLabel:SetText("Enable Cracked to preview the live frames.")
+                    elseif catalogPreviewEnabled then
+                        previewLabel:SetText("Catalog preview is active in the live Cracked panes. Switch combined/split or restyle tabs to inspect the full tracked set.")
+                    else
+                        previewLabel:SetText("Populate the live Cracked panes with every defensive and group buff we track.")
+                    end
+                end
+            end
+
             fontDD:SetSelected(style.font or "default")
             alphaSlider:SetValue(style.alpha or PANE_STYLE_DEFAULTS.alpha)
             titleCB:SetChecked(style.showTitle ~= false)
@@ -2689,6 +2863,17 @@ local function BuildSettingsPage(parent, moduleDB)
                 RefreshControls()
                 RefreshVisualLayout()
             end)
+        end
+
+        if previewButton then
+            previewButton.OnClick = function()
+                if not moduleDB.enabled then
+                    return
+                end
+                catalogPreviewEnabled = not catalogPreviewEnabled
+                RefreshControls()
+                RefreshVisualState()
+            end
         end
 
         fontDD.OnValueChanged = Guard(function(_, value) SetPaneStyleValue(paneId, "font", value); RefreshVisualLayout() end)

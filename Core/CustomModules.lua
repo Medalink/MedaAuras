@@ -559,7 +559,82 @@ end
 
 local function EvaluateModuleCode(code, metadata, preferMetadata)
     local capture
+    local function ResolveSourceName()
+        local candidate = metadata and (metadata.title or metadata.name)
+        if candidate and candidate ~= "" then
+            return candidate
+        end
+
+        if capture then
+            candidate = capture.title or capture.name or capture.moduleId
+            if candidate and candidate ~= "" then
+                return candidate
+            end
+        end
+
+        return "Custom Module"
+    end
+
+    local function BuildSourceInfo()
+        local moduleId = metadata and metadata.moduleId
+        if (not moduleId or moduleId == "") and capture then
+            moduleId = capture.moduleId or capture.name or capture.title
+        end
+
+        local sourceName = ResolveSourceName()
+        return {
+            kind = "custom",
+            id = tostring(moduleId or sourceName),
+            name = tostring(sourceName),
+            label = format("MedaAuras / Custom: %s", tostring(sourceName)),
+        }
+    end
+
+    local function ResolveLogArg(selfOrMessage, maybeMessage)
+        if maybeMessage ~= nil then
+            return maybeMessage
+        end
+        return selfOrMessage
+    end
+
     local proxy = setmetatable({
+        Log = function(selfOrMessage, maybeMessage)
+            if MedaAuras and MedaAuras.Log then
+                return MedaAuras.Log(ResolveLogArg(selfOrMessage, maybeMessage), BuildSourceInfo())
+            end
+        end,
+        LogDebug = function(selfOrMessage, maybeMessage)
+            if MedaAuras and MedaAuras.LogDebug then
+                return MedaAuras.LogDebug(ResolveLogArg(selfOrMessage, maybeMessage), BuildSourceInfo())
+            end
+        end,
+        LogWarn = function(selfOrMessage, maybeMessage)
+            if MedaAuras and MedaAuras.LogWarn then
+                return MedaAuras.LogWarn(ResolveLogArg(selfOrMessage, maybeMessage), BuildSourceInfo())
+            end
+        end,
+        LogError = function(selfOrMessage, maybeMessage)
+            if MedaAuras and MedaAuras.LogError then
+                return MedaAuras.LogError(ResolveLogArg(selfOrMessage, maybeMessage), BuildSourceInfo())
+            end
+        end,
+        LogTable = function(selfOrTable, maybeTable, maybeName, maybeMaxDepth)
+            local tbl
+            local name
+            local maxDepth
+            if type(maybeTable) == "table" then
+                tbl = maybeTable
+                name = maybeName
+                maxDepth = maybeMaxDepth
+            else
+                tbl = selfOrTable
+                name = maybeTable
+                maxDepth = maybeName
+            end
+            if MedaAuras and MedaAuras.LogTable then
+                return MedaAuras.LogTable(tbl, name, maxDepth, BuildSourceInfo())
+            end
+        end,
         RegisterCustomModule = function(selfOrConfig, maybeConfig)
             local config = maybeConfig or selfOrConfig
             if type(config) ~= "table" then
