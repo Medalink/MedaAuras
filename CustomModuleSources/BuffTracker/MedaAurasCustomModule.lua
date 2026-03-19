@@ -19,7 +19,7 @@ local wipe = wipe
 
 local MODULE_ID = "padding"
 local MODULE_NAME = "Padding"
-local MODULE_VERSION = "0.3"
+local MODULE_VERSION = "0.4"
 local MODULE_AUTHOR = "Medalink"
 local MODULE_DESCRIPTION = "Shows one draggable icon per configured player buff with countdown timers."
 
@@ -382,7 +382,7 @@ local function BuildRuntimeDisplays(db)
         end
     end
 
-    if #displays == 0 and db.locked == false then
+    if #displays == 0 and state.configPreviewActive then
         if #state.trackedSpells == 0 then
             displays[1] = {
                 entry = {
@@ -411,7 +411,7 @@ end
 local function RefreshRuntimeDisplay()
     local db = state.db
     local host = EnsureRuntimeHost()
-    local allowPreview = db and db.locked == false and state.configPreviewActive
+    local allowPreview = db and state.configPreviewActive
 
     if not db or (not db.enabled and not allowPreview) then
         wipe(state.runtimeDisplays)
