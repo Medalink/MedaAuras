@@ -62,6 +62,7 @@ local bars = {}
 local updateTicker
 local isResizing = false
 local shouldShowByZone = true
+local hasVisibleEntries = false
 local watcherHandle, mobKickHandle
 local UpdateDisplay
 local AutoRegisterParty, CleanPartyList
@@ -78,6 +79,18 @@ local fontCache = {}
 local function Log(msg)   MedaAuras.Log(format("[Interrupted] %s", msg)) end
 local function LogDebug(msg) MedaAuras.LogDebug(format("[Interrupted] %s", msg)) end
 local function LogWarn(msg)  MedaAuras.LogWarn(format("[Interrupted] %s", msg)) end
+
+local function UpdateMainFrameVisibility()
+    if not mainFrame then
+        return
+    end
+
+    if shouldShowByZone and hasVisibleEntries then
+        mainFrame:Show()
+    else
+        mainFrame:Hide()
+    end
+end
 
 local function GetFontObj(fontValue, size, outline)
     local path = MedaUI:GetFontPath(fontValue)
@@ -806,9 +819,7 @@ local function CheckZoneVisibility()
     end
     LogDebug(format("CheckZoneVisibility: instanceType=%s showByZone=%s mainFrame=%s",
         tostring(instanceType), tostring(shouldShowByZone), tostring(mainFrame ~= nil)))
-    if mainFrame then
-        if shouldShowByZone then mainFrame:Show() else mainFrame:Hide() end
-    end
+    UpdateMainFrameVisibility()
 end
 
 local lastStateDump = 0
@@ -820,6 +831,8 @@ UpdateDisplay = function()
     local now = GetTime()
     local barIdx = 1
     local displayEntries = GetDisplayEntries(now)
+    local numVisible = math.min(#displayEntries, 6)
+    hasVisibleEntries = numVisible > 0
 
     if now - lastStateDump > 10 then
         lastStateDump = now
@@ -857,8 +870,9 @@ UpdateDisplay = function()
         if bars[i] then bars[i]:Hide() end
     end
 
+    UpdateMainFrameVisibility()
+
     if not isResizing then
-        local numVisible = barIdx - 1
         if numVisible > 0 then
             mainFrame:SetHeight(titleH + numVisible * (barH + 1))
         end
@@ -945,7 +959,7 @@ local function CreateUI()
 
     mainFrame:ClearAllPoints()
     mainFrame:SetPoint(db.position.point, UIParent, db.position.point, db.position.x, db.position.y)
-    mainFrame:Show()
+    UpdateMainFrameVisibility()
 
     LogDebug(format("CreateUI: frame positioned at %s (%.0f, %.0f), now building bars",
         db.position.point, db.position.x, db.position.y))
@@ -955,6 +969,7 @@ end
 
 local function DestroyUI()
     if updateTicker then updateTicker:Cancel(); updateTicker = nil end
+    hasVisibleEntries = false
     if mainFrame then mainFrame:Hide() end
 end
 

@@ -33,6 +33,7 @@ Data\Recommendations.lua
 Data\GoneFishinFish.lua
 Data\CreatureVO.lua
 Data\Interrupts.lua
+Data\Defensives.lua
 Data\ProphecyData.lua
 Data\ProphecyTemplates.lua
 
@@ -41,6 +42,7 @@ Services\SpellCastTracker.lua
 Services\CooldownTimer.lua
 Services\UnitPriority.lua
 Services\GroupInspector.lua
+Services\GroupAuraTracker.lua
 Services\InterruptResolver.lua
 Services\MapPinProvider.xml
 Services\MapPinProvider.lua
@@ -59,6 +61,7 @@ Modules\GoneFishin.lua
 Modules\ShutIt.lua
 Modules\LazyCast.lua
 Modules\Interrupted.lua
+Modules\Cracked.lua
 
 # Prophecy Module
 Modules\Prophecy\Init.lua

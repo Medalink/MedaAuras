@@ -36,10 +36,12 @@ ns.Services.GroupInspector = GroupInspector
 -- ============================================================================
 
 local eventFrame
-local cache = {}           -- [guid] = { unit, name, class, specID, inspected, talentSpells, talentsKnown, timestamp }
-local inspectQueue = {}    -- FIFO of { unit, guid } awaiting inspect
-local queuedInspects = {}  -- [guid] = true while queued
+local cache = {}           -- [unit] = { unit, name, class, specID, inspected, talentSpells, talentsKnown, timestamp }
+local inspectQueue = {}    -- FIFO of { unit } awaiting inspect
+local queuedInspects = {}  -- [unit] = true while queued
 local inspectBusy = false
+local inspectBusyUnit
+local inspectBusyGUID
 local callbacks = {}       -- [key] = func
 local inspectCompleteCallbacks = {} -- [key] = func(unit, name, class, specID)
 local pendingProcessAfterCombat = false
@@ -170,8 +172,6 @@ end
 
 local function CacheUnit(unit)
     if not UnitExists(unit) then return nil end
-    local guid = UnitGUID(unit)
-    if not guid then return nil end
 
     local _, class = UnitClass(unit)
     local name = UnitName(unit)
@@ -186,13 +186,13 @@ local function CacheUnit(unit)
         inspected = true
     end
 
-    local existing = cache[guid]
+    local existing = cache[unit]
     if existing and existing.specID and not inspected then
         specID = existing.specID
         inspected = existing.inspected
     end
 
-    cache[guid] = {
+    cache[unit] = {
         unit      = unit,
         name      = name or "Unknown",
         class     = class or "UNKNOWN",
@@ -206,7 +206,7 @@ local function CacheUnit(unit)
     LogDebug(format("Cached %s: %s class=%s specID=%s inspected=%s",
         unit, name or "?", class or "?", tostring(specID), tostring(inspected)))
 
-    return guid
+    return unit
 end
 
 local function ProcessInspectQueue()
@@ -222,9 +222,8 @@ local function ProcessInspectQueue()
 
     local request = table.remove(inspectQueue, 1)
     local unit = request and request.unit
-    local guid = request and request.guid
-    if guid then
-        queuedInspects[guid] = nil
+    if unit then
+        queuedInspects[unit] = nil
     end
 
     if not UnitExists(unit) or UnitIsUnit(unit, "player") then
@@ -245,34 +244,66 @@ local function ProcessInspectQueue()
     end
 
     inspectBusy = true
+    inspectBusyUnit = unit
+    inspectBusyGUID = UnitGUID(unit)
     LogDebug(format("Sending NotifyInspect for %s", unit))
 
     local ok, err = pcall(NotifyInspect, unit)
     if not ok then
         LogWarn(format("NotifyInspect failed for %s: %s", unit, tostring(err)))
         inspectBusy = false
+        inspectBusyUnit = nil
+        inspectBusyGUID = nil
         C_Timer.After(INSPECT_INTERVAL, ProcessInspectQueue)
     end
 end
 
 local function OnInspectReady(guid)
     inspectBusy = false
+    local targetUnit = nil
 
-    for _, entry in pairs(cache) do
-        if entry.unit and UnitGUID(entry.unit) == guid then
-            local specID = GetInspectSpecialization(entry.unit)
-            if specID and specID > 0 then
-                local oldSpec = entry.specID
-                entry.specID = specID
-                entry.inspected = true
-                ScanTalentSpellsIntoEntry(entry)
-                LogDebug(format("Inspected %s: specID=%d%s",
-                    entry.name, specID,
-                    oldSpec and oldSpec ~= specID and format(" (changed from %d)", oldSpec) or ""))
-                FireCallbacks()
-                FireInspectComplete(entry.unit, entry.name, entry.class, specID)
+    if inspectBusyUnit and UnitExists(inspectBusyUnit) then
+        local okMatch, isMatch = pcall(function()
+            if guid == nil or inspectBusyGUID == nil then
+                return true
             end
-            break
+            return inspectBusyGUID == guid
+        end)
+        if okMatch and isMatch then
+            targetUnit = inspectBusyUnit
+        end
+    end
+
+    if not targetUnit and guid ~= nil then
+        for unit, entry in pairs(cache) do
+            if entry.unit and UnitExists(entry.unit) then
+                local okMatch, isMatch = pcall(function()
+                    return UnitGUID(entry.unit) == guid
+                end)
+                if okMatch and isMatch then
+                    targetUnit = unit
+                    break
+                end
+            end
+        end
+    end
+
+    inspectBusyUnit = nil
+    inspectBusyGUID = nil
+
+    local entry = targetUnit and cache[targetUnit] or nil
+    if entry and entry.unit and UnitExists(entry.unit) then
+        local specID = GetInspectSpecialization(entry.unit)
+        if specID and specID > 0 then
+            local oldSpec = entry.specID
+            entry.specID = specID
+            entry.inspected = true
+            ScanTalentSpellsIntoEntry(entry)
+            LogDebug(format("Inspected %s: specID=%d%s",
+                entry.name, specID,
+                oldSpec and oldSpec ~= specID and format(" (changed from %d)", oldSpec) or ""))
+            FireCallbacks()
+            FireInspectComplete(entry.unit, entry.name, entry.class, specID)
         end
     end
 
@@ -297,8 +328,7 @@ local function UnitHasProvider(unit, provider)
         return spellID and IsPlayerSpell and IsPlayerSpell(spellID) or false
     end
 
-    local guid = UnitGUID(unit)
-    local entry = guid and cache[guid] or nil
+    local entry = cache[unit]
     if provider.talentSpellID then
         return entry and entry.talentsKnown and entry.talentSpells and entry.talentSpells[provider.talentSpellID] or false
     end
@@ -308,18 +338,18 @@ end
 
 local function ScanRoster()
     local units = GetGroupUnits()
-    local currentGUIDs = {}
+    local currentUnits = {}
     local newCount, cachedCount, leftCount = 0, 0, 0
 
     for _, unit in ipairs(units) do
-        local guid = CacheUnit(unit)
-        if guid then
-            currentGUIDs[guid] = true
-            local entry = cache[guid]
+        local cacheKey = CacheUnit(unit)
+        if cacheKey then
+            currentUnits[cacheKey] = true
+            local entry = cache[cacheKey]
             if not entry.inspected and not UnitIsUnit(unit, "player") then
-                if not queuedInspects[guid] then
-                    inspectQueue[#inspectQueue + 1] = { unit = unit, guid = guid }
-                    queuedInspects[guid] = true
+                if not queuedInspects[cacheKey] then
+                    inspectQueue[#inspectQueue + 1] = { unit = unit }
+                    queuedInspects[cacheKey] = true
                     newCount = newCount + 1
                 else
                     cachedCount = cachedCount + 1
@@ -330,9 +360,10 @@ local function ScanRoster()
         end
     end
 
-    for guid in pairs(cache) do
-        if not currentGUIDs[guid] then
-            cache[guid] = nil
+    for unit in pairs(cache) do
+        if not currentUnits[unit] then
+            cache[unit] = nil
+            queuedInspects[unit] = nil
             leftCount = leftCount + 1
         end
     end
@@ -417,8 +448,7 @@ function GroupInspector:QueryProviders(providersList)
 
     for _, unit in ipairs(units) do
         if UnitExists(unit) then
-            local guid = UnitGUID(unit)
-            local entry = guid and cache[guid]
+            local entry = cache[unit]
             local _, unitClass = UnitClass(unit)
 
             for _, provider in ipairs(providersList) do
@@ -447,8 +477,7 @@ end
 
 function GroupInspector:GetUnitInfo(unit)
     if not UnitExists(unit) then return nil end
-    local guid = UnitGUID(unit)
-    return guid and cache[guid] or nil
+    return cache[unit]
 end
 
 function GroupInspector:UnitHasTalentSpell(unit, spellID)
@@ -457,8 +486,7 @@ function GroupInspector:UnitHasTalentSpell(unit, spellID)
         return IsPlayerSpell and IsPlayerSpell(spellID) or false
     end
 
-    local guid = UnitGUID(unit)
-    local entry = guid and cache[guid] or nil
+    local entry = cache[unit]
     return entry and entry.talentsKnown and entry.talentSpells and entry.talentSpells[spellID] or false
 end
 
@@ -470,6 +498,8 @@ function GroupInspector:RequestRefresh()
     wipe(inspectQueue)
     wipe(queuedInspects)
     inspectBusy = false
+    inspectBusyUnit = nil
+    inspectBusyGUID = nil
     pendingProcessAfterCombat = false
     ScanRoster()
 end
@@ -479,6 +509,8 @@ function GroupInspector:RequestReinspectAll()
     wipe(inspectQueue)
     wipe(queuedInspects)
     inspectBusy = false
+    inspectBusyUnit = nil
+    inspectBusyGUID = nil
     pendingProcessAfterCombat = false
     ScanRoster()
 end

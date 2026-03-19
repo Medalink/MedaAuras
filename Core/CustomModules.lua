@@ -557,10 +557,14 @@ local function ApplyMetadataToCode(code, metadata)
     return code
 end
 
-local function EvaluateModuleCode(code, metadata)
+local function EvaluateModuleCode(code, metadata, preferMetadata)
     local capture
     local proxy = setmetatable({
-        RegisterCustomModule = function(config)
+        RegisterCustomModule = function(selfOrConfig, maybeConfig)
+            local config = maybeConfig or selfOrConfig
+            if type(config) ~= "table" then
+                return
+            end
             capture = config
         end,
     }, { __index = MedaAuras })
@@ -595,14 +599,24 @@ local function EvaluateModuleCode(code, metadata)
         capture.defaults.enabled = false
     end
 
+    local function PickMetadataValue(capturedValue, metadataValue)
+        if preferMetadata and metadataValue ~= nil then
+            return metadataValue
+        end
+        if capturedValue ~= nil then
+            return capturedValue
+        end
+        return metadataValue
+    end
+
     local mergedMeta = NormalizeMetadata(metadata and metadata.moduleId, {
-        moduleId = capture.moduleId or (metadata and metadata.moduleId),
-        name = capture.name or (metadata and metadata.name),
-        title = capture.title or (metadata and metadata.title),
-        author = capture.author or (metadata and metadata.author),
-        description = capture.description or (metadata and metadata.description),
-        moduleVersion = capture.version or (metadata and metadata.moduleVersion),
-        dataVersion = capture.dataVersion or (metadata and metadata.dataVersion),
+        moduleId = PickMetadataValue(capture.moduleId, metadata and metadata.moduleId),
+        name = PickMetadataValue(capture.name, metadata and metadata.name),
+        title = PickMetadataValue(capture.title, metadata and metadata.title),
+        author = PickMetadataValue(capture.author, metadata and metadata.author),
+        description = PickMetadataValue(capture.description, metadata and metadata.description),
+        moduleVersion = PickMetadataValue(capture.version, metadata and metadata.moduleVersion),
+        dataVersion = PickMetadataValue(capture.dataVersion, metadata and metadata.dataVersion),
         apiVersion = metadata and metadata.apiVersion or CUSTOM_API_VERSION,
         packageVersion = metadata and metadata.packageVersion or CUSTOM_PACKAGE_VERSION,
         createdAt = metadata and metadata.createdAt or time(),
@@ -633,8 +647,7 @@ local function BuildRecordFromCode(code)
         return nil, err
     end
 
-    local parsed = ExtractMetadataFromCode(code)
-    local captured, execErr = EvaluateModuleCode(code, parsed)
+    local captured, execErr = EvaluateModuleCode(code)
     if not captured then
         return nil, execErr
     end
@@ -753,7 +766,7 @@ local function EnsureRuntimeLoaded(moduleId)
         return runtime
     end
 
-    local captured, codeErr = EvaluateModuleCode(record.code, record.metadata)
+    local captured, codeErr = EvaluateModuleCode(record.code, record.metadata, true)
     if not captured then
         record.lastError = codeErr
         return nil, codeErr
@@ -1010,7 +1023,7 @@ local function BuildRecordFromPackage(pkg, forceCopy)
         createdAt = time(),
     })
 
-    local captured, codeErr = EvaluateModuleCode(pkg.code or "", metadata)
+    local captured, codeErr = EvaluateModuleCode(pkg.code or "", metadata, true)
     if not captured then
         return nil, nil, codeErr
     end
