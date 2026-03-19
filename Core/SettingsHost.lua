@@ -251,7 +251,7 @@ local function BuildCustomModuleDefinition(entry)
         tag = moduleConfig.customTag,
         tagColor = moduleConfig.customColor,
         pages = { { id = "settings", label = "Settings" } },
-        defaultPageHeight = 800,
+        defaultPageHeight = 1400,
         getEnabled = function()
             local db = MedaAuras:GetModuleDB(entry.key)
             return db and db.enabled
@@ -262,12 +262,15 @@ local function BuildCustomModuleDefinition(entry)
             else
                 MedaAuras:DisableModule(entry.key)
             end
+            if MedaAuras.RefreshModuleConfig then
+                MedaAuras:RefreshModuleConfig()
+            end
         end,
         buildPage = function(_, parent)
             if MedaAuras.BuildCustomModuleConfig then
-                MedaAuras:BuildCustomModuleConfig(parent, entry.key)
+                return MedaAuras:BuildCustomModuleConfig(parent, entry.key) or 1400
             end
-            return 800
+            return 1400
         end,
     }
 end

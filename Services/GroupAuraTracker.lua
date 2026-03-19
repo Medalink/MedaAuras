@@ -122,6 +122,7 @@ local function BuildSpellState(unit, spell, auraInfo, previousState)
         sourceUnit = nil,
         duration = nil,
         expirationTime = nil,
+        applications = 0,
         lastSeen = GetTime(),
     }
 
@@ -145,6 +146,18 @@ local function BuildSpellState(unit, spell, auraInfo, previousState)
         elseif previousState and previousState.sourceUnit then
             state.sourceUnit = previousState.sourceUnit
         end
+
+        if IsValueNonSecret(auraInfo.applications) then
+            state.applications = tonumber(auraInfo.applications) or 0
+        elseif IsValueNonSecret(auraInfo.stackCount) then
+            state.applications = tonumber(auraInfo.stackCount) or 0
+        elseif IsValueNonSecret(auraInfo.count) then
+            state.applications = tonumber(auraInfo.count) or 0
+        elseif previousState and previousState.active then
+            state.applications = tonumber(previousState.applications) or 0
+        end
+    elseif previousState and previousState.active then
+        state.applications = tonumber(previousState.applications) or 0
     end
 
     return state

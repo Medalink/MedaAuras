@@ -1764,7 +1764,7 @@ function MedaAuras:BuildCustomModuleConfig(parent, key)
     local stabilityColors = MedaAuras and MedaAuras.STABILITY_COLORS
     local stabilityColor = (stabilityColors and stabilityColors[stability]) or SUCCESS_COLOR
     if not record then
-        return
+        return 40
     end
 
     local yOff = 0
@@ -1865,7 +1865,7 @@ function MedaAuras:BuildCustomModuleConfig(parent, key)
         if MedaAuras.SetContentHeight then
             MedaAuras:SetContentHeight(math.abs(yOff) + 40)
         end
-        return
+        return math.abs(yOff) + 40
     end
 
     if runtime.config and runtime.config.BuildConfig then
@@ -1879,7 +1879,9 @@ function MedaAuras:BuildCustomModuleConfig(parent, key)
         configHolder:SetHeight(1)
 
         local originalSetContentHeight = MedaAuras.SetContentHeight
+        local requestedConfigHeight = 0
         MedaAuras.SetContentHeight = function(_, height)
+            requestedConfigHeight = math.max(requestedConfigHeight, tonumber(height) or 0)
             if originalSetContentHeight then
                 originalSetContentHeight(MedaAuras, height + math.abs(yOff))
             end
@@ -1899,12 +1901,19 @@ function MedaAuras:BuildCustomModuleConfig(parent, key)
             end
             AddInfoLine(parent, yOff, "Config Error", buildErr, ERROR_COLOR)
             LogError(buildErr)
+            return math.abs(yOff) + 120
         elseif originalSetContentHeight then
             record.lastError = nil
-            originalSetContentHeight(MedaAuras, math.abs(yOff) + 520)
+            local finalHeight = math.abs(yOff) + math.max(requestedConfigHeight, 520)
+            originalSetContentHeight(MedaAuras, finalHeight)
+            return finalHeight
         end
     elseif MedaAuras.SetContentHeight then
         record.lastError = nil
-        MedaAuras:SetContentHeight(math.abs(yOff) + 40)
+        local finalHeight = math.abs(yOff) + 40
+        MedaAuras:SetContentHeight(finalHeight)
+        return finalHeight
     end
+
+    return math.abs(yOff) + 40
 end

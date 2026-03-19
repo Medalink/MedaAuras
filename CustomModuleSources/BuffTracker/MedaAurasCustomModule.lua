@@ -19,7 +19,7 @@ local wipe = wipe
 
 local MODULE_ID = "padding"
 local MODULE_NAME = "Padding"
-local MODULE_VERSION = "0.6"
+local MODULE_VERSION = "0.8"
 local MODULE_AUTHOR = "Medalink"
 local MODULE_DESCRIPTION = "Shows one draggable icon per configured player buff with countdown timers."
 
@@ -29,6 +29,7 @@ local PREVIEW_SPACING = 12
 local SUCCESS_COLOR = { 0.3, 0.85, 0.3 }
 local WARNING_COLOR = { 1.0, 0.7, 0.2 }
 local ERROR_COLOR = { 1.0, 0.35, 0.35 }
+local AURA_WATCH_KEY = "PaddingPlayerBuffs"
 
 local state = {
     db = nil,
@@ -48,7 +49,7 @@ local MODULE_DEFAULTS = {
     enabled = false,
     spellIdsText = "",
     spellIds = {},
-    locked = false,
+    locked = true,
     iconSize = 56,
     iconAlpha = 1,
     textSize = 18,
@@ -172,8 +173,67 @@ local function FormatRemaining(seconds)
     return format("%.1f", seconds)
 end
 
+local function GetAuraTracker()
+    return MedaAuras and MedaAuras.ns and MedaAuras.ns.Services and MedaAuras.ns.Services.GroupAuraTracker or nil
+end
+
+local function SyncAuraWatch()
+    local tracker = GetAuraTracker()
+    if not tracker or not tracker.Initialize or not tracker.RegisterWatch then
+        return
+    end
+
+    tracker:Initialize()
+
+    if #state.trackedSpells == 0 then
+        if tracker.UnregisterWatch then
+            tracker:UnregisterWatch(AURA_WATCH_KEY)
+        end
+        return
+    end
+
+    local spells = {}
+    for _, entry in ipairs(state.trackedSpells) do
+        spells[#spells + 1] = {
+            spellID = entry.spellId,
+            name = entry.name,
+            filter = "HELPFUL",
+        }
+    end
+
+    tracker:RegisterWatch(AURA_WATCH_KEY, {
+        spells = spells,
+        filter = "HELPFUL",
+        rescanMode = "unit",
+    })
+
+    if tracker.RequestWatchScan then
+        tracker:RequestWatchScan(AURA_WATCH_KEY, "player")
+    end
+end
+
 local function GetTrackedAuraMap()
     local auraBySpellId = {}
+    local tracker = GetAuraTracker()
+
+    if tracker and tracker.GetUnitSpellState then
+        for _, entry in ipairs(state.trackedSpells) do
+            local auraState = tracker:GetUnitSpellState(AURA_WATCH_KEY, "player", entry.spellId)
+            if auraState and auraState.active then
+                auraBySpellId[entry.spellId] = {
+                    spellId = entry.spellId,
+                    icon = entry.icon,
+                    duration = auraState.duration,
+                    expirationTime = auraState.expirationTime,
+                    applications = auraState.applications,
+                }
+            end
+        end
+
+        if next(auraBySpellId) then
+            return auraBySpellId
+        end
+    end
 
     if not UnitExists("player") or not C_UnitAuras or not C_UnitAuras.GetBuffDataByIndex then
         return auraBySpellId
@@ -325,7 +385,7 @@ local function EnsureRuntimeHost()
     host:SetBackdropBorderColor(0, 0, 0, 0)
 
     host:SetScript("OnDragStart", function(self)
-        if state.db and not state.db.locked then
+        if state.db and (IsSettingsPreviewVisible() or state.db.locked == false) then
             self:StartMoving()
         end
     end)
@@ -370,46 +430,6 @@ local function HideUnusedRuntimeWidgets(fromIndex)
     end
 end
 
-local function BuildRuntimeDisplays(db)
-    local displays = {}
-    local auraBySpellId = GetTrackedAuraMap()
-
-    for _, entry in ipairs(state.trackedSpells) do
-        local aura = auraBySpellId[entry.spellId]
-        if aura then
-            displays[#displays + 1] = {
-                entry = entry,
-                aura = aura,
-            }
-        end
-    end
-
-    if #displays == 0 and IsSettingsPreviewVisible() then
-        if #state.trackedSpells == 0 then
-            displays[1] = {
-                entry = {
-                    icon = DEFAULT_ICON,
-                    name = "Preview",
-                },
-                placeholder = true,
-                previewTime = "12",
-                previewStacks = 2,
-            }
-        else
-            for _, entry in ipairs(state.trackedSpells) do
-                displays[#displays + 1] = {
-                    entry = entry,
-                    preview = true,
-                    previewTime = "12",
-                    previewStacks = 2,
-                }
-            end
-        end
-    end
-
-    return displays
-end
-
 function IsSettingsPreviewVisible()
     if not state.configPreviewActive then
         return false
@@ -431,12 +451,25 @@ function IsSettingsPreviewVisible()
     return false
 end
 
+local function ShouldShowSettingsPreview()
+    return IsSettingsPreviewVisible()
+end
+
+local function ShouldShowUnlockedPreview(db)
+    return db and db.locked == false
+end
+
+local function ShouldShowAnyDisplay(db)
+    return (db and db.enabled) or ShouldShowSettingsPreview() or ShouldShowUnlockedPreview(db)
+end
+
 local function RefreshRuntimeDisplay()
     local db = state.db
     local host = EnsureRuntimeHost()
-    local allowPreview = db and IsSettingsPreviewVisible()
+    local showSettingsPreview = ShouldShowSettingsPreview()
+    local showUnlockedPreview = ShouldShowUnlockedPreview(db)
 
-    if not db or (not db.enabled and not allowPreview) then
+    if not db or not ShouldShowAnyDisplay(db) then
         wipe(state.runtimeDisplays)
         host:Hide()
         host:SetScript("OnUpdate", nil)
@@ -445,7 +478,72 @@ local function RefreshRuntimeDisplay()
     end
 
     RefreshConfiguredSpells(db)
-    state.runtimeDisplays = BuildRuntimeDisplays(db)
+
+    local activeDisplays = {}
+    local auraBySpellId = GetTrackedAuraMap()
+    for _, entry in ipairs(state.trackedSpells) do
+        local aura = auraBySpellId[entry.spellId]
+        if aura then
+            activeDisplays[#activeDisplays + 1] = {
+                entry = entry,
+                aura = aura,
+            }
+        end
+    end
+
+    if showSettingsPreview and #activeDisplays > 0 then
+        state.runtimeDisplays = activeDisplays
+    elseif db.enabled and #activeDisplays > 0 then
+        state.runtimeDisplays = activeDisplays
+    elseif showSettingsPreview then
+        state.runtimeDisplays = {}
+        if #state.trackedSpells == 0 then
+            state.runtimeDisplays[1] = {
+                entry = {
+                    icon = DEFAULT_ICON,
+                    name = "Preview",
+                },
+                placeholder = true,
+                preview = true,
+                previewTime = "12",
+                previewStacks = 2,
+            }
+        else
+            for _, entry in ipairs(state.trackedSpells) do
+                state.runtimeDisplays[#state.runtimeDisplays + 1] = {
+                    entry = entry,
+                    preview = true,
+                    previewTime = "12",
+                    previewStacks = 2,
+                }
+            end
+        end
+    elseif showUnlockedPreview then
+        state.runtimeDisplays = {}
+        if #state.trackedSpells == 0 then
+            state.runtimeDisplays[1] = {
+                entry = {
+                    icon = DEFAULT_ICON,
+                    name = "Preview",
+                },
+                placeholder = true,
+                preview = true,
+                previewTime = "12",
+                previewStacks = 2,
+            }
+        else
+            for _, entry in ipairs(state.trackedSpells) do
+                state.runtimeDisplays[#state.runtimeDisplays + 1] = {
+                    entry = entry,
+                    preview = true,
+                    previewTime = "12",
+                    previewStacks = 2,
+                }
+            end
+        end
+    else
+        state.runtimeDisplays = activeDisplays
+    end
 
     if #state.runtimeDisplays == 0 then
         host:Hide()
@@ -539,20 +637,24 @@ end
 local function OnInitialize(db)
     state.db = db
     RefreshConfiguredSpells(db)
+    SyncAuraWatch()
     EnsureRuntimeHost()
 end
 
 local function OnEnable(db)
     state.db = db
     RefreshConfiguredSpells(db)
+    SyncAuraWatch()
     RegisterEvents()
     RefreshRuntimeDisplay()
 end
 
 local function OnDisable()
-    UnregisterEvents()
+    if not ShouldShowSettingsPreview() then
+        UnregisterEvents()
+    end
     wipe(state.runtimeDisplays)
-    if state.runtimeHost and not IsSettingsPreviewVisible() then
+    if state.runtimeHost and not ShouldShowAnyDisplay(state.db) then
         state.runtimeHost:Hide()
         state.runtimeHost:SetScript("OnUpdate", nil)
     end
@@ -577,6 +679,8 @@ local function BuildConfig(parent, db)
     state.db = db
     state.configPreviewActive = true
     RefreshConfiguredSpells(db)
+    SyncAuraWatch()
+    RegisterEvents()
 
     local cleanup = CreateFrame("Frame", nil, parent)
     cleanup:SetAllPoints(parent)
@@ -584,8 +688,9 @@ local function BuildConfig(parent, db)
     cleanup:SetScript("OnHide", function()
         state.configPreviewActive = false
         if state.db and not state.db.enabled then
-            RefreshRuntimeDisplay()
+            UnregisterEvents()
         end
+        RefreshRuntimeDisplay()
     end)
     if MedaAuras.RegisterConfigCleanup then
         MedaAuras:RegisterConfigCleanup(cleanup)
@@ -600,7 +705,7 @@ local function BuildConfig(parent, db)
     summary:SetPoint("RIGHT", parent, "RIGHT", -20, 0)
     summary:SetJustifyH("LEFT")
     summary:SetWordWrap(true)
-    summary:SetText("Enter one or more player buff spell IDs separated by commas or spaces. The module shows one icon for each configured buff while that buff is active. The settings preview always shows at least one icon so placement and styling are visible before the module is enabled.")
+    summary:SetText("Enter one or more player buff spell IDs separated by commas or spaces. While this settings page is open, the icon group is always shown and can be dragged. When settings are closed, locked mode hides the group until one of the tracked buffs is actually active.")
     summary:SetTextColor(unpack(MedaUI.Theme.textDim or { 0.7, 0.7, 0.7, 1 }))
     yOff = yOff - summary:GetStringHeight() - 20
 
@@ -648,7 +753,7 @@ local function BuildConfig(parent, db)
     end
 
     local appearanceHeader = MedaUI:CreateSectionHeader(parent, "Appearance")
-    local lockCB = MedaUI:CreateCheckbox(parent, "Unlock to Drag")
+    local lockCB = MedaUI:CreateCheckbox(parent, "Locked")
     local borderCB = MedaUI:CreateCheckbox(parent, "Show Border")
     local sizeSlider = MedaUI:CreateLabeledSlider(parent, "Icon Size", 200, 24, 120, 2)
     local textSlider = MedaUI:CreateLabeledSlider(parent, "Countdown Size", 200, 8, 36, 1)
@@ -753,16 +858,16 @@ local function BuildConfig(parent, db)
         footerNote:SetPoint("RIGHT", parent, "RIGHT", -20, 0)
         footerNote:SetJustifyH("LEFT")
         footerNote:SetWordWrap(true)
-        footerNote:SetText("Enable or disable the module from the custom-module sidebar toggle. When the frame is unlocked, the live display shows desaturated preview icons if no tracked buffs are currently active so players can drag the group into place.")
+        footerNote:SetText("Visibility rules: settings open always shows the group and allows dragging. Settings closed + unlocked keeps the preview visible. Settings closed + locked hides the group until a tracked buff is actually active on the player.")
         footerNote:SetTextColor(unpack(MedaUI.Theme.textDim or { 0.7, 0.7, 0.7, 1 }))
 
-        local totalHeight = 620 + previewHolder:GetHeight() + footerNote:GetStringHeight()
+        local totalHeight = math_max(860, 760 + previewHolder:GetHeight() + footerNote:GetStringHeight())
         MedaAuras:SetContentHeight(totalHeight)
     end
 
-    lockCB:SetChecked(db.locked == false)
+    lockCB:SetChecked(db.locked ~= false)
     lockCB.OnValueChanged = function(_, checked)
-        db.locked = not checked
+        db.locked = checked
         RefreshAllVisuals()
     end
 
@@ -814,6 +919,7 @@ local function BuildConfig(parent, db)
         db.spellIdsText = BuildSpellText(db.spellIds)
         spellInput:SetText(db.spellIdsText)
         RefreshConfiguredSpells(db)
+        SyncAuraWatch()
         RefreshAllVisuals()
     end
 
