@@ -2163,6 +2163,39 @@ local function SplitNormalizedTipText(value, fallbackTitle)
     return fallbackTitle or "Tip", text, nil
 end
 
+local function NormalizeStructuredTipEntry(value, fallbackTitle, prefix, index)
+    if type(value) ~= "table" then
+        local title, detail, encounter = SplitNormalizedTipText(value, fallbackTitle)
+        return {
+            id = format("%s:%s", prefix or "tip", tostring(index or 0)),
+            title = title,
+            detail = detail,
+            encounter = encounter,
+        }
+    end
+
+    local title = SafeText(value.title) or SafeText(value.object) or SafeText(value.buff) or fallbackTitle or "Tip"
+    local detail = SafeText(value.detail) or SafeText(value.tip) or SafeText(value.body)
+    local encounter = SafeText(value.encounter)
+    if not detail then
+        local text = SafeText(value.text)
+        if text then
+            title, detail, encounter = SplitNormalizedTipText(text, fallbackTitle)
+        end
+    end
+
+    return {
+        id = SafeText(value.id) or format("%s:%s", prefix or "tip", tostring(index or 0)),
+        title = title,
+        detail = detail,
+        encounter = encounter,
+        spellID = value.spellID or value.buffSpellID,
+        buff = SafeText(value.buff),
+        object = SafeText(value.object),
+        icon = value.icon,
+    }
+end
+
 GetNormalizedBossTips = function(instanceCtx)
     if not instanceCtx then return {} end
 
@@ -2188,14 +2221,8 @@ GetNormalizedTipsAndTricks = function(instanceCtx)
 
     if type(instanceCtx.tipsAndTricks) == "table" and #instanceCtx.tipsAndTricks > 0 then
         local items = {}
-        for index, text in ipairs(instanceCtx.tipsAndTricks) do
-            local title, detail, encounter = SplitNormalizedTipText(text, "Tip")
-            items[#items + 1] = {
-                id = "tips_and_tricks:" .. tostring(index),
-                title = title,
-                detail = detail,
-                encounter = encounter,
-            }
+        for index, value in ipairs(instanceCtx.tipsAndTricks) do
+            items[#items + 1] = NormalizeStructuredTipEntry(value, "Tip", "tips_and_tricks", index)
         end
         return items
     end
@@ -2450,7 +2477,10 @@ local function BuildDungeonTrickItems(ctx, instanceCtx, keyPrefix)
                 title = trick.title or "Tip",
                 encounter = trick.encounter,
                 detail = trick.detail,
-                icon = 134400,
+                icon = trick.icon or ((trick.spellID and GET_SPELL_TEXTURE and GET_SPELL_TEXTURE(trick.spellID)) or 134400),
+                spellID = trick.spellID,
+                buff = trick.buff,
+                object = trick.object,
                 actionLabel = "Tip",
                 actionHex = DUNGEON_FOCUS_NPC_HEX,
                 accent = RECOMMEND_COLOR,
@@ -2623,7 +2653,7 @@ local function AddDungeonFocusTooltip(tip, entry)
 
     local danger = entry.danger or {}
     local title = entry.title or danger.mechanic or entry.mob or "Priority"
-    BeginSpellTooltip(tip, entry.spellID or danger.spellID or danger.mechanic, title)
+    BeginSpellTooltip(tip, entry.spellID or entry.buff or danger.spellID or danger.mechanic, title)
 
     AddTooltipSpacer(tip)
     if entry.actionLabel and entry.actionLabel ~= "" then
@@ -2639,6 +2669,14 @@ local function AddDungeonFocusTooltip(tip, entry)
     if entry.encounter and entry.encounter ~= "" then
         local r, g, b = HexToColorTriplet(DUNGEON_FOCUS_NPC_HEX, { 0.5, 0.9, 0.5 })
         tip:AddLine("Encounter: " .. entry.encounter, r, g, b)
+    end
+
+    if entry.object and entry.object ~= "" then
+        tip:AddLine("Object: " .. entry.object, 0.85, 0.82, 0.62)
+    end
+
+    if entry.buff and entry.buff ~= "" and entry.buff ~= title then
+        tip:AddLine("Buff: " .. entry.buff, 0.62, 0.88, 1.0)
     end
 
     if danger.dispelType and danger.dispelType ~= "" then

@@ -404,6 +404,39 @@ local function SplitNormalizedTipText(value, fallbackTitle)
     return fallbackTitle or "Tip", text, nil
 end
 
+local function NormalizeStructuredTipEntry(value, fallbackTitle, prefix, index)
+    if type(value) ~= "table" then
+        local title, detail, encounter = SplitNormalizedTipText(value, fallbackTitle)
+        return {
+            id = format("%s:%s", prefix or "tip", tostring(index or 0)),
+            title = title,
+            detail = detail,
+            encounter = encounter,
+        }
+    end
+
+    local title = SafeText(value.title) or SafeText(value.object) or SafeText(value.buff) or fallbackTitle or "Tip"
+    local detail = SafeText(value.detail) or SafeText(value.tip) or SafeText(value.body)
+    local encounter = SafeText(value.encounter)
+    if not detail then
+        local text = SafeText(value.text)
+        if text then
+            title, detail, encounter = SplitNormalizedTipText(text, fallbackTitle)
+        end
+    end
+
+    return {
+        id = SafeText(value.id) or format("%s:%s", prefix or "tip", tostring(index or 0)),
+        title = title,
+        detail = detail,
+        encounter = encounter,
+        spellID = value.spellID or value.buffSpellID,
+        buff = SafeText(value.buff),
+        object = SafeText(value.object),
+        icon = value.icon,
+    }
+end
+
 local function BuildPreviewCandidates(data)
     local candidates = {}
     local seen = {}
@@ -493,9 +526,14 @@ local function BuildPreviewDispelEntries(data, instanceCtx, config)
 
                 entries[#entries + 1] = {
                     title = SafeText(danger.mechanic) or SafeText(capability and capability.label) or "Tracked Dispel",
-                    detail = meta.label,
+                    detail = BuildHUDPageDetail({
+                        encounter = danger.encounter,
+                        source = danger.source,
+                        body = danger.tip or meta.label,
+                    }, 84),
                     detailColor = meta.color,
                     icon = GetDangerIcon(data, danger, FALLBACK_ICON),
+                    spellID = danger.spellID or ResolveSpellID(danger.mechanic),
                     priority = capabilityPriority[capabilityID] or 999,
                     severityWeight = GetSeverityWeight(danger.severity),
                     sortLabel = (SafeText(danger.mechanic) or ""):lower(),
@@ -542,6 +580,7 @@ local function BuildPreviewInterruptEntries(data, instanceCtx)
                 type = "interrupt",
                 icon = stop.icon,
             }, FALLBACK_INTERRUPT_ICON),
+            spellID = stop.spellID or ResolveSpellID(title),
             priority = index,
             severityWeight = GetSeverityWeight(stop.danger),
             sortLabel = title:lower(),
@@ -609,7 +648,8 @@ local function BuildPreviewTrickEntries(_, ctx, instanceCtx)
     end
 
     for _, text in ipairs(instanceCtx and instanceCtx.tipsAndTricks or {}) do
-        local title, detail, encounter = SplitNormalizedTipText(text, "Tip")
+        local tipEntry = NormalizeStructuredTipEntry(text, "Tip", "tips_and_tricks", #entries + 1)
+        local title, detail, encounter = tipEntry.title, tipEntry.detail, tipEntry.encounter
         local signature = table.concat({
             SafeText(title) or "",
             SafeText(encounter) or "",
@@ -623,7 +663,10 @@ local function BuildPreviewTrickEntries(_, ctx, instanceCtx)
                     body = detail,
                 }, 100),
                 detailColor = { 0.85, 0.78, 0.42 },
-                icon = FALLBACK_TRICK_ICON,
+                icon = tipEntry.icon or ((tipEntry.spellID and GET_SPELL_TEXTURE and GET_SPELL_TEXTURE(tipEntry.spellID)) or FALLBACK_TRICK_ICON),
+                spellID = tipEntry.spellID,
+                buff = tipEntry.buff,
+                object = tipEntry.object,
                 priority = 2,
                 severityWeight = 2,
                 sortLabel = (title or ""):lower(),
@@ -792,8 +835,40 @@ local function GetRowHeight(config)
     return math_max(iconSize, titleSize + detailSize + 10)
 end
 
+local function ShowHUDEntryTooltip(owner, entry)
+    if not (owner and entry and GameTooltip) then
+        return
+    end
+
+    GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+
+    local spellRef = entry.spellID or entry.buff or entry.title
+    local spellID = ResolveSpellID(spellRef)
+    local showedSpell = false
+    if spellID and GameTooltip.SetSpellByID then
+        showedSpell = pcall(GameTooltip.SetSpellByID, GameTooltip, spellID) and true or false
+    end
+    if not showedSpell and entry.title and entry.title ~= "" then
+        GameTooltip:AddLine(entry.title, 1, 0.82, 0)
+    end
+
+    if entry.object and entry.object ~= "" then
+        GameTooltip:AddLine("Object: " .. entry.object, 0.85, 0.95, 1, true)
+    end
+    if entry.buff and entry.buff ~= "" and entry.buff ~= entry.title then
+        GameTooltip:AddLine("Buff: " .. entry.buff, 0.6, 1, 0.6, true)
+    end
+    if entry.detail and entry.detail ~= "" then
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine(entry.detail, 1, 1, 1, true)
+    end
+
+    GameTooltip:Show()
+end
+
 local function CreateHUDRow(parent)
     local row = CreateFrame("Frame", nil, parent)
+    row:EnableMouse(true)
     row.icon = row:CreateTexture(nil, "ARTWORK")
     row.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 
@@ -839,6 +914,7 @@ local function CreateHUDRow(parent)
     end
 
     function row:SetEntry(entry, config)
+        self._entry = entry
         self._iconTexture = entry and entry.icon or nil
         if self._iconTexture then
             self.icon:SetTexture(self._iconTexture)
@@ -851,6 +927,15 @@ local function CreateHUDRow(parent)
         self.detail:SetText(entry and entry.detail or "")
         self.detail:SetTextColor(detailColor[1] or 1, detailColor[2] or 1, detailColor[3] or 1)
     end
+
+    row:SetScript("OnEnter", function(self)
+        ShowHUDEntryTooltip(self, self._entry)
+    end)
+    row:SetScript("OnLeave", function()
+        if GameTooltip then
+            GameTooltip:Hide()
+        end
+    end)
 
     return row
 end

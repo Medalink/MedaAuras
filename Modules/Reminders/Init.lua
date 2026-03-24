@@ -22,6 +22,7 @@ local ALL_CLASSES = R.ALL_CLASSES
 
 local RunPipeline
 local RequestInspectorRescan
+local HandleRuntimeCaptureAuraUpdate
 
 local function Log(...)
     return R.Log(...)
@@ -33,6 +34,10 @@ end
 
 local function GetData(...)
     return R.GetData(...)
+end
+
+local function ShowCopyPopup(...)
+    return R.ShowCopyPopup(...)
 end
 
 local function IsDataCompatible(...)
@@ -247,7 +252,9 @@ end
 -- ============================================================================
 
 local function OnEvent(_, event, arg1)
-    if event == "PLAYER_ENTERING_WORLD" then
+    if event == "UNIT_AURA" then
+        HandleRuntimeCaptureAuraUpdate(arg1)
+    elseif event == "PLAYER_ENTERING_WORLD" then
         UpdateDetectedLabel()
         RunPipeline(true)
     elseif event == "ZONE_CHANGED_NEW_AREA" then
@@ -270,6 +277,344 @@ end
 
 local function OnInspectorUpdate()
     RunPipeline(false)
+end
+
+-- ============================================================================
+-- Runtime capture
+-- ============================================================================
+
+local CAPTURE_HISTORY_LIMIT = 32
+local CAPTURE_TIMEOUT_S = 12
+local CAPTURE_SETTLE_S = 1.5
+
+local function EnsureRuntimeCaptureStore()
+    S.db.runtimeCaptureBlocks = type(S.db.runtimeCaptureBlocks) == "table" and S.db.runtimeCaptureBlocks or {}
+    S.db.runtimeCaptureNextID = tonumber(S.db.runtimeCaptureNextID) or 1
+    return S.db.runtimeCaptureBlocks
+end
+
+local function FormatCaptureTimestamp(epochSeconds)
+    local epoch = tonumber(epochSeconds) or time()
+    return date("%Y-%m-%d %H:%M:%S", epoch)
+end
+
+local function BuildPlayerAuraSnapshot()
+    local snapshot = {}
+
+    for i = 1, 255 do
+        local ok, aura = pcall(C_UnitAuras.GetBuffDataByIndex, "player", i)
+        if not ok or not aura then
+            break
+        end
+
+        local spellID = tonumber(aura.spellId or aura.spellID)
+        local name = aura.name
+        if spellID and spellID > 0 and type(name) == "string" and name ~= "" then
+            snapshot[spellID] = {
+                spellID = spellID,
+                name = name,
+            }
+        end
+    end
+
+    return snapshot
+end
+
+local function GetCaptureContext(mode, explicitContext)
+    local trimmed = type(explicitContext) == "string" and explicitContext:match("^%s*(.-)%s*$") or nil
+    if trimmed and trimmed ~= "" then
+        return trimmed
+    end
+
+    if mode == "unit" then
+        if UnitExists("target") then
+            local targetName = UnitName("target")
+            if type(targetName) == "string" and targetName ~= "" then
+                return targetName
+            end
+        end
+        if UnitExists("mouseover") then
+            local mouseoverName = UnitName("mouseover")
+            if type(mouseoverName) == "string" and mouseoverName ~= "" then
+                return mouseoverName
+            end
+        end
+    end
+
+    return nil
+end
+
+local function BuildCaptureBlock(session)
+    local lines = {
+        "=== MedaDebug Dungeon Object Capture ===",
+        "Capture ID: " .. tostring(session.captureID or 0),
+        "Status: " .. tostring(session.status or "unmatched"),
+        "Confidence: " .. tostring(session.confidence or "low"),
+        "Context: " .. tostring(session.context or ""),
+        "Tooltip Type: " .. tostring(session.tooltipType or "object"),
+        "Source: " .. tostring(session.source or "reminders-live"),
+        "Timestamp: " .. tostring(session.timestampText or FormatCaptureTimestamp(session.startedAtEpoch)),
+        "Instance: " .. format("%s (%s)", tostring(session.instanceName or "Unknown"), tostring(session.instanceID or 0)),
+        "=== Outcomes ===",
+    }
+
+    if not session.outcomes or #session.outcomes == 0 then
+        lines[#lines + 1] = "(no correlated outcomes)"
+    else
+        for index, outcome in ipairs(session.outcomes) do
+            local delayText = outcome.delayS and format(" (%.2fs)", outcome.delayS) or ""
+            lines[#lines + 1] = format(
+                "%d. [aura] %s gained %s%s",
+                index,
+                tostring(outcome.unit or "player"),
+                tostring(outcome.spellName or "Unknown"),
+                delayText
+            )
+            if outcome.spellID then
+                lines[#lines + 1] = "spellID: " .. tostring(outcome.spellID)
+            end
+            if outcome.unit then
+                lines[#lines + 1] = "unit: " .. tostring(outcome.unit)
+            end
+        end
+    end
+
+    return table.concat(lines, "\n")
+end
+
+local function CopyRuntimeCaptureDump()
+    local blocks = EnsureRuntimeCaptureStore()
+    if #blocks == 0 then
+        Log("No runtime capture blocks stored yet.")
+        return
+    end
+
+    ShowCopyPopup(table.concat(blocks, "\n\n"), "Runtime Capture Dump")
+end
+
+local function ClearRuntimeCaptureDump()
+    local blocks = EnsureRuntimeCaptureStore()
+    wipe(blocks)
+    S.db.runtimeCaptureNextID = 1
+    Log("Cleared stored runtime capture blocks.")
+end
+
+local function FinalizeRuntimeCapture(reason)
+    local session = S.runtimeCaptureSession
+    if not session or session.finalized then
+        return
+    end
+
+    session.finalized = true
+    session.status = (#session.outcomes > 0) and "matched" or "unmatched"
+    session.confidence = (#session.outcomes > 0) and "high" or "low"
+    session.endReason = reason or "completed"
+
+    local block = BuildCaptureBlock(session)
+    local blocks = EnsureRuntimeCaptureStore()
+    blocks[#blocks + 1] = block
+    while #blocks > CAPTURE_HISTORY_LIMIT do
+        table.remove(blocks, 1)
+    end
+
+    if session.status == "matched" then
+        Log(format(
+            "Runtime capture matched %s in %s with %d aura outcome(s). Use /mr capture copy to export.",
+            tostring(session.context or "?"),
+            tostring(session.instanceName or "?"),
+            #session.outcomes
+        ))
+        ShowCopyPopup(table.concat(blocks, "\n\n"), "Runtime Capture Dump")
+    else
+        Log(format(
+            "Runtime capture finished without a new aura for %s.",
+            tostring(session.context or "?")
+        ))
+    end
+
+    S.runtimeCaptureSession = nil
+end
+
+local function ScheduleRuntimeCaptureFinalize(delayS)
+    local session = S.runtimeCaptureSession
+    if not session then
+        return
+    end
+
+    local token = session.token
+    C_Timer.After(delayS, function()
+        local current = S.runtimeCaptureSession
+        if not current or current.token ~= token then
+            return
+        end
+        if current.lastOutcomeAt and (GetTime() - current.lastOutcomeAt) < (delayS - 0.05) then
+            return
+        end
+        FinalizeRuntimeCapture("settled")
+    end)
+end
+
+local function StartRuntimeCapture(mode, explicitContext)
+    if S.runtimeCaptureSession and not S.runtimeCaptureSession.finalized then
+        Log("A runtime capture is already active. Use /mr capture stop before arming a new one.")
+        return
+    end
+
+    local inInstance = IsInInstance()
+    if not inInstance then
+        Log("Runtime capture works only inside an instance.")
+        return
+    end
+
+    local instanceName, _, _, _, _, _, _, instanceID = GetInstanceInfo()
+    if not instanceID then
+        Log("Could not resolve the current instance ID.")
+        return
+    end
+
+    local tooltipType = (mode == "object") and "object" or "unit"
+    local context = GetCaptureContext(tooltipType, explicitContext)
+    if not context then
+        if tooltipType == "unit" then
+            Log("Target or mouse over the recruiter first, or pass an explicit context label.")
+        else
+            Log("Provide an explicit object label, for example: /mr capture object Arcane Tome")
+        end
+        return
+    end
+
+    EnsureRuntimeCaptureStore()
+
+    local captureID = S.db.runtimeCaptureNextID
+    S.db.runtimeCaptureNextID = captureID + 1
+
+    S.runtimeCaptureSession = {
+        token = tostring(captureID) .. ":" .. tostring(time()),
+        captureID = captureID,
+        context = context,
+        tooltipType = tooltipType,
+        source = "reminders-live",
+        instanceName = instanceName,
+        instanceID = instanceID,
+        startedAt = GetTime(),
+        startedAtEpoch = time(),
+        timestampText = FormatCaptureTimestamp(time()),
+        baselineAuras = BuildPlayerAuraSnapshot(),
+        observedSpellIDs = {},
+        outcomes = {},
+        status = "pending",
+        confidence = "low",
+        finalized = false,
+        playerName = UnitName("player") or "player",
+    }
+
+    Log(format(
+        "Runtime capture armed for %s [%s] in %s (%s). Interact now; capture will auto-finish after a new player aura appears.",
+        context,
+        tooltipType,
+        tostring(instanceName),
+        tostring(instanceID)
+    ))
+
+    local token = S.runtimeCaptureSession.token
+    C_Timer.After(CAPTURE_TIMEOUT_S, function()
+        local current = S.runtimeCaptureSession
+        if not current or current.token ~= token then
+            return
+        end
+        FinalizeRuntimeCapture("timeout")
+    end)
+end
+
+HandleRuntimeCaptureAuraUpdate = function(unit)
+    if unit ~= "player" then
+        return
+    end
+
+    local session = S.runtimeCaptureSession
+    if not session or session.finalized then
+        return
+    end
+
+    local currentSnapshot = BuildPlayerAuraSnapshot()
+    local added = false
+
+    for spellID, aura in pairs(currentSnapshot) do
+        if not session.baselineAuras[spellID] and not session.observedSpellIDs[spellID] then
+            session.observedSpellIDs[spellID] = true
+            session.outcomes[#session.outcomes + 1] = {
+                kind = "aura",
+                spellID = spellID,
+                spellName = aura.name,
+                unit = session.playerName or "player",
+                delayS = math.max(0, GetTime() - (session.startedAt or GetTime())),
+            }
+            added = true
+        end
+    end
+
+    if added then
+        session.lastOutcomeAt = GetTime()
+        ScheduleRuntimeCaptureFinalize(CAPTURE_SETTLE_S)
+    end
+end
+
+local function HandleRuntimeCaptureCommand(args)
+    local command, remainder = (args or ""):match("^(%S+)%s*(.*)$")
+    command = command and command:lower() or ""
+
+    if command == "" or command == "start" then
+        StartRuntimeCapture("unit", remainder)
+        return
+    end
+
+    if command == "unit" then
+        StartRuntimeCapture("unit", remainder)
+        return
+    end
+
+    if command == "object" then
+        StartRuntimeCapture("object", remainder)
+        return
+    end
+
+    if command == "stop" then
+        if S.runtimeCaptureSession then
+            FinalizeRuntimeCapture("manual_stop")
+        else
+            Log("No active runtime capture.")
+        end
+        return
+    end
+
+    if command == "copy" then
+        CopyRuntimeCaptureDump()
+        return
+    end
+
+    if command == "clear" then
+        ClearRuntimeCaptureDump()
+        return
+    end
+
+    if command == "status" then
+        local blocks = EnsureRuntimeCaptureStore()
+        if S.runtimeCaptureSession then
+            Log(format(
+                "Active runtime capture: %s [%s] in %s (%s). Stored blocks: %d.",
+                tostring(S.runtimeCaptureSession.context or "?"),
+                tostring(S.runtimeCaptureSession.tooltipType or "?"),
+                tostring(S.runtimeCaptureSession.instanceName or "?"),
+                tostring(S.runtimeCaptureSession.instanceID or "?"),
+                #blocks
+            ))
+        else
+            Log(format("No active runtime capture. Stored blocks: %d.", #blocks))
+        end
+        return
+    end
+
+    Log("Usage: /mr capture [start|unit|object <label>|stop|copy|clear|status]")
 end
 
 -- ============================================================================
@@ -532,6 +877,7 @@ local function StartModule()
     S.eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
     S.eventFrame:RegisterEvent("ACTIVE_DELVE_DATA_UPDATE")
     S.eventFrame:RegisterEvent("CHALLENGE_MODE_START")
+    S.eventFrame:RegisterEvent("UNIT_AURA")
     S.eventFrame:SetScript("OnEvent", OnEvent)
 
     local GroupInspector = ns.Services.GroupInspector
@@ -575,6 +921,7 @@ local function StopModule()
     S.playerSectionLastCtxKey = nil
     S.currentAffixes = nil
     S.playerToolkit = nil
+    S.runtimeCaptureSession = nil
 
     Log("Module disabled")
 end
@@ -1215,10 +1562,27 @@ local slashCommands = {
             end
         end
     end,
+    capture = function(_, args)
+        HandleRuntimeCaptureCommand(args)
+    end,
 }
 
 SLASH_MEDAREMINDERS1 = "/mr"
-SlashCmdList["MEDAREMINDERS"] = function()
+SlashCmdList["MEDAREMINDERS"] = function(msg)
+    local trimmed = type(msg) == "string" and msg:match("^%s*(.-)%s*$") or ""
+    if trimmed ~= "" then
+        local subCmd, subRest = trimmed:match("^(%S+)%s*(.*)$")
+        subCmd = subCmd and subCmd:lower() or ""
+        local handler = slashCommands[subCmd]
+        if handler then
+            local db = S.db or MedaAuras:GetModuleDB(MODULE_NAME)
+            handler(db, subRest)
+            return
+        end
+        Log("Unknown /mr command. Try /mr capture status or /mr instanceinfo.")
+        return
+    end
+
     if S.coveragePanel then
         S.dismissed = false
         S.coveragePanel:ClearDismissed()
@@ -1250,6 +1614,8 @@ local MODULE_DEFAULTS = {
     showInterrupts = true,
     showAffixTips  = true,
     showDungeonTimers = true,
+    runtimeCaptureBlocks = {},
+    runtimeCaptureNextID = 1,
     huds = {
         dispel = {
             enabled = true,

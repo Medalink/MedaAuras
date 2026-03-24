@@ -1787,18 +1787,18 @@ end
 -- ============================================================================
 
 
-local function ShowCopyPopup(text)
+local function ShowCopyPopup(text, title)
     if not S.copyPopup then
         S.copyPopup = MedaUI:CreateImportExportDialog({
             width = 420,
             height = 160,
-            title = "Copy Reminder",
+            title = title or "Copy Reminder",
             mode = "export",
             hintText = "Press Ctrl+C to copy, then Esc to close.",
         })
     end
 
-    S.copyPopup:ShowExport("Copy Reminder", text)
+    S.copyPopup:ShowExport(title or "Copy Reminder", text)
 end
 
 local ARCHON_LOADOUT_UNLOCK_LABEL = "March 24, 2026"

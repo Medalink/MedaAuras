@@ -29,7 +29,7 @@ S.wowhead = {
     badge = "|cffff8800[W]|r",
     color = { 1.0, 0.53, 0 },
     url   = "wowhead.com",
-    lastFetched = 1774365932,
+    lastFetched = 1774369240,
 }
 
 S.icyveins = {
