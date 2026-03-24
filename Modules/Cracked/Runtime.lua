@@ -1,5 +1,8 @@
 local ADDON_NAME, ns = ...
 
+local C = ns.Cracked or {}
+ns.Cracked = C
+
 local MedaUI = LibStub("MedaUI-2.0")
 
 local format = format
@@ -8,7 +11,6 @@ local pairs = pairs
 local ipairs = ipairs
 local wipe = wipe
 local pcall = pcall
-local unpack = unpack
 local sort = table.sort
 local CreateFrame = CreateFrame
 local CreateFont = _G and _G.CreateFont
@@ -18,27 +20,21 @@ local UnitClass = UnitClass
 local UnitIsUnit = UnitIsUnit
 local AuraUtil = AuraUtil
 local C_CooldownViewer = _G and _G.C_CooldownViewer or nil
-local UnitGroupRolesAssigned = _G and _G.UnitGroupRolesAssigned or nil
 local IsInGroup = IsInGroup
 local IsInRaid = IsInRaid
 local IsInInstance = IsInInstance
 local C_Timer = C_Timer
 local IsSpellKnown = _G and _G.IsSpellKnown or nil
 local IsPlayerSpell = IsPlayerSpell
+local GetSpellCooldown = _G and _G.GetSpellCooldown or nil
+local GetSpellCharges = _G and _G.GetSpellCharges or nil
+local C_Spell = _G and _G.C_Spell or nil
 local GetSpecialization = GetSpecialization
 local GetSpecializationInfo = GetSpecializationInfo
-
-if MedaAuras and MedaAuras.Log then
-    MedaAuras.Log("[Cracked] File loaded OK")
-end
 
 -- ============================================================================
 -- Module Info
 -- ============================================================================
-
-local MODULE_NAME      = "Cracked"
-local MODULE_VERSION   = "0.2"
-local MODULE_STABILITY = "experimental"
 
 -- ============================================================================
 -- Shared Data
@@ -79,7 +75,6 @@ local myName, myClass
 local myCds = {}  -- [spellID] = { baseCd, cdEnd, activeEnd, lastUse }
 
 local paneFrames = {}
-local updateTicker
 local shouldShowByZone = true
 local showInSettings = false
 local spellMatchHandle
@@ -87,12 +82,12 @@ local rosterFrame
 local blizzardProbeCount = 0
 local settingsPreviewCleanup
 local lastVisibilityState = {}
-local lastRenderSummary = {}
 local activeSettingsPaneId = "all"
 local IsCategoryEnabled
 local UpdateDisplay
 local RebuildPaneBars
 local catalogPreviewEnabled = false
+local initialized = false
 
 local MAX_BARS = 15
 
@@ -213,12 +208,30 @@ local function Log(msg)      MedaAuras.Log(format("[Cracked] %s", msg)) end
 local function LogDebug(msg) MedaAuras.LogDebug(format("[Cracked] %s", msg)) end
 local function LogWarn(msg)  MedaAuras.LogWarn(format("[Cracked] %s", msg)) end
 
+local function IsDebugModeEnabled()
+    return MedaAuras.IsDebugModeEnabled and MedaAuras:IsDebugModeEnabled() or false
+end
+
+local function IsDeepDebugModeEnabled()
+    return MedaAuras.IsDeepDebugModeEnabled and MedaAuras:IsDeepDebugModeEnabled() or false
+end
+
 local function SafeStr(value)
     local ok, str = pcall(tostring, value)
     if not ok then return "<secret>" end
     local clean = pcall(function() return str == str end)
     if not clean then return "<secret>" end
     return str
+end
+
+local function SafeNumber(value)
+    if ns.SafeNumber then
+        return ns.SafeNumber(value)
+    end
+    if type(value) ~= "number" then
+        return nil
+    end
+    return value
 end
 
 local function CopyTable(value)
@@ -342,9 +355,43 @@ local function EnsurePaneState()
     end
 end
 
+local function NormalizeNumber(value, fallback, minimum, maximum)
+    if type(value) ~= "number" then
+        value = fallback
+    end
+    if minimum and value < minimum then
+        value = minimum
+    end
+    if maximum and value > maximum then
+        value = maximum
+    end
+    return value
+end
+
+local function NormalizePaneStyle(style)
+    local source = type(style) == "table" and style or {}
+    return {
+        frameWidth = NormalizeNumber(source.frameWidth, PANE_STYLE_DEFAULTS.frameWidth, 80, 600),
+        barHeight = NormalizeNumber(source.barHeight, PANE_STYLE_DEFAULTS.barHeight, 12, 64),
+        showTitle = source.showTitle ~= false,
+        showIcons = source.showIcons ~= false,
+        showPlayerName = source.showPlayerName ~= false,
+        showSpellName = source.showSpellName == true,
+        growUp = source.growUp == true,
+        alpha = NormalizeNumber(source.alpha, PANE_STYLE_DEFAULTS.alpha, 0.05, 1.0),
+        font = type(source.font) == "string" and source.font or PANE_STYLE_DEFAULTS.font,
+        titleFontSize = NormalizeNumber(source.titleFontSize, PANE_STYLE_DEFAULTS.titleFontSize, 8, 48),
+        nameFontSize = NormalizeNumber(source.nameFontSize, PANE_STYLE_DEFAULTS.nameFontSize, 0, 64),
+        readyFontSize = NormalizeNumber(source.readyFontSize, PANE_STYLE_DEFAULTS.readyFontSize, 0, 64),
+        iconSize = NormalizeNumber(source.iconSize, PANE_STYLE_DEFAULTS.iconSize, 0, 64),
+    }
+end
+
 local function GetPaneStyle(paneId)
     EnsurePaneState()
-    return MedaUI:GetResolvedLinkedSettings(db, PANE_STYLE_ROOT, paneId == "all" and "all" or paneId, PANE_STYLE_DEFAULTS)
+    return NormalizePaneStyle(
+        MedaUI:GetResolvedLinkedSettings(db, PANE_STYLE_ROOT, paneId == "all" and "all" or paneId, PANE_STYLE_DEFAULTS)
+    )
 end
 
 local function SetPaneStyleValue(paneId, key, value)
@@ -637,42 +684,92 @@ local function ConsumeDefensiveUse(state, now)
     end
 end
 
-local function BuildRenderSummary(entries, numVisible, now)
-    if not entries or numVisible <= 0 then
-        return "entries=none"
+local function ResolveCooldownEnd(startTime, duration, modRate)
+    startTime = SafeNumber(startTime)
+    duration = SafeNumber(duration)
+    modRate = SafeNumber(modRate)
+
+    if not startTime or not duration or duration <= 0 then
+        return 0
     end
 
-    local parts = {}
-    for i = 1, math.min(numVisible, 4) do
-        local entry = entries[i]
-        if entry then
-            local state = "READY"
-            local chargeText = entry.maxCharges and entry.maxCharges > 1
-                and format("%d/%d", entry.currentCharges or entry.maxCharges, entry.maxCharges)
-                or nil
-            if entry.entryKind == "missingBuff" then
-                state = format("MISSING:%d", entry.count or 0)
-            elseif entry.isActive then
-                state = entry.activeEnd and entry.activeEnd > now
-                    and format("ACTIVE:%.1f", entry.activeEnd - now)
-                    or "ACTIVE"
-            elseif entry.isOnCd then
-                state = entry.cdEnd and entry.cdEnd > now
-                    and format("CD:%.1f", entry.cdEnd - now)
-                    or "CD"
-            end
-            if chargeText then
-                state = chargeText .. ":" .. state
-            end
+    local rate = modRate or 1
+    if rate <= 0 then
+        rate = 1
+    end
 
-            local label = entry.entryKind == "missingBuff"
-                and entry.spellName
-                or format("%s:%s", SafeStr(entry.name), entry.spellName)
-            parts[#parts + 1] = format("%s[%s]", label, state)
+    return startTime + (duration / rate)
+end
+
+local function SyncPlayerDefensiveCooldown(spellID, state, defData)
+    if not spellID or not state or not defData then
+        return
+    end
+
+    local chargesCurrent, chargesMax, chargeStart, chargeDuration, chargeModRate
+    if GetSpellCharges then
+        local okCharges, current, maximum, startTime, duration, modRate = pcall(GetSpellCharges, spellID)
+        if okCharges then
+            chargesCurrent = SafeNumber(current)
+            chargesMax = SafeNumber(maximum)
+            chargeStart = SafeNumber(startTime)
+            chargeDuration = SafeNumber(duration)
+            chargeModRate = SafeNumber(modRate)
         end
     end
 
-    return table.concat(parts, " | ")
+    if chargesMax and chargesMax > 1 then
+        state.maxCharges = chargesMax
+        state.currentCharges = math.max(0, math.min(chargesCurrent or chargesMax, chargesMax))
+        state.rechargeEnds = nil
+        state.cdEnd = state.currentCharges < chargesMax
+            and ResolveCooldownEnd(chargeStart, chargeDuration, chargeModRate)
+            or 0
+
+        if chargeDuration and chargeDuration > 1 then
+            local rate = chargeModRate or 1
+            if rate <= 0 then rate = 1 end
+            state.baseCd = chargeDuration / rate
+        end
+        return
+    end
+
+    local startTime, duration, enabled, modRate
+    if C_Spell and C_Spell.GetSpellCooldown then
+        local okInfo, info = pcall(C_Spell.GetSpellCooldown, spellID)
+        if okInfo and info then
+            startTime = SafeNumber(info.startTime)
+            duration = SafeNumber(info.duration)
+            enabled = info.isEnabled
+            modRate = SafeNumber(info.modRate)
+        end
+    elseif GetSpellCooldown then
+        local okCooldown, startValue, durationValue, enabledValue, modRateValue = pcall(GetSpellCooldown, spellID)
+        if okCooldown then
+            startTime = SafeNumber(startValue)
+            duration = SafeNumber(durationValue)
+            enabled = enabledValue
+            modRate = SafeNumber(modRateValue)
+        end
+    end
+
+    state.currentCharges = nil
+    state.rechargeEnds = nil
+
+    if enabled == 0 then
+        state.cdEnd = 0
+        return
+    end
+
+    state.cdEnd = ResolveCooldownEnd(startTime, duration, modRate)
+
+    if duration and duration > 1 then
+        local rate = modRate or 1
+        if rate <= 0 then rate = 1 end
+        state.baseCd = duration / rate
+    elseif not state.baseCd or state.baseCd <= 0 then
+        state.baseCd = defData.cd or 0
+    end
 end
 
 local function LogPlayerTrackingSnapshot(reason)
@@ -711,27 +808,33 @@ local function LogPlayerTrackingSnapshot(reason)
 end
 
 local function BuildAuraRescanMode()
-    if db and db.forceFullAuraRescan then
+    if db and db.forceFullAuraRescan and IsDebugModeEnabled() then
         return "full"
     end
     return "unit"
 end
 
 local function RefreshAuraWatches()
-    if not ns.Services.GroupAuraTracker or not ns.Services.GroupAuraTracker.RegisterWatch then
+    local tracker = ns.Services.GroupAuraTracker
+    if not tracker or not tracker.RegisterWatch then
         return
     end
 
-    ns.Services.GroupAuraTracker:RegisterWatch(AURA_WATCH_KEY, {
+    tracker:RegisterWatch(AURA_WATCH_KEY, {
         spells = WATCH_SPELLS,
         filter = "HELPFUL",
         rescanMode = BuildAuraRescanMode(),
     })
-    ns.Services.GroupAuraTracker:RegisterWatch(GROUP_BUFF_WATCH_KEY, {
-        spells = GROUP_BUFF_WATCH_SPELLS,
-        filter = "HELPFUL",
-        rescanMode = BuildAuraRescanMode(),
-    })
+
+    if db and db.showMissingGroupBuffs ~= false then
+        tracker:RegisterWatch(GROUP_BUFF_WATCH_KEY, {
+            spells = GROUP_BUFF_WATCH_SPELLS,
+            filter = "HELPFUL",
+            rescanMode = BuildAuraRescanMode(),
+        })
+    elseif tracker.UnregisterWatch then
+        tracker:UnregisterWatch(GROUP_BUFF_WATCH_KEY)
+    end
 end
 
 local function ShouldShowLiveFrame()
@@ -772,6 +875,9 @@ local function EndSettingsLivePreview()
     catalogPreviewEnabled = false
     settingsPreviewCleanup = nil
     UpdateMainFrameVisibility()
+    if C.RequestDisplayRefresh then
+        C.RequestDisplayRefresh()
+    end
 end
 
 local function BeginSettingsLivePreview(anchor)
@@ -785,6 +891,9 @@ local function BeginSettingsLivePreview(anchor)
 
     showInSettings = true
     UpdateMainFrameVisibility()
+    if C.RequestDisplayRefresh then
+        C.RequestDisplayRefresh()
+    end
 
     if anchor then
         local cleanup = CreateFrame("Frame", nil, anchor)
@@ -827,13 +936,86 @@ local function FormatCandidateIDs(ids, lookupTable)
     return table.concat(parts, ", ")
 end
 
+local function FormatDecisionList(items)
+    if not items or #items == 0 then
+        return "none"
+    end
+
+    local parts = {}
+    for i, item in ipairs(items) do
+        if i > 6 then
+            parts[#parts + 1] = format("+%d more", #items - 6)
+            break
+        end
+        parts[#parts + 1] = item
+    end
+    return table.concat(parts, ", ")
+end
+
+local function DidCandidateIDsChange(oldInfo, candidateIDs)
+    if not oldInfo or not oldInfo.candidateIDs then
+        return true
+    end
+
+    if #oldInfo.candidateIDs ~= #candidateIDs then
+        return true
+    end
+
+    for index, spellID in ipairs(candidateIDs) do
+        if oldInfo.candidateIDs[index] ~= spellID then
+            return true
+        end
+    end
+
+    return false
+end
+
 local function GetCachedSpecID(unit)
     if not unit or not UnitExists(unit) then return nil end
     local info = ns.Services.GroupInspector and ns.Services.GroupInspector:GetUnitInfo(unit)
     return info and info.specID or nil
 end
 
-local function BuildCandidateSet(cls, specID)
+local function GetCachedInspectorInfo(unit)
+    if not unit or not UnitExists(unit) then
+        return nil
+    end
+    local inspector = ns.Services and ns.Services.GroupInspector
+    if not inspector or not inspector.GetUnitInfo then
+        return nil
+    end
+    return inspector:GetUnitInfo(unit)
+end
+
+local function HasRequiredTalentSpell(unit, spellID, defData)
+    local talentSpellID = defData and defData.talentSpellID
+    if not talentSpellID then
+        return true
+    end
+
+    if unit and UnitIsUnit(unit, "player") then
+        return IsPlayerSpell and IsPlayerSpell(talentSpellID) or false
+    end
+
+    local inspector = ns.Services and ns.Services.GroupInspector
+    if not inspector or not inspector.UnitHasTalentSpell or not inspector.GetUnitInfo or not unit then
+        return true
+    end
+
+    local info = inspector:GetUnitInfo(unit)
+    if not info or not info.talentsKnown then
+        return true
+    end
+
+    return inspector:UnitHasTalentSpell(unit, talentSpellID)
+end
+
+local function IsReadyForPartyRegistration(unit)
+    local info = GetCachedInspectorInfo(unit)
+    return info and info.inspected and info.specID ~= nil
+end
+
+local function BuildCandidateSet(cls, specID, unit)
     local ids = CLASS_DEFENSIVE_IDS[cls]
     local candidateLookup = {}
     local candidateIDs = {}
@@ -853,6 +1035,10 @@ local function BuildCandidateSet(cls, specID)
                 allowed = false
             end
 
+            if allowed and unit and not HasRequiredTalentSpell(unit, spellID, data) then
+                allowed = false
+            end
+
             if allowed then
                 candidateLookup[spellID] = data
                 candidateIDs[#candidateIDs + 1] = spellID
@@ -864,11 +1050,49 @@ local function BuildCandidateSet(cls, specID)
     return candidateLookup, candidateIDs, classWideCount
 end
 
+local function BuildCandidateDecisionSummary(cls, specID, unit)
+    local ids = CLASS_DEFENSIVE_IDS[cls]
+    local included = {}
+    local excluded = {}
+
+    if not ids then
+        return included, excluded
+    end
+
+    for _, spellID in ipairs(ids) do
+        local data = ALL_DEFENSIVES[spellID]
+        if data and IsCategoryEnabled(data.category) then
+            local reason = nil
+            local whitelist = SPELL_SPEC_WHITELIST[spellID]
+            if specID and whitelist and not whitelist[specID] then
+                reason = "spec"
+            elseif unit and not HasRequiredTalentSpell(unit, spellID, data) then
+                reason = "talent"
+            end
+
+            if reason then
+                excluded[#excluded + 1] = format("%s(%s)", data.name, reason)
+            else
+                included[#included + 1] = data.name
+            end
+        end
+    end
+
+    table.sort(included)
+    table.sort(excluded)
+    return included, excluded
+end
+
 local function UpdateMemberDefensives(name, cls, specID, reason, unit)
-    local candidateLookup, candidateIDs, classWideCount = BuildCandidateSet(cls, specID)
     local oldInfo = partyMembers[name]
-    local cds = {}
+    local effectiveSpecID = specID
+    if oldInfo and oldInfo.specID and not specID and reason == "roster" then
+        effectiveSpecID = oldInfo.specID
+    end
+
     local effectiveUnit = unit or (oldInfo and oldInfo.unit)
+    local candidateLookup, candidateIDs, classWideCount = BuildCandidateSet(cls, effectiveSpecID, effectiveUnit)
+    local cds = {}
 
     for _, spellID in ipairs(candidateIDs) do
         local data = ALL_DEFENSIVES[spellID]
@@ -896,7 +1120,7 @@ local function UpdateMemberDefensives(name, cls, specID, reason, unit)
 
     partyMembers[name] = {
         class = cls,
-        specID = specID,
+        specID = effectiveSpecID,
         unit = unit or (oldInfo and oldInfo.unit),
         cds = cds,
         candidateLookup = candidateLookup,
@@ -904,10 +1128,24 @@ local function UpdateMemberDefensives(name, cls, specID, reason, unit)
         classWideCount = classWideCount,
     }
 
-    Log(format("Registered %s (%s spec=%s) with %d/%d defensive candidates via %s",
-        name, cls, tostring(specID), #candidateIDs, classWideCount, tostring(reason)))
-    LogDebug(format("  CandidateIDs for %s: %s",
-        name, FormatCandidateIDs(candidateIDs, candidateLookup)))
+    if reason ~= "roster"
+        or not oldInfo
+        or oldInfo.class ~= cls
+        or oldInfo.specID ~= effectiveSpecID
+        or DidCandidateIDsChange(oldInfo, candidateIDs)
+    then
+        LogDebug(format("Registered %s (%s spec=%s) with %d/%d defensive candidates via %s",
+            name, cls, tostring(effectiveSpecID), #candidateIDs, classWideCount, tostring(reason)))
+        LogDebug(format("  CandidateIDs for %s: %s",
+            name, FormatCandidateIDs(candidateIDs, candidateLookup)))
+        if reason == "inspect" then
+            local included, excluded = BuildCandidateDecisionSummary(cls, effectiveSpecID, effectiveUnit)
+            LogDebug(format("  TalentGate %s: include=%s exclude=%s",
+                name,
+                FormatDecisionList(included),
+                FormatDecisionList(excluded)))
+        end
+    end
 end
 
 -- ============================================================================
@@ -918,14 +1156,15 @@ local function FindMyDefensives()
     local _, cls = UnitClass("player")
     myClass = cls
     myName = UnitName("player")
+    local previousCds = {}
 
-    LogDebug(format("FindMyDefensives: class=%s name=%s", tostring(cls), tostring(myName)))
-
+    for spellID, state in pairs(myCds) do
+        previousCds[spellID] = state
+    end
     wipe(myCds)
 
     local ids = CLASS_DEFENSIVE_IDS[cls]
     if not ids then
-        LogDebug(format("  No defensive IDs for class=%s", tostring(cls)))
         return
     end
 
@@ -938,11 +1177,9 @@ local function FindMyDefensives()
                 local ok, r = pcall(IsPlayerSpell, spellID)
                 if ok and r then known = true end
             end
-            LogDebug(format("  spellID %d (%s) known=%s cat=%s",
-                spellID, data.name, tostring(known), data.category))
             if known then
                 local override = GetDefensiveTalentOverride("player", spellID, true)
-                local state = {
+                local state = previousCds[spellID] or {
                     baseCd = data.cd,
                     cdEnd = 0,
                     activeEnd = 0,
@@ -950,6 +1187,7 @@ local function FindMyDefensives()
                 }
                 ApplyDefensiveMetadata(state, data, override)
                 NormalizeChargeState(state, GetTime())
+                SyncPlayerDefensiveCooldown(spellID, state, data)
                 myCds[spellID] = state
                 count = count + 1
                 if override then
@@ -964,8 +1202,14 @@ local function FindMyDefensives()
         end
     end
 
-    Log(format("FindMyDefensives: found %d known defensives for %s (%s)", count, tostring(myName), tostring(cls)))
-    LogPlayerTrackingSnapshot("find-my-defensives")
+    LogDebug(format("FindMyDefensives: tracked=%d player=%s class=%s",
+        count, tostring(myName), tostring(cls)))
+    if IsDeepDebugModeEnabled() then
+        LogPlayerTrackingSnapshot("find-my-defensives")
+    end
+    if C.RequestDisplayRefresh then
+        C.RequestDisplayRefresh()
+    end
 end
 
 -- ============================================================================
@@ -973,28 +1217,18 @@ end
 -- ============================================================================
 
 local function AutoRegisterParty()
-    LogDebug(format("AutoRegisterParty: inGroup=%s", tostring(IsInGroup())))
+    local unknownName = _G.UNKNOWNOBJECT or _G.UNKNOWN
     for i = 1, 4 do
         local u = "party" .. i
         if UnitExists(u) then
             local name = UnitName(u)
             local _, cls = UnitClass(u)
-            local role = UnitGroupRolesAssigned(u)
             local specID = GetCachedSpecID(u)
-            LogDebug(format("  %s: name=%s class=%s role=%s already=%s",
-                u, tostring(name), tostring(cls), tostring(role),
-                tostring(name and partyMembers[name] ~= nil)))
-            if name and cls then
+            if (not unknownName or name ~= unknownName) and name and cls and IsReadyForPartyRegistration(u) then
                 UpdateMemberDefensives(name, cls, specID, "roster", u)
             end
-        else
-            LogDebug(format("  %s: does not exist", u))
         end
     end
-
-    local count = 0
-    for _ in pairs(partyMembers) do count = count + 1 end
-    LogDebug(format("  Total tracked: %d party members", count))
 end
 
 local function CleanPartyList()
@@ -1008,11 +1242,7 @@ local function CleanPartyList()
         if not current[name] then
             partyMembers[name] = nil
             removed = removed + 1
-            LogDebug(format("CleanPartyList: removed %s (left group)", name))
         end
-    end
-    if removed > 0 then
-        LogDebug(format("CleanPartyList: removed %d member(s)", removed))
     end
 end
 
@@ -1025,7 +1255,7 @@ end
 -- ============================================================================
 
 local function ProbeCandidateAuras(name, unit, debugInfo)
-    if not AuraUtil or not unit or not UnitExists(unit) or not debugInfo or not debugInfo.candidateIDs then
+    if not IsDeepDebugModeEnabled() or not AuraUtil or not unit or not UnitExists(unit) or not debugInfo or not debugInfo.candidateIDs then
         return
     end
 
@@ -1063,6 +1293,10 @@ local BLIZZ_VIEWERS = {
 }
 
 local function ProbeBlizzardUISurfaces(reason)
+    if not IsDeepDebugModeEnabled() then
+        return
+    end
+
     blizzardProbeCount = blizzardProbeCount + 1
     if blizzardProbeCount > 12 then return end
 
@@ -1119,11 +1353,14 @@ end
 
 local function ResolveDefensiveCandidates(name, unit)
     local info = partyMembers[name]
-    if info and info.candidateLookup and info.candidateIDs then
+    if info and info.class then
+        -- Cast matching should stay broader than display pre-registration.
+        -- Talent gates can be wrong or stale; exact live casts should still land.
+        local lookupTable, knownIDs = BuildCandidateSet(info.class, info.specID, nil)
         return {
-            lookupTable = info.candidateLookup,
-            knownIDs = info.candidateIDs,
-            label = format("%s:%s", tostring(info.class), tostring(info.specID or "nospec")),
+            lookupTable = lookupTable,
+            knownIDs = knownIDs,
+            label = format("%s:%s(match)", tostring(info.class), tostring(info.specID or "nospec")),
         }
     end
 
@@ -1131,11 +1368,11 @@ local function ResolveDefensiveCandidates(name, unit)
         local _, cls = UnitClass(unit)
         local specID = GetCachedSpecID(unit)
         if cls then
-            local lookupTable, knownIDs = BuildCandidateSet(cls, specID)
+            local lookupTable, knownIDs = BuildCandidateSet(cls, specID, nil)
             return {
                 lookupTable = lookupTable,
                 knownIDs = knownIDs,
-                label = format("%s:%s(ephemeral)", tostring(cls), tostring(specID or "nospec")),
+                label = format("%s:%s(match-ephemeral)", tostring(cls), tostring(specID or "nospec")),
             }
         end
     end
@@ -1150,18 +1387,6 @@ local function OnPartyDefensiveMatch(name, cleanSpellID, defData, unit, debugInf
 
     local now = GetTime()
     local cd
-
-    Log(format("PARTY DEFENSIVE: %s cast %s (ID %d, cat=%s, CD=%ds, dur=%ds, confidence=%s via=%s)",
-        SafeStr(name), defData.name, cleanSpellID, defData.category,
-        defData.cd, defData.duration,
-        tostring(debugInfo and debugInfo.confidence or "unknown"),
-        tostring(debugInfo and debugInfo.chosenBy or "unknown")))
-    if debugInfo then
-        LogDebug(format("  MatchDebug cast=%s cleanID=%s candidates=%s",
-            SafeStr(debugInfo.castID),
-            SafeStr(debugInfo.cleanID),
-            FormatCandidateIDs(debugInfo.candidateIDs, debugInfo.candidateLookup)))
-    end
 
     local info = partyMembers[name]
     if not info then
@@ -1192,16 +1417,28 @@ local function OnPartyDefensiveMatch(name, cleanSpellID, defData, unit, debugInf
         end
 
         cd = info.cds[cleanSpellID]
+        Log(format("PARTY DEFENSIVE: %s cast %s (ID %d, cat=%s, CD=%ds, dur=%ds, confidence=%s via=%s)",
+            SafeStr(name), defData.name, cleanSpellID, defData.category,
+            defData.cd, defData.duration,
+            tostring(debugInfo and debugInfo.confidence or "unknown"),
+            tostring(debugInfo and debugInfo.chosenBy or "unknown")))
+        if debugInfo and IsDeepDebugModeEnabled() then
+            LogDebug(format("  MatchDebug cast=%s cleanID=%s candidates=%s",
+                SafeStr(debugInfo.castID),
+                SafeStr(debugInfo.cleanID),
+                FormatCandidateIDs(debugInfo.candidateIDs, debugInfo.candidateLookup)))
+        end
         ConsumeDefensiveUse(cd, now)
         local activeDuration = type(cd.displayDuration) == "number" and cd.displayDuration or defData.duration
         cd.activeEnd = activeDuration > 0 and (now + activeDuration) or 0
         cd.lastUse = now
 
-        Log(format("  STATE -> ACTIVE: %s %s activeEnd=%.1f cdEnd=%.1f",
-            SafeStr(name), cd.displayName or defData.name,
-            cd.activeEnd > 0 and cd.activeEnd or 0,
-            cd.cdEnd))
     else
+        Log(format("PARTY DEFENSIVE: %s cast %s (ID %d, cat=%s, CD=%ds, dur=%ds, confidence=%s via=%s)",
+            SafeStr(name), defData.name, cleanSpellID, defData.category,
+            defData.cd, defData.duration,
+            tostring(debugInfo and debugInfo.confidence or "unknown"),
+            tostring(debugInfo and debugInfo.chosenBy or "unknown")))
         LogWarn(format("  Could not register %s from %s", SafeStr(name), SafeStr(unit)))
     end
 
@@ -1209,7 +1446,7 @@ local function OnPartyDefensiveMatch(name, cleanSpellID, defData, unit, debugInf
         ns.Services.GroupAuraTracker:RequestWatchScan(AURA_WATCH_KEY, unit)
     end
 
-    if unit then
+    if unit and IsDeepDebugModeEnabled() then
         local cdEnd = type(cd and cd.cdEnd) == "number" and cd.cdEnd or 0
         local activeEnd = type(cd and cd.activeEnd) == "number" and cd.activeEnd or 0
         LogDebug(format("MatchPostScan name=%s unit=%s spell=%s cd=%.1f active=%.1f %s",
@@ -1221,8 +1458,14 @@ local function OnPartyDefensiveMatch(name, cleanSpellID, defData, unit, debugInf
             GetAuraDebugStateSummary(AURA_WATCH_KEY, unit, cleanSpellID)))
     end
 
-    ProbeCandidateAuras(name, unit, debugInfo)
-    ProbeBlizzardUISurfaces("match:" .. tostring(defData.name))
+    if IsDeepDebugModeEnabled() then
+        ProbeCandidateAuras(name, unit, debugInfo)
+        ProbeBlizzardUISurfaces("match:" .. tostring(defData.name))
+    end
+
+    if C.RequestDisplayRefresh then
+        C.RequestDisplayRefresh()
+    end
 end
 
 -- ============================================================================
@@ -1255,12 +1498,17 @@ local function SetupOwnTracking()
         local activeDuration = type(cd.displayDuration) == "number" and cd.displayDuration or defData.duration
         cd.activeEnd = activeDuration > 0 and (now + activeDuration) or 0
         cd.lastUse = now
+        SyncPlayerDefensiveCooldown(spellID, cd, defData)
 
         Log(format("OWN DEFENSIVE: %s (ID %d, cat=%s, CD=%ds, dur=%ds) activeEnd=%.1f cdEnd=%.1f",
             cd.displayName or defData.name, spellID, defData.category,
             cd.baseCd or defData.cd, activeDuration,
             cd.activeEnd > 0 and cd.activeEnd or 0,
             cd.cdEnd))
+
+        if C.RequestDisplayRefresh then
+            C.RequestDisplayRefresh()
+        end
     end)
     LogDebug("SetupOwnTracking: registered UNIT_SPELLCAST_SUCCEEDED for player")
 end
@@ -1313,7 +1561,7 @@ local function EnsurePaneFrame(paneId)
         return paneFrames[paneId]
     end
 
-    local style = GetPaneStyle(paneId)
+    local style = GetPaneStyle(paneId) or PANE_STYLE_DEFAULTS
     local paneName = paneId == "all" and "MedaAurasCrackedFrame" or ("MedaAurasCrackedFrame" .. paneId:gsub("^%l", string.upper))
     local pane = {
         paneId = paneId,
@@ -1325,7 +1573,7 @@ local function EnsurePaneFrame(paneId)
     local _, _, _, _, _, _, titleFontSize = GetBarLayoutForStyle(style)
 
     local frame = CreateFrame("Frame", paneName, UIParent)
-    frame:SetSize(style.frameWidth, 200)
+    frame:SetSize(style.frameWidth or PANE_STYLE_DEFAULTS.frameWidth, 200)
     frame:SetFrameStrata("MEDIUM")
     frame:SetClampedToScreen(true)
     frame:SetMovable(true)
@@ -1333,7 +1581,7 @@ local function EnsurePaneFrame(paneId)
     frame:RegisterForDrag("LeftButton")
     frame:SetResizable(true)
     frame:SetResizeBounds(80, 40, 600, 800)
-    frame:SetAlpha(style.alpha)
+    frame:SetAlpha(style.alpha or PANE_STYLE_DEFAULTS.alpha)
     frame:SetScript("OnDragStart", function(self)
         if not db.locked then
             self:StartMoving()
@@ -1540,15 +1788,8 @@ local function RenderPaneEntries(paneId, entries, now)
     local style = GetPaneStyle(paneId)
     local _, barHeight, _, _, _, titleHeight = GetBarLayoutForStyle(style)
     local numVisible = math.min(#entries, MAX_BARS)
-    local summary = BuildRenderSummary(entries, numVisible, now)
-
     pane.enabled = db.paneMode ~= "split" and paneId == "all" or (db.paneMode == "split" and paneId ~= "all" and IsPaneEnabled(paneId))
     pane.hasVisibleEntries = numVisible > 0 and pane.enabled
-
-    if lastRenderSummary[paneId] ~= summary then
-        lastRenderSummary[paneId] = summary
-        LogDebug(format("RenderEntries pane=%s visible=%d summary=%s", paneId, numVisible, summary))
-    end
 
     for i = 1, MAX_BARS do
         local entry = entries[i]
@@ -1676,6 +1917,34 @@ local function CollectDisplayEntries()
         return ns.Services.GroupAuraTracker:GetUnitSpellState(AURA_WATCH_KEY, unit, spellID)
     end
 
+    local function GetTrackedExternalAuraState(casterUnit, spellID)
+        local tracker = ns.Services and ns.Services.GroupAuraTracker
+        if not casterUnit or not spellID or not tracker or not tracker.GetWatchState then
+            return nil
+        end
+
+        local watchState = tracker:GetWatchState(AURA_WATCH_KEY)
+        if not watchState then
+            return nil
+        end
+
+        local bestState = nil
+        for _, recipientState in pairs(watchState) do
+            local spellState = recipientState and recipientState.spells and recipientState.spells[spellID] or nil
+            if spellState and spellState.active and spellState.sourceUnit == casterUnit then
+                if not bestState then
+                    bestState = spellState
+                elseif spellState.exactTiming and not bestState.exactTiming then
+                    bestState = spellState
+                elseif spellState.expirationTime and bestState.expirationTime and spellState.expirationTime > bestState.expirationTime then
+                    bestState = spellState
+                end
+            end
+        end
+
+        return bestState
+    end
+
     local function GetTrackedGroupBuffState(unit, spellID)
         if not unit or not ns.Services.GroupAuraTracker or not ns.Services.GroupAuraTracker.GetUnitSpellState then
             return nil
@@ -1684,7 +1953,10 @@ local function CollectDisplayEntries()
     end
 
     local function ResolveActiveState(unit, spellID, cd, defData, isPlayer)
-        local auraState = isPlayer and nil or GetTrackedAuraState(unit, spellID)
+        local auraState = GetTrackedAuraState(unit, spellID)
+        if (not auraState or not auraState.active) and defData.category == "external" then
+            auraState = GetTrackedExternalAuraState(unit, spellID) or auraState
+        end
         local renderMode = "none"
         local activeStart = nil
         local activeEnd = 0
@@ -1693,10 +1965,12 @@ local function CollectDisplayEntries()
         local duration = defData.duration or 0
 
         if auraState and auraState.active then
-            if auraState.exactTiming and auraState.expirationTime and auraState.duration and auraState.expirationTime > now then
+            local auraExpirationTime = SafeNumber(auraState.expirationTime)
+            local auraDuration = SafeNumber(auraState.duration)
+            if auraState.exactTiming and auraExpirationTime and auraDuration and auraExpirationTime > now then
                 renderMode = "timer"
-                activeEnd = auraState.expirationTime
-                activeDuration = auraState.duration
+                activeEnd = auraExpirationTime
+                activeDuration = auraDuration
                 activeStart = activeEnd - activeDuration
                 activeSource = "aura"
             elseif cd.activeEnd > now and duration > 0 then
@@ -1726,6 +2000,9 @@ local function CollectDisplayEntries()
         for spellID, cd in pairs(cds) do
             local defData = ALL_DEFENSIVES[spellID]
             if defData and IsCategoryEnabled(defData.category) then
+                if isPlayer then
+                    SyncPlayerDefensiveCooldown(spellID, cd, defData)
+                end
                 NormalizeChargeState(cd, now)
                 local cdEnd = type(cd.cdEnd) == "number" and cd.cdEnd or 0
                 local activeEndValue = type(cd.activeEnd) == "number" and cd.activeEnd or 0
@@ -1953,56 +2230,50 @@ local function CheckZoneVisibility()
     LogDebug(format("CheckZoneVisibility: instanceType=%s showByZone=%s",
         tostring(instanceType), tostring(shouldShowByZone)))
     UpdateMainFrameVisibility()
+    if C.RequestDisplayRefresh then
+        C.RequestDisplayRefresh()
+    end
 end
 
-local lastStateDump = 0
+local function OnAuraStateChanged(watchKey)
+    if watchKey ~= nil and watchKey ~= AURA_WATCH_KEY and watchKey ~= GROUP_BUFF_WATCH_KEY then
+        return
+    end
+
+    if C.RequestDisplayRefresh then
+        C.RequestDisplayRefresh()
+    end
+end
+
+local function NeedsAnimatedEntry(entry)
+    if not entry or entry.entryKind == "missingBuff" then
+        return false
+    end
+
+    if entry.isActive or entry.isOnCd then
+        return true
+    end
+
+    return entry.maxCharges and entry.maxCharges > 1
+        and entry.currentCharges ~= nil
+        and entry.currentCharges < entry.maxCharges
+end
 
 UpdateDisplay = function()
-    if not next(paneFrames) then return end
+    if not next(paneFrames) then
+        return false
+    end
 
     local now = GetTime()
 
-    if now - lastStateDump > 10 then
-        lastStateDump = now
-        local memberCount = 0
-        local totalTracked = 0
-        for n, info in pairs(partyMembers) do
-            memberCount = memberCount + 1
-            for sid, cd in pairs(info.cds) do
-                totalTracked = totalTracked + 1
-                local defData = ALL_DEFENSIVES[sid]
-                NormalizeChargeState(cd, now)
-                local displayName = cd.displayName or (defData and defData.name) or tostring(sid)
-                local activeEnd = type(cd.activeEnd) == "number" and cd.activeEnd or 0
-                local cdEnd = type(cd.cdEnd) == "number" and cd.cdEnd or 0
-                local currentCharges = type(cd.currentCharges) == "number" and cd.currentCharges or nil
-                local maxCharges = type(cd.maxCharges) == "number" and cd.maxCharges or nil
-                local isActive = activeEnd > now
-                local isOnCd = maxCharges and maxCharges > 1
-                    and currentCharges ~= nil
-                    and currentCharges <= 0
-                    and cdEnd > now
-                    or (not (maxCharges and maxCharges > 1) and cdEnd > now)
-                if isActive or isOnCd or (maxCharges and maxCharges > 1 and currentCharges and currentCharges < maxCharges) then
-                    local chargeSuffix = maxCharges and maxCharges > 1
-                        and format(" charges=%d/%d", currentCharges or maxCharges, maxCharges)
-                        or ""
-                    LogDebug(format("  STATE: %s %s active=%s activeRem=%.1f cdRem=%.1f%s",
-                        n, displayName,
-                        tostring(isActive),
-                        isActive and (activeEnd - now) or 0,
-                        cdEnd > now and (cdEnd - now) or 0,
-                        chargeSuffix))
-                end
-            end
-        end
-        local myCount = 0
-        for _ in pairs(myCds) do myCount = myCount + 1 end
-        LogDebug(format("UpdateDisplay tick: myDefensives=%d members=%d totalTracked=%d visible=%s",
-            myCount, memberCount, totalTracked, tostring(shouldShowByZone)))
-    end
-
     local allEntries = CollectDisplayEntries()
+    local needsAnimation = false
+    for _, entry in ipairs(allEntries) do
+        if NeedsAnimatedEntry(entry) then
+            needsAnimation = true
+            break
+        end
+    end
 
     if #allEntries == 0 and ShouldShowLiveFrame() then
         LogPlayerTrackingSnapshot("no-visible-entries")
@@ -2028,6 +2299,7 @@ UpdateDisplay = function()
     end
 
     UpdateMainFrameVisibility()
+    return ShouldShowLiveFrame() and needsAnimation
 end
 
 -- ============================================================================
@@ -2037,23 +2309,20 @@ end
 local function CreateUI()
     EnsurePaneState()
     if next(paneFrames) then
-        LogDebug("CreateUI: pane frames already exist, refreshing")
-        RebuildAllPaneBars()
-        UpdateMainFrameVisibility()
         return
     end
 
-    LogDebug("CreateUI: building pane frames...")
     for _, paneId in ipairs(DISPLAY_PANE_IDS) do
         EnsurePaneFrame(paneId)
     end
     RebuildAllPaneBars()
     UpdateMainFrameVisibility()
-    LogDebug("CreateUI: complete")
 end
 
 local function DestroyUI()
-    if updateTicker then updateTicker:Cancel(); updateTicker = nil end
+    if C.StopDisplayUpdates then
+        C.StopDisplayUpdates()
+    end
     EndSettingsLivePreview()
     for _, pane in pairs(paneFrames) do
         pane.hasVisibleEntries = false
@@ -2074,13 +2343,18 @@ local function SetupRosterEvents()
     rosterFrame:RegisterEvent("SPELLS_CHANGED")
     rosterFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
     rosterFrame:SetScript("OnEvent", function(_, event, arg1)
-        LogDebug(format("Roster event: %s arg1=%s", event, tostring(arg1)))
         if event == "GROUP_ROSTER_UPDATE" then
             CleanPartyList()
             AutoRegisterParty()
+            if C.RequestDisplayRefresh then
+                C.RequestDisplayRefresh()
+            end
         elseif event == "PLAYER_ENTERING_WORLD" then
             CheckZoneVisibility()
             AutoRegisterParty()
+            if C.RequestDisplayRefresh then
+                C.RequestDisplayRefresh()
+            end
         elseif event == "SPELLS_CHANGED" then
             FindMyDefensives()
         elseif event == "PLAYER_SPECIALIZATION_CHANGED" then
@@ -2116,6 +2390,9 @@ local function OnInspectComplete(unit, name, class, specID)
     info = partyMembers[name]
     LogDebug(format("  -> %s tracked with %d defensive entries, specID=%d",
         name, (function() local n=0 for _ in pairs(info.cds) do n=n+1 end return n end)(), specID))
+    if C.RequestDisplayRefresh then
+        C.RequestDisplayRefresh()
+    end
 end
 
 -- ============================================================================
@@ -2123,42 +2400,32 @@ end
 -- ============================================================================
 
 local function OnInitialize(moduleDB)
+    if initialized then
+        db = moduleDB
+        return
+    end
     db = moduleDB
-    Log("OnInitialize starting...")
-
-    LogDebug(format("  db.enabled=%s", tostring(moduleDB.enabled)))
-    LogDebug(format("  ns.DefensiveData=%s", tostring(ns.DefensiveData ~= nil)))
-    LogDebug(format("  ns.Services.PartySpellWatcher=%s", tostring(ns.Services.PartySpellWatcher ~= nil)))
-    LogDebug(format("  ns.Services.GroupInspector=%s", tostring(ns.Services.GroupInspector ~= nil)))
-    LogDebug(format("  ns.Services.GroupAuraTracker=%s", tostring(ns.Services.GroupAuraTracker ~= nil)))
     if ns.Services.GroupInspector and ns.Services.GroupInspector.Initialize then
         ns.Services.GroupInspector:Initialize()
     end
     if ns.Services.GroupAuraTracker and ns.Services.GroupAuraTracker.Initialize then
         ns.Services.GroupAuraTracker:Initialize()
+        if ns.Services.GroupAuraTracker.RegisterCallback then
+            ns.Services.GroupAuraTracker:RegisterCallback("Cracked", OnAuraStateChanged)
+        end
         RefreshAuraWatches()
     end
 
-    LogDebug("  Step 1: FindMyDefensives")
     FindMyDefensives()
 
-    LogDebug("  Step 2: CreateUI")
-    CreateUI()
-    LogDebug(format("  paneFrames created: %s", tostring(next(paneFrames) ~= nil)))
-
-    LogDebug("  Step 3: CheckZoneVisibility")
     CheckZoneVisibility()
 
-    LogDebug("  Step 4: SetupOwnTracking")
     SetupOwnTracking()
 
-    LogDebug("  Step 5: SetupRosterEvents")
     SetupRosterEvents()
 
-    LogDebug("  Step 6: AutoRegisterParty")
     AutoRegisterParty()
 
-    LogDebug("  Step 7: Register PartySpellWatcher spell match for defensives")
     ns.Services.PartySpellWatcher:Initialize()
     spellMatchHandle = ns.Services.PartySpellWatcher:OnPartySpellMatch({
         label = "CrackedDefensives",
@@ -2167,27 +2434,57 @@ local function OnInitialize(moduleDB)
         entryToID = ENTRY_TO_ID,
         callback = OnPartyDefensiveMatch,
     })
-    Log(format("  spellMatchHandle=%s", tostring(spellMatchHandle)))
 
-    LogDebug("  Step 8: Register GroupInspector inspect-complete callback")
     ns.Services.GroupInspector:RegisterInspectComplete("Cracked", OnInspectComplete)
 
-    LogDebug("  Step 9: Start UpdateDisplay ticker (0.1s)")
-    if updateTicker then updateTicker:Cancel() end
-    updateTicker = C_Timer.NewTicker(0.1, UpdateDisplay)
+    if C.RequestDisplayRefresh then
+        C.RequestDisplayRefresh()
+    end
 
-    ProbeBlizzardUISurfaces("init")
-    Log("OnInitialize complete - tracking started")
+    if IsDeepDebugModeEnabled() then
+        ProbeBlizzardUISurfaces("init")
+    end
+    initialized = true
+    LogDebug("OnInitialize complete")
 end
 
 local function OnEnable(moduleDB)
     db = moduleDB
-    Log("OnEnable called")
-    OnInitialize(moduleDB)
+    if not initialized then
+        OnInitialize(moduleDB)
+        return
+    end
+
+    if ns.Services.GroupAuraTracker and ns.Services.GroupAuraTracker.RegisterCallback then
+        ns.Services.GroupAuraTracker:RegisterCallback("Cracked", OnAuraStateChanged)
+        RefreshAuraWatches()
+    end
+
+    FindMyDefensives()
+    CheckZoneVisibility()
+    SetupOwnTracking()
+    SetupRosterEvents()
+    AutoRegisterParty()
+
+    if not spellMatchHandle then
+        ns.Services.PartySpellWatcher:Initialize()
+        spellMatchHandle = ns.Services.PartySpellWatcher:OnPartySpellMatch({
+            label = "CrackedDefensives",
+            lookupTable = ALL_DEFENSIVES,
+            candidateResolver = ResolveDefensiveCandidates,
+            entryToID = ENTRY_TO_ID,
+            callback = OnPartyDefensiveMatch,
+        })
+    end
+
+    ns.Services.GroupInspector:RegisterInspectComplete("Cracked", OnInspectComplete)
+
+    if C.RequestDisplayRefresh then
+        C.RequestDisplayRefresh()
+    end
 end
 
 local function OnDisable()
-    Log("OnDisable called")
     DestroyUI()
     TeardownOwnTracking()
     TeardownRosterEvents()
@@ -2199,737 +2496,97 @@ local function OnDisable()
 
     ns.Services.GroupInspector:UnregisterInspectComplete("Cracked")
     if ns.Services.GroupAuraTracker and ns.Services.GroupAuraTracker.UnregisterWatch then
+        if ns.Services.GroupAuraTracker.UnregisterCallback then
+            ns.Services.GroupAuraTracker:UnregisterCallback("Cracked")
+        end
         ns.Services.GroupAuraTracker:UnregisterWatch(AURA_WATCH_KEY)
         ns.Services.GroupAuraTracker:UnregisterWatch(GROUP_BUFF_WATCH_KEY)
     end
 
     wipe(partyMembers)
     wipe(myCds)
+    initialized = false
 end
 
 -- ============================================================================
--- Module Defaults
+-- Exports
 -- ============================================================================
 
-local MODULE_DEFAULTS = {
-    enabled = false,
-    frameWidth = 240,
-    barHeight = 24,
-    locked = false,
-    showTitle = true,
-    showIcons = true,
-    showPlayerName = true,
-    showSpellName = false,
-    growUp = false,
-    alpha = 0.9,
-    nameFontSize = 0,
-    readyFontSize = 0,
-    showExternals = true,
-    showPartyWide = true,
-    showMajor = true,
-    showPersonal = false,
-    showMissingGroupBuffs = true,
-    forceFullAuraRescan = false,
-    showInDungeon = true,
-    showInRaid = true,
-    showInOpenWorld = false,
-    showInArena = true,
-    showInBG = false,
-    paneMode = "combined",
-    font = "default",
-    titleFontSize = 12,
-    iconSize = 0,
-    panePositions = {},
-    paneStyles = {},
-    position = { point = "CENTER", x = 250, y = -150 },
-}
-
--- ============================================================================
--- Preview
--- ============================================================================
-
-local pvContainer, pvInner, pvBars, pvTitleText
-local pvTicker
-local pvStartTime = 0
-
-local PREVIEW_MOCK = {
-    { name = "Tanksworth",  class = "WARRIOR",     spellID = 97462,  baseCd = 180, duration = 10, cdOffset = 60 },
-    { name = "Stabsworth",  class = "ROGUE",       spellID = 31224,  baseCd = 120, duration = 5,  cdOffset = 0  },
-    { name = "Frostbyte",   class = "MAGE",        spellID = 45438,  baseCd = 240, duration = 10, cdOffset = 100 },
-    { name = "Healbot",     class = "PRIEST",      spellID = 33206,  baseCd = 180, duration = 8,  cdOffset = 30 },
-    { name = "Felrush",     class = "DEMONHUNTER", spellID = 196718, baseCd = 180, duration = 8,  cdOffset = 0  },
-}
-
-local function GetPreviewPaneId()
-    return PANE_LABELS[activeSettingsPaneId] and activeSettingsPaneId or "all"
+C.OnInitialize = OnInitialize
+C.OnEnable = OnEnable
+C.OnDisable = OnDisable
+C.ShouldShowLiveFrame = ShouldShowLiveFrame
+C.UpdateMainFrameVisibility = UpdateMainFrameVisibility
+C.UpdateDisplayNow = UpdateDisplay
+C.CreateUI = CreateUI
+C.DestroyUI = DestroyUI
+C.CheckZoneVisibility = CheckZoneVisibility
+C.RefreshAuraWatches = RefreshAuraWatches
+C.BeginSettingsLivePreview = BeginSettingsLivePreview
+C.EndSettingsLivePreview = EndSettingsLivePreview
+C.RebuildPaneBars = RebuildPaneBars
+C.RebuildAllPaneBars = RebuildAllPaneBars
+C.ApplyPanePosition = ApplyPanePosition
+C.EnsurePaneState = EnsurePaneState
+C.GetPaneStyle = GetPaneStyle
+C.SetPaneStyleValue = SetPaneStyleValue
+C.IsPaneLinked = IsPaneLinked
+C.SetPaneLinked = SetPaneLinked
+C.SetCatalogPreviewEnabled = function(enabled)
+    catalogPreviewEnabled = not not enabled
 end
-
-local function GetPreviewEntries()
-    local paneId = GetPreviewPaneId()
-    if paneId == "buffs" then
-        return {
-            {
-                entryKind = "missingBuff",
-                spellName = "Fortitude",
-                icon = GROUP_BUFFS.stamina and GROUP_BUFFS.stamina.icon or 135987,
-                count = 2,
-                summary = "Tanksworth, Frostbyte",
-            },
-        }
-    end
-
-    if paneId == "all" then
-        return PREVIEW_MOCK
-    end
-
-    local filtered = {}
-    for _, mock in ipairs(PREVIEW_MOCK) do
-        local defData = ALL_DEFENSIVES[mock.spellID]
-        if defData and defData.category == paneId then
-            filtered[#filtered + 1] = mock
-        end
-    end
-
-    if #filtered == 0 then
-        return PREVIEW_MOCK
-    end
-
-    return filtered
+C.IsCatalogPreviewEnabled = function()
+    return catalogPreviewEnabled
 end
-
-local function DestroyPreview()
-    if pvTicker then pvTicker:Cancel(); pvTicker = nil end
-    if pvBars then
-        for i = 1, #pvBars do
-            pvBars[i]:Hide()
-            pvBars[i]:SetParent(nil)
-        end
-        wipe(pvBars)
-        pvBars = nil
-    end
-    pvTitleText = nil
-    if pvInner then pvInner:Hide(); pvInner:SetParent(nil); pvInner = nil end
-    if pvContainer then pvContainer:Hide(); pvContainer:SetParent(nil); pvContainer = nil end
-end
-
-local function CreatePreviewBars()
-    if pvInner then pvInner:Hide(); pvInner:SetParent(nil) end
-
-    pvInner = CreateFrame("Frame", nil, pvContainer)
-    pvInner:SetAllPoints()
-    pvBars = {}
-
-    local paneId = GetPreviewPaneId()
-    local style = GetPaneStyle(paneId)
-    local entries = GetPreviewEntries()
-    local barW, barH, iconS, fontSize, cdFontSize, titleH, titleFontSize = GetBarLayoutForStyle(style)
-
-    if style.showTitle then
-        pvTitleText = pvInner:CreateFontString(nil, "OVERLAY")
-        pvTitleText:SetFontObject(GetFontObj(style.font or "default", titleFontSize, "outline"))
-        pvTitleText:SetPoint("TOP", 0, -3)
-        pvTitleText:SetText("|cFF00DDDD" .. (PANE_TITLES[paneId] or "Defensives") .. "|r")
+C.SetActiveSettingsPaneId = function(paneId)
+    if PANE_LABELS[paneId] then
+        activeSettingsPaneId = paneId
     else
-        pvTitleText = nil
+        activeSettingsPaneId = "all"
     end
-
-    for i = 1, #entries do
-        local yOff
-        if style.growUp then
-            yOff = (i - 1) * (barH + 1)
-        else
-            yOff = -(titleH + (i - 1) * (barH + 1))
-        end
-
-        local f = CreateFrame("Frame", nil, pvInner)
-        f:SetSize(iconS + barW, barH)
-        if style.growUp then
-            f:SetPoint("BOTTOMLEFT", 0, yOff)
-        else
-            f:SetPoint("TOPLEFT", 0, yOff)
-        end
-
-        local ico = f:CreateTexture(nil, "ARTWORK")
-        ico:SetSize(iconS, barH)
-        ico:SetPoint("LEFT", 0, 0)
-        ico:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-        if iconS == 0 then ico:Hide() end
-        f.icon = ico
-
-        local barBg = f:CreateTexture(nil, "BACKGROUND")
-        barBg:SetPoint("TOPLEFT", iconS, 0)
-        barBg:SetPoint("BOTTOMRIGHT", 0, 0)
-        barBg:SetTexture(BAR_TEXTURE)
-        barBg:SetVertexColor(0.15, 0.15, 0.15, 0.9)
-        f.barBg = barBg
-
-        local sb = CreateFrame("StatusBar", nil, f)
-        sb:SetPoint("TOPLEFT", iconS, 0)
-        sb:SetPoint("BOTTOMRIGHT", 0, 0)
-        sb:SetStatusBarTexture(BAR_TEXTURE)
-        sb:SetStatusBarColor(1, 1, 1, 0.85)
-        sb:SetMinMaxValues(0, 1)
-        sb:SetValue(0)
-        sb:SetFrameLevel(f:GetFrameLevel() + 1)
-        f.cdBar = sb
-
-        local content = CreateFrame("Frame", nil, f)
-        content:SetPoint("TOPLEFT", iconS, 0)
-        content:SetPoint("BOTTOMRIGHT", 0, 0)
-        content:SetFrameLevel(sb:GetFrameLevel() + 1)
-
-        local nm = content:CreateFontString(nil, "OVERLAY")
-        nm:SetFontObject(GetFontObj(style.font or "default", fontSize, "outline"))
-        nm:SetPoint("LEFT", 6, 0)
-        nm:SetJustifyH("LEFT")
-        nm:SetWidth(barW - 50)
-        nm:SetWordWrap(false)
-        nm:SetShadowOffset(1, -1)
-        nm:SetShadowColor(0, 0, 0, 1)
-        if style.showPlayerName == false and not style.showSpellName then nm:Hide() end
-        f.nameText = nm
-
-        local cdTxt = content:CreateFontString(nil, "OVERLAY")
-        cdTxt:SetFontObject(GetFontObj(style.font or "default", cdFontSize, "outline"))
-        cdTxt:SetPoint("RIGHT", -6, 0)
-        cdTxt:SetShadowOffset(1, -1)
-        cdTxt:SetShadowColor(0, 0, 0, 1)
-        f.cdText = cdTxt
-
-        f:Show()
-        pvBars[i] = f
-    end
-
-    pvContainer:SetSize(style.frameWidth, titleH + #entries * (barH + 1))
 end
-
-local function UpdatePreview()
-    if not pvContainer or not pvBars or not db then return end
-
-    local paneId = GetPreviewPaneId()
-    local style = GetPaneStyle(paneId)
-    local entries = GetPreviewEntries()
-    local elapsed = GetTime() - pvStartTime
-    local _, barH, _, _, _, titleH = GetBarLayoutForStyle(style)
-
-    for i, mock in ipairs(entries) do
-        local bar = pvBars[i]
-        if not bar then break end
-
-        if mock.entryKind == "missingBuff" then
-            bar.icon:SetTexture(mock.icon)
-            if style.showPlayerName == false and not style.showSpellName then
-                bar.nameText:Hide()
-            else
-                bar.nameText:Show()
-                bar.nameText:SetText("|cFFFFFFFF" .. mock.spellName .. " - " .. mock.summary .. "|r")
-            end
-            bar.cdBar:Hide()
-            bar.barBg:SetVertexColor(0.28, 0.21, 0.05, 0.95)
-            bar.cdText:SetText(tostring(mock.count))
-            bar.cdText:SetTextColor(1.0, 0.82, 0.22)
-        else
-            local defData = ALL_DEFENSIVES[mock.spellID]
-            if defData then
-                bar.icon:SetTexture(defData.icon or DEFAULT_SPELL_ICON)
-                local col = CLASS_COLORS[mock.class] or FALLBACK_WHITE
-
-                if style.showPlayerName == false and not style.showSpellName then
-                    bar.nameText:Hide()
-                else
-                    bar.nameText:Show()
-                    local label = BuildEntryLabel(style, mock.name, defData.name)
-                    bar.nameText:SetText("|cFFFFFFFF" .. label .. "|r")
-                end
-
-                local readyWindow = 5
-                local activeWindow = mock.duration
-                local cycleLen = mock.baseCd + readyWindow
-                local pos = (elapsed + mock.cdOffset) % cycleLen
-
-                if pos < activeWindow then
-                    local rem = activeWindow - pos
-                    bar.cdBar:SetMinMaxValues(0, activeWindow)
-                    bar.cdBar:SetValue(rem)
-                    bar.cdBar:SetStatusBarColor(ACTIVE_COLOR[1], ACTIVE_COLOR[2], ACTIVE_COLOR[3], 0.85)
-                    bar.barBg:SetVertexColor(ACTIVE_COLOR[1] * 0.25, ACTIVE_COLOR[2] * 0.25, ACTIVE_COLOR[3] * 0.25, 0.9)
-                    bar.cdText:SetText(format("%.1fs", rem))
-                    bar.cdText:SetTextColor(0.2, 1.0, 0.2)
-                elseif pos < mock.baseCd then
-                    local rem = mock.baseCd - pos
-                    bar.cdBar:SetMinMaxValues(0, mock.baseCd)
-                    bar.cdBar:SetValue(rem)
-                    bar.cdBar:SetStatusBarColor(col[1], col[2], col[3], 0.85)
-                    bar.barBg:SetVertexColor(col[1] * 0.25, col[2] * 0.25, col[3] * 0.25, 0.9)
-                    bar.cdText:SetText(format("%.0f", rem))
-                    bar.cdText:SetTextColor(1, 1, 1)
-                else
-                    bar.cdBar:SetMinMaxValues(0, 1)
-                    bar.cdBar:SetValue(0)
-                    bar.barBg:SetVertexColor(col[1], col[2], col[3], 0.85)
-                    bar.cdText:SetText("READY")
-                    bar.cdText:SetTextColor(0.2, 1.0, 0.2)
-                end
-            end
-        end
-    end
-
-    pvContainer:SetAlpha(style.alpha)
-    pvContainer:SetSize(style.frameWidth, titleH + #entries * (barH + 1))
+C.GetActiveSettingsPaneId = function()
+    return activeSettingsPaneId
 end
-
-local function RebuildPreview()
-    if not pvContainer then return end
-    CreatePreviewBars()
-    UpdatePreview()
+C.GetDisplayPaneIds = function()
+    return DISPLAY_PANE_IDS
 end
-
--- ============================================================================
--- Settings UI
--- ============================================================================
-
-local function BuildSettingsPage(parent, moduleDB)
+C.GetStylePaneIds = function()
+    return STYLE_PANE_IDS
+end
+C.GetPaneLabels = function()
+    return PANE_LABELS
+end
+C.GetPaneTitles = function()
+    return PANE_TITLES
+end
+C.GetBarLayoutForStyle = GetBarLayoutForStyle
+C.GetFontObj = GetFontObj
+C.BuildEntryLabel = BuildEntryLabel
+C.GetAllDefensives = function()
+    return ALL_DEFENSIVES
+end
+C.GetGroupBuffs = function()
+    return GROUP_BUFFS
+end
+C.GetClassColors = function()
+    return CLASS_COLORS
+end
+C.GetDefaultSpellIcon = function()
+    return DEFAULT_SPELL_ICON
+end
+C.GetActiveColor = function()
+    return ACTIVE_COLOR
+end
+C.GetFallbackWhite = function()
+    return FALLBACK_WHITE
+end
+C.GetBarTexture = function()
+    return BAR_TEXTURE
+end
+C.GetDB = function()
+    return db
+end
+C.SetDB = function(moduleDB)
     db = moduleDB
-    EnsurePaneState()
-    DestroyPreview()
-    EndSettingsLivePreview()
-
-    do
-        local anchor = _G["MedaAurasSettingsPanel"]
-        if anchor then
-            pvContainer = CreateFrame("Frame", nil, anchor)
-            pvContainer:SetFrameStrata("HIGH")
-            pvContainer:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 6, 0)
-            pvContainer:SetClampedToScreen(true)
-            pvContainer:SetScript("OnHide", function()
-                if pvTicker then pvTicker:Cancel(); pvTicker = nil end
-            end)
-            MedaAuras:RegisterConfigCleanup(pvContainer)
-
-            local pvBg = pvContainer:CreateTexture(nil, "BACKGROUND")
-            pvBg:SetAllPoints()
-            pvBg:SetTexture(BAR_TEXTURE)
-            pvBg:SetVertexColor(0.08, 0.08, 0.08, 0.85)
-
-            pvStartTime = GetTime()
-            CreatePreviewBars()
-            UpdatePreview()
-
-            pvTicker = C_Timer.NewTicker(0.1, UpdatePreview)
-            if moduleDB.enabled then
-                BeginSettingsLivePreview(anchor)
-                UpdateDisplay()
-            end
-        end
-    end
-
-    local LEFT_X = 0
-    local RIGHT_X = 240
-    local generalHeight
-    local maxPaneHeight = 0
-
-    local function RefreshVisualLayout()
-        if next(paneFrames) then
-            RebuildAllPaneBars()
-            UpdateDisplay()
-        end
-        RebuildPreview()
-    end
-
-    local function RefreshVisualState()
-        if next(paneFrames) then
-            UpdateDisplay()
-        end
-        UpdatePreview()
-    end
-
-    local function ResetPanePositions()
-        moduleDB.panePositions = {}
-        moduleDB._crackedPanePositionMigrated = false
-        EnsurePaneState()
-        for _, paneId in ipairs(DISPLAY_PANE_IDS) do
-            ApplyPanePosition(paneId)
-        end
-        RefreshVisualState()
-    end
-
-    local _, tabs = MedaAuras:CreateConfigTabs(parent, {
-        { id = "general", label = "General" },
-        { id = "all", label = "Everything" },
-        { id = "external", label = "Externals" },
-        { id = "party", label = "Party CDs" },
-        { id = "major", label = "Major" },
-        { id = "personal", label = "Minor" },
-        { id = "buffs", label = "Buffs" },
-    })
-
-    local function BindPreviewTab(tabId, previewId)
-        tabs[tabId]:HookScript("OnShow", function()
-            activeSettingsPaneId = previewId
-            RebuildPreview()
-        end)
-    end
-
-    BindPreviewTab("general", "all")
-    BindPreviewTab("all", "all")
-    BindPreviewTab("external", "external")
-    BindPreviewTab("party", "party")
-    BindPreviewTab("major", "major")
-    BindPreviewTab("personal", "personal")
-    BindPreviewTab("buffs", "buffs")
-
-    do
-        local p = tabs.general
-        local yOff = 0
-
-        local header = MedaUI:CreateSectionHeader(p, "Cracked")
-        header:SetPoint("TOPLEFT", LEFT_X, yOff)
-        yOff = yOff - 45
-
-        local enableCB = MedaUI:CreateCheckbox(p, "Enable Module")
-        enableCB:SetPoint("TOPLEFT", LEFT_X, yOff)
-        enableCB:SetChecked(moduleDB.enabled)
-        enableCB.OnValueChanged = function(_, checked)
-            if checked then
-                MedaAuras:EnableModule(MODULE_NAME)
-            else
-                MedaAuras:DisableModule(MODULE_NAME)
-            end
-            MedaAuras:RefreshSidebarDot(MODULE_NAME)
-            if checked then
-                C_Timer.After(0, function()
-                    local anchor = _G["MedaAurasSettingsPanel"]
-                    BeginSettingsLivePreview(anchor)
-                    RefreshVisualState()
-                end)
-            else
-                EndSettingsLivePreview()
-            end
-        end
-
-        local lockCB = MedaUI:CreateCheckbox(p, "Lock Pane Positions")
-        lockCB:SetPoint("TOPLEFT", RIGHT_X, yOff)
-        lockCB:SetChecked(moduleDB.locked)
-        lockCB.OnValueChanged = function(_, checked)
-            moduleDB.locked = checked
-        end
-        yOff = yOff - 35
-
-        local modeDD = MedaUI:CreateLabeledDropdown(p, "Layout Mode", 200, {
-            { value = "combined", label = "Everything In One Pane" },
-            { value = "split", label = "Split By Category" },
-        })
-        modeDD:SetPoint("TOPLEFT", LEFT_X, yOff)
-        modeDD:SetSelected(moduleDB.paneMode or "combined")
-        modeDD.OnValueChanged = function(_, value)
-            moduleDB.paneMode = value
-            RefreshVisualState()
-        end
-
-        local resetBtn = MedaUI:CreateButton(p, "Reset Pane Positions", 180)
-        resetBtn:SetPoint("TOPLEFT", RIGHT_X, yOff + 16)
-        resetBtn.OnClick = ResetPanePositions
-        yOff = yOff - 58
-
-        local info = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        info:SetPoint("TOPLEFT", LEFT_X, yOff)
-        info:SetTextColor(unpack(MedaUI.Theme.textDim))
-        info:SetText("Linked category tabs inherit the Everything style until you unlink them.")
-        yOff = yOff - 28
-
-        local catHeader = MedaUI:CreateSectionHeader(p, "Tracked Categories")
-        catHeader:SetPoint("TOPLEFT", LEFT_X, yOff)
-        yOff = yOff - 45
-
-        local extCB = MedaUI:CreateCheckbox(p, "Externals")
-        extCB:SetPoint("TOPLEFT", LEFT_X, yOff)
-        extCB:SetChecked(moduleDB.showExternals ~= false)
-        extCB.OnValueChanged = function(_, checked)
-            moduleDB.showExternals = checked
-            RefreshVisualState()
-        end
-
-        local partyCB = MedaUI:CreateCheckbox(p, "Party CDs")
-        partyCB:SetPoint("TOPLEFT", RIGHT_X, yOff)
-        partyCB:SetChecked(moduleDB.showPartyWide ~= false)
-        partyCB.OnValueChanged = function(_, checked)
-            moduleDB.showPartyWide = checked
-            RefreshVisualState()
-        end
-        yOff = yOff - 30
-
-        local majorCB = MedaUI:CreateCheckbox(p, "Major Personals")
-        majorCB:SetPoint("TOPLEFT", LEFT_X, yOff)
-        majorCB:SetChecked(moduleDB.showMajor ~= false)
-        majorCB.OnValueChanged = function(_, checked)
-            moduleDB.showMajor = checked
-            RefreshVisualState()
-        end
-
-        local personalCB = MedaUI:CreateCheckbox(p, "Minor Personals")
-        personalCB:SetPoint("TOPLEFT", RIGHT_X, yOff)
-        personalCB:SetChecked(moduleDB.showPersonal)
-        personalCB.OnValueChanged = function(_, checked)
-            moduleDB.showPersonal = checked
-            RefreshVisualState()
-        end
-        yOff = yOff - 30
-
-        local missingBuffsCB = MedaUI:CreateCheckbox(p, "Show Missing Group Buffs")
-        missingBuffsCB:SetPoint("TOPLEFT", LEFT_X, yOff)
-        missingBuffsCB:SetChecked(moduleDB.showMissingGroupBuffs ~= false)
-        missingBuffsCB.OnValueChanged = function(_, checked)
-            moduleDB.showMissingGroupBuffs = checked
-            RefreshVisualState()
-            RebuildPreview()
-        end
-        yOff = yOff - 45
-
-        local auraHeader = MedaUI:CreateSectionHeader(p, "Aura Tracking")
-        auraHeader:SetPoint("TOPLEFT", LEFT_X, yOff)
-        yOff = yOff - 45
-
-        local fullRescanCB = MedaUI:CreateCheckbox(p, "Force Full Aura Rescan")
-        fullRescanCB:SetPoint("TOPLEFT", LEFT_X, yOff)
-        fullRescanCB:SetChecked(moduleDB.forceFullAuraRescan)
-        fullRescanCB.OnValueChanged = function(_, checked)
-            moduleDB.forceFullAuraRescan = checked
-            if moduleDB.enabled then
-                RefreshAuraWatches()
-            end
-            if moduleDB.enabled and ns.Services.GroupAuraTracker and ns.Services.GroupAuraTracker.RequestFullRescan then
-                ns.Services.GroupAuraTracker:RequestFullRescan()
-            end
-        end
-        yOff = yOff - 45
-
-        local zoneHeader = MedaUI:CreateSectionHeader(p, "Show In")
-        zoneHeader:SetPoint("TOPLEFT", LEFT_X, yOff)
-        yOff = yOff - 45
-
-        local function ZoneCB(label, key, x, y)
-            local cb = MedaUI:CreateCheckbox(p, label)
-            cb:SetPoint("TOPLEFT", x, y)
-            cb:SetChecked(moduleDB[key])
-            cb.OnValueChanged = function(_, checked)
-                moduleDB[key] = checked
-                CheckZoneVisibility()
-            end
-        end
-
-        ZoneCB("Dungeons", "showInDungeon", LEFT_X, yOff)
-        ZoneCB("Raids", "showInRaid", RIGHT_X, yOff)
-        yOff = yOff - 30
-        ZoneCB("Open World", "showInOpenWorld", LEFT_X, yOff)
-        ZoneCB("Arena", "showInArena", RIGHT_X, yOff)
-        yOff = yOff - 30
-        ZoneCB("Battlegrounds", "showInBG", LEFT_X, yOff)
-
-        generalHeight = math.abs(yOff - 80)
-    end
-
-    local function BuildPaneStyleTab(tabId, paneId)
-        local p = tabs[tabId]
-        local yOff = 0
-        local isRefreshing = false
-
-        local function Guard(callback)
-            return function(...)
-                if isRefreshing then
-                    return
-                end
-                callback(...)
-            end
-        end
-
-        local header = MedaUI:CreateSectionHeader(p, PANE_LABELS[paneId] .. " Style")
-        header:SetPoint("TOPLEFT", LEFT_X, yOff)
-        yOff = yOff - 45
-
-        local linkCB
-        local stateLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        stateLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
-
-        if paneId ~= "all" then
-            linkCB = MedaUI:CreateCheckbox(p, "Link To Shared Style")
-            linkCB:SetPoint("TOPLEFT", LEFT_X, yOff)
-            yOff = yOff - 28
-        end
-
-        stateLabel:SetPoint("TOPLEFT", LEFT_X, yOff)
-        yOff = yOff - 24
-
-        local previewButton
-        local previewLabel
-        if paneId == "all" then
-            previewButton = MedaUI:CreateButton(p, "Show Full Catalog Preview", 210)
-            previewButton:SetPoint("TOPLEFT", LEFT_X, yOff)
-
-            previewLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            previewLabel:SetPoint("TOPLEFT", previewButton, "BOTTOMLEFT", 0, -8)
-            previewLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
-            previewLabel:SetWidth(420)
-            previewLabel:SetJustifyH("LEFT")
-            previewLabel:SetText("Populate the live Cracked panes with every defensive and group buff we track.")
-            yOff = yOff - 56
-        end
-
-        local fontDD = MedaUI:CreateLabeledDropdown(p, "Font", 200, MedaUI:GetFontList(), "font")
-        fontDD:SetPoint("TOPLEFT", LEFT_X, yOff)
-        local alphaSlider = MedaUI:CreateLabeledSlider(p, "Opacity", 200, 0.3, 1.0, 0.05)
-        alphaSlider:SetPoint("TOPLEFT", RIGHT_X, yOff)
-        yOff = yOff - 60
-
-        local titleCB = MedaUI:CreateCheckbox(p, "Show Title")
-        titleCB:SetPoint("TOPLEFT", LEFT_X, yOff)
-        local growCB = MedaUI:CreateCheckbox(p, "Grow Upward")
-        growCB:SetPoint("TOPLEFT", RIGHT_X, yOff)
-        yOff = yOff - 30
-
-        local iconsCB = MedaUI:CreateCheckbox(p, "Show Icons")
-        iconsCB:SetPoint("TOPLEFT", LEFT_X, yOff)
-        local namesCB = MedaUI:CreateCheckbox(p, "Show Player Name")
-        namesCB:SetPoint("TOPLEFT", RIGHT_X, yOff)
-        yOff = yOff - 30
-
-        local spellCB = MedaUI:CreateCheckbox(p, "Show Spell Name")
-        spellCB:SetPoint("TOPLEFT", LEFT_X, yOff)
-        yOff = yOff - 45
-
-        local widthSlider = MedaUI:CreateLabeledSlider(p, "Frame Width", 200, 140, 420, 10)
-        widthSlider:SetPoint("TOPLEFT", LEFT_X, yOff)
-        local barSlider = MedaUI:CreateLabeledSlider(p, "Bar Height", 200, 12, 48, 1)
-        barSlider:SetPoint("TOPLEFT", RIGHT_X, yOff)
-        yOff = yOff - 60
-
-        local iconSlider = MedaUI:CreateLabeledSlider(p, "Icon Size", 200, 0, 64, 1)
-        iconSlider:SetPoint("TOPLEFT", LEFT_X, yOff)
-        local titleSlider = MedaUI:CreateLabeledSlider(p, "Title Text Size", 200, 8, 32, 1)
-        titleSlider:SetPoint("TOPLEFT", RIGHT_X, yOff)
-        yOff = yOff - 60
-
-        local nameSlider = MedaUI:CreateLabeledSlider(p, "Name Text Size", 200, 0, 48, 1)
-        nameSlider:SetPoint("TOPLEFT", LEFT_X, yOff)
-        local readySlider = MedaUI:CreateLabeledSlider(p, "Cooldown Text Size", 200, 0, 48, 1)
-        readySlider:SetPoint("TOPLEFT", RIGHT_X, yOff)
-
-        local function RefreshControls()
-            local style = GetPaneStyle(paneId)
-            isRefreshing = true
-
-            if linkCB then
-                linkCB:SetChecked(IsPaneLinked(paneId))
-                stateLabel:SetText(IsPaneLinked(paneId)
-                    and "Linked: edits here update the shared Everything style."
-                    or "Unlinked: this pane now keeps its own style.")
-            else
-                stateLabel:SetText("Editing this tab updates the shared source used by linked panes.")
-            end
-
-            if previewButton then
-                previewButton:SetText(catalogPreviewEnabled and "Hide Full Catalog Preview" or "Show Full Catalog Preview")
-                previewButton:SetEnabled(moduleDB.enabled and next(paneFrames) ~= nil)
-                if previewLabel then
-                    if not moduleDB.enabled then
-                        previewLabel:SetText("Enable Cracked to preview the live frames.")
-                    elseif catalogPreviewEnabled then
-                        previewLabel:SetText("Catalog preview is active in the live Cracked panes. Switch combined/split or restyle tabs to inspect the full tracked set.")
-                    else
-                        previewLabel:SetText("Populate the live Cracked panes with every defensive and group buff we track.")
-                    end
-                end
-            end
-
-            fontDD:SetSelected(style.font or "default")
-            alphaSlider:SetValue(style.alpha or PANE_STYLE_DEFAULTS.alpha)
-            titleCB:SetChecked(style.showTitle ~= false)
-            growCB:SetChecked(style.growUp == true)
-            iconsCB:SetChecked(style.showIcons ~= false)
-            namesCB:SetChecked(style.showPlayerName ~= false)
-            spellCB:SetChecked(style.showSpellName == true)
-            widthSlider:SetValue(style.frameWidth or PANE_STYLE_DEFAULTS.frameWidth)
-            barSlider:SetValue(style.barHeight or PANE_STYLE_DEFAULTS.barHeight)
-            iconSlider:SetValue(style.iconSize or 0)
-            titleSlider:SetValue(style.titleFontSize or 12)
-            nameSlider:SetValue(style.nameFontSize or 0)
-            readySlider:SetValue(style.readyFontSize or 0)
-
-            isRefreshing = false
-        end
-
-        if linkCB then
-            linkCB.OnValueChanged = Guard(function(_, checked)
-                SetPaneLinked(paneId, checked)
-                RefreshControls()
-                RefreshVisualLayout()
-            end)
-        end
-
-        if previewButton then
-            previewButton.OnClick = function()
-                if not moduleDB.enabled then
-                    return
-                end
-                catalogPreviewEnabled = not catalogPreviewEnabled
-                RefreshControls()
-                RefreshVisualState()
-            end
-        end
-
-        fontDD.OnValueChanged = Guard(function(_, value) SetPaneStyleValue(paneId, "font", value); RefreshVisualLayout() end)
-        alphaSlider.OnValueChanged = Guard(function(_, value) SetPaneStyleValue(paneId, "alpha", value); RefreshVisualLayout() end)
-        titleCB.OnValueChanged = Guard(function(_, checked) SetPaneStyleValue(paneId, "showTitle", checked); RefreshVisualLayout() end)
-        growCB.OnValueChanged = Guard(function(_, checked) SetPaneStyleValue(paneId, "growUp", checked); RefreshVisualLayout() end)
-        iconsCB.OnValueChanged = Guard(function(_, checked) SetPaneStyleValue(paneId, "showIcons", checked); RefreshVisualLayout() end)
-        namesCB.OnValueChanged = Guard(function(_, checked) SetPaneStyleValue(paneId, "showPlayerName", checked); RefreshVisualLayout() end)
-        spellCB.OnValueChanged = Guard(function(_, checked) SetPaneStyleValue(paneId, "showSpellName", checked); RefreshVisualLayout() end)
-        widthSlider.OnValueChanged = Guard(function(_, value) SetPaneStyleValue(paneId, "frameWidth", value); RefreshVisualLayout() end)
-        barSlider.OnValueChanged = Guard(function(_, value) SetPaneStyleValue(paneId, "barHeight", value); RefreshVisualLayout() end)
-        iconSlider.OnValueChanged = Guard(function(_, value) SetPaneStyleValue(paneId, "iconSize", value); RefreshVisualLayout() end)
-        titleSlider.OnValueChanged = Guard(function(_, value) SetPaneStyleValue(paneId, "titleFontSize", value); RefreshVisualLayout() end)
-        nameSlider.OnValueChanged = Guard(function(_, value) SetPaneStyleValue(paneId, "nameFontSize", value); RefreshVisualLayout() end)
-        readySlider.OnValueChanged = Guard(function(_, value) SetPaneStyleValue(paneId, "readyFontSize", value); RefreshVisualLayout() end)
-
-        p:HookScript("OnShow", RefreshControls)
-        RefreshControls()
-
-        maxPaneHeight = math.max(maxPaneHeight, math.abs(yOff - 90))
-    end
-
-    BuildPaneStyleTab("all", "all")
-    BuildPaneStyleTab("external", "external")
-    BuildPaneStyleTab("party", "party")
-    BuildPaneStyleTab("major", "major")
-    BuildPaneStyleTab("personal", "personal")
-    BuildPaneStyleTab("buffs", "buffs")
-
-    MedaAuras:SetContentHeight(math.max(generalHeight, maxPaneHeight, 760))
 end
-
--- ============================================================================
--- Register Module
--- ============================================================================
-
-MedaAuras:RegisterModule({
-    name        = MODULE_NAME,
-    title       = "Cracked",
-    version     = MODULE_VERSION,
-    stability   = MODULE_STABILITY,
-    author      = "Medalink",
-    description = "Tracks party defensive cooldowns in M+ and dungeons. "
-               .. "Detects when party members use defensive abilities and "
-               .. "displays cooldown bars with active/CD states, colored by class. "
-               .. "Uses secret laundering to read tainted party spell IDs.",
-    sidebarDesc = "Party defensive cooldown tracker (experimental).",
-    defaults    = MODULE_DEFAULTS,
-    OnInitialize = OnInitialize,
-    OnEnable    = OnEnable,
-    OnDisable   = OnDisable,
-    pages       = {
-        { id = "settings", label = "Settings" },
-    },
-    buildPage   = function(_, parent)
-        BuildSettingsPage(parent, MedaAuras:GetModuleDB(MODULE_NAME))
-        return 760
-    end,
-})

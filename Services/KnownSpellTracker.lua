@@ -13,7 +13,6 @@ local C_Spell = C_Spell
 local C_UnitAuras = C_UnitAuras
 local GetPlayerAuraBySpellID = C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID or nil
 local GetAuraDataBySpellName = C_UnitAuras and C_UnitAuras.GetAuraDataBySpellName or nil
-local issecretvalue = issecretvalue
 
 local KnownSpellTracker = {}
 ns.Services.KnownSpellTracker = KnownSpellTracker
@@ -29,10 +28,10 @@ local function LogDebug(msg)
 end
 
 local function IsValueNonSecret(value)
-    if not issecretvalue or value == nil then
-        return true
+    if ns.IsValueNonSecret then
+        return ns.IsValueNonSecret(value)
     end
-    return not issecretvalue(value)
+    return true
 end
 
 local function ResolveSpellName(spellID, fallback)

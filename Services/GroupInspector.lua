@@ -53,16 +53,26 @@ local INSPECT_INTERVAL = 1.5
 -- Logging helpers
 -- ============================================================================
 
-local function Log(msg)
-    MedaAuras.Log(format("[GroupInspector] %s", msg))
-end
-
 local function LogDebug(msg)
     MedaAuras.LogDebug(format("[GroupInspector] %s", msg))
 end
 
 local function LogWarn(msg)
     MedaAuras.LogWarn(format("[GroupInspector] %s", msg))
+end
+
+local function IsValueNonSecret(value)
+    if ns.IsValueNonSecret then
+        return ns.IsValueNonSecret(value)
+    end
+    return true
+end
+
+local function SafeStr(value)
+    if ns.SafeStr then
+        return ns.SafeStr(value, "<secret>")
+    end
+    return tostring(value)
 end
 
 -- ============================================================================
@@ -175,6 +185,8 @@ local function CacheUnit(unit)
 
     local _, class = UnitClass(unit)
     local name = UnitName(unit)
+    local rawGUID = UnitGUID(unit)
+    local guid = IsValueNonSecret(rawGUID) and rawGUID or nil
     local specID = nil
     local inspected = false
 
@@ -187,24 +199,26 @@ local function CacheUnit(unit)
     end
 
     local existing = cache[unit]
-    if existing and existing.specID and not inspected then
+    local sameUnit = existing and existing.guid ~= nil and guid ~= nil and existing.guid == guid
+    if existing and existing.specID and not inspected and sameUnit then
         specID = existing.specID
         inspected = existing.inspected
     end
 
     cache[unit] = {
         unit      = unit,
+        guid      = guid,
         name      = name or "Unknown",
         class     = class or "UNKNOWN",
         specID    = specID,
         inspected = inspected,
-        talentSpells = existing and existing.talentSpells or {},
-        talentsKnown = existing and existing.talentsKnown or UnitIsUnit(unit, "player"),
+        talentSpells = sameUnit and existing and existing.talentSpells or {},
+        talentsKnown = sameUnit and existing and existing.talentsKnown or UnitIsUnit(unit, "player"),
         timestamp = GetTime(),
     }
 
-    LogDebug(format("Cached %s: %s class=%s specID=%s inspected=%s",
-        unit, name or "?", class or "?", tostring(specID), tostring(inspected)))
+    LogDebug(format("Cached %s: %s class=%s guid=%s specID=%s inspected=%s reused=%s",
+        unit, name or "?", class or "?", SafeStr(guid), tostring(specID), tostring(inspected), tostring(sameUnit)))
 
     return unit
 end
@@ -245,7 +259,8 @@ local function ProcessInspectQueue()
 
     inspectBusy = true
     inspectBusyUnit = unit
-    inspectBusyGUID = UnitGUID(unit)
+    local busyGUID = UnitGUID(unit)
+    inspectBusyGUID = IsValueNonSecret(busyGUID) and busyGUID or nil
     LogDebug(format("Sending NotifyInspect for %s", unit))
 
     local ok, err = pcall(NotifyInspect, unit)
@@ -277,8 +292,12 @@ local function OnInspectReady(guid)
     if not targetUnit and guid ~= nil then
         for unit, entry in pairs(cache) do
             if entry.unit and UnitExists(entry.unit) then
+                local unitGUID = UnitGUID(entry.unit)
                 local okMatch, isMatch = pcall(function()
-                    return UnitGUID(entry.unit) == guid
+                    if not IsValueNonSecret(unitGUID) then
+                        return false
+                    end
+                    return unitGUID == guid
                 end)
                 if okMatch and isMatch then
                     targetUnit = unit
@@ -346,8 +365,17 @@ local function ScanRoster()
         if cacheKey then
             currentUnits[cacheKey] = true
             local entry = cache[cacheKey]
+            local inspectInFlight = false
+            if inspectBusy and inspectBusyUnit and inspectBusyGUID then
+                local okMatch, isMatch = pcall(function()
+                    return cacheKey == inspectBusyUnit or UnitGUID(unit) == inspectBusyGUID
+                end)
+                inspectInFlight = okMatch and isMatch or false
+            elseif inspectBusy and inspectBusyUnit then
+                inspectInFlight = cacheKey == inspectBusyUnit
+            end
             if not entry.inspected and not UnitIsUnit(unit, "player") then
-                if not queuedInspects[cacheKey] then
+                if not queuedInspects[cacheKey] and not inspectInFlight then
                     inspectQueue[#inspectQueue + 1] = { unit = unit }
                     queuedInspects[cacheKey] = true
                     newCount = newCount + 1
@@ -368,10 +396,37 @@ local function ScanRoster()
         end
     end
 
-    Log(format("GROUP_ROSTER_UPDATE: %d new, %d cached, %d left", newCount, cachedCount, leftCount))
+    LogDebug(format("GROUP_ROSTER_UPDATE: %d new, %d cached, %d left", newCount, cachedCount, leftCount))
 
     FireCallbacks()
     ProcessInspectQueue()
+end
+
+local function QueueInspectUnit(unit, forceReinspect)
+    if not unit or not UnitExists(unit) or UnitIsUnit(unit, "player") then
+        return false
+    end
+
+    local cacheKey = CacheUnit(unit)
+    if not cacheKey then
+        return false
+    end
+
+    local entry = cache[cacheKey]
+    if forceReinspect and entry then
+        entry.specID = nil
+        entry.inspected = false
+        entry.talentSpells = {}
+        entry.talentsKnown = false
+    end
+
+    if not queuedInspects[cacheKey] then
+        inspectQueue[#inspectQueue + 1] = { unit = cacheKey }
+        queuedInspects[cacheKey] = true
+    end
+
+    ProcessInspectQueue()
+    return true
 end
 
 -- ============================================================================
@@ -502,6 +557,10 @@ function GroupInspector:RequestRefresh()
     inspectBusyGUID = nil
     pendingProcessAfterCombat = false
     ScanRoster()
+end
+
+function GroupInspector:RequestUnitReinspect(unit)
+    return QueueInspectUnit(unit, true)
 end
 
 function GroupInspector:RequestReinspectAll()

@@ -2,7 +2,7 @@ local _, ns = ...
 
 ns.RemindersData = {
     dataVersion   = 1,
-    lastUpdated   = "2026-03-17",
+    lastUpdated   = "2026-03-24",
 
     sources       = {},
     capabilities  = {},
@@ -29,7 +29,7 @@ S.wowhead = {
     badge = "|cffff8800[W]|r",
     color = { 1.0, 0.53, 0 },
     url   = "wowhead.com",
-    lastFetched = 1773751362,
+    lastFetched = 1774365932,
 }
 
 S.icyveins = {

@@ -48,12 +48,57 @@ local DISPEL_TYPE_META = {
     },
 }
 
+local HUD_META = {
+    dispel = {
+        title = "Key Dispels",
+        settingsPage = "dispelhud",
+        fallbackPoint = {
+            point = "RIGHT",
+            relativePoint = "RIGHT",
+            x = -220,
+            y = 180,
+        },
+    },
+    interrupt = {
+        title = "Key Interrupts",
+        settingsPage = "interrupthud",
+        fallbackPoint = {
+            point = "RIGHT",
+            relativePoint = "RIGHT",
+            x = -220,
+            y = 20,
+        },
+    },
+    boss = {
+        title = "Boss Tips",
+        settingsPage = "bosstipshud",
+        fallbackPoint = {
+            point = "RIGHT",
+            relativePoint = "RIGHT",
+            x = -220,
+            y = -140,
+        },
+    },
+    tricks = {
+        title = "Tips & Tricks",
+        settingsPage = "tipsandtrickshud",
+        fallbackPoint = {
+            point = "RIGHT",
+            relativePoint = "RIGHT",
+            x = -220,
+            y = -300,
+        },
+    },
+}
+
+local HUD_KINDS = { "dispel", "interrupt", "boss", "tricks" }
+
 local HUD_DEFAULTS = {
     dispel = {
         enabled = true,
         showIcons = true,
         locked = false,
-        filterMode = "mine",
+        filterMode = "all",
         font = "default",
         outline = "outline",
         titleSize = 13,
@@ -76,25 +121,38 @@ local HUD_DEFAULTS = {
         expanded = false,
         point = nil,
     },
-}
-
-local FALLBACK_POINT = {
-    dispel = {
-        point = "RIGHT",
-        relativePoint = "RIGHT",
-        x = -220,
-        y = 120,
+    boss = {
+        enabled = true,
+        showIcons = true,
+        locked = false,
+        font = "default",
+        outline = "outline",
+        titleSize = 13,
+        detailSize = 11,
+        iconSize = 18,
+        topX = 5,
+        expanded = false,
+        point = nil,
     },
-    interrupt = {
-        point = "RIGHT",
-        relativePoint = "RIGHT",
-        x = -220,
-        y = -120,
+    tricks = {
+        enabled = true,
+        showIcons = true,
+        locked = false,
+        font = "default",
+        outline = "outline",
+        titleSize = 13,
+        detailSize = 11,
+        iconSize = 18,
+        topX = 5,
+        expanded = false,
+        point = nil,
     },
 }
 
 local FALLBACK_ICON = 136116
 local FALLBACK_INTERRUPT_ICON = 132357
+local FALLBACK_BOSS_ICON = 236344
+local FALLBACK_TRICK_ICON = 134400
 local SECTION_WIDTH = 300
 local SECTION_INSET = 6
 local HEADER_HEIGHT = 22
@@ -105,6 +163,8 @@ local EMPTY_GAP = 6
 local HUD_SETTINGS_PAGES = {
     dispel = "dispelhud",
     interrupt = "interrupthud",
+    boss = "bosstipshud",
+    tricks = "tipsandtrickshud",
 }
 
 local hudRuntime = S.hudRuntime or {
@@ -113,20 +173,25 @@ local hudRuntime = S.hudRuntime or {
     rows = {
         dispel = {},
         interrupt = {},
+        boss = {},
+        tricks = {},
     },
     overflowRows = {
         dispel = {},
         interrupt = {},
+        boss = {},
+        tricks = {},
     },
 }
 S.hudRuntime = hudRuntime
 
 local BuildDispelEntries
 local BuildInterruptEntries
+local BuildBossEntries
+local BuildTrickEntries
 local IsDispelCapability
 local GetProfileForFilter
 local ProfileHasCapability
-local MakeEntryKey
 local GetDangerIcon
 
 local function CopyDefaults(dst, defaults)
@@ -231,6 +296,13 @@ local function ResolveSpellID(spellRef)
     return nil
 end
 
+local function GetDungeonTimerInfo(ctx, instanceCtx)
+    if R.GetDungeonTimerInfo then
+        return R.GetDungeonTimerInfo(ctx, instanceCtx)
+    end
+    return nil
+end
+
 local function GetDispelTypeKey(danger)
     if not danger then return nil end
     if type(danger.dispelType) == "string" and danger.dispelType ~= "" then
@@ -240,6 +312,96 @@ local function GetDispelTypeKey(danger)
         return danger.capability:gsub("^dispel_", ""):lower()
     end
     return nil
+end
+
+local function TrimSummary(value, maxLength)
+    local text = SafeText(value)
+    local limit = maxLength or 96
+    if not text or #text <= limit then
+        return text
+    end
+
+    local trimmed = text:sub(1, math.max(1, limit - 3))
+    trimmed = trimmed:gsub("%s+%S*$", "")
+    return trimmed .. "..."
+end
+
+local function GetBossSortRank(value)
+    local text = SafeText(value)
+    if not text then return 50 end
+
+    local lower = text:lower()
+    if lower:find("1st boss", 1, true) or lower:find("first boss", 1, true) then return 1 end
+    if lower:find("2nd boss", 1, true) or lower:find("second boss", 1, true) then return 2 end
+    if lower:find("3rd boss", 1, true) or lower:find("third boss", 1, true) then return 3 end
+    if lower:find("4th boss", 1, true) or lower:find("fourth boss", 1, true) then return 4 end
+    if lower:find("final boss", 1, true) or lower:find("last boss", 1, true) then return 99 end
+    if lower:find("all bosses", 1, true) then return 90 end
+    if lower:find("boss", 1, true) then return 70 end
+    return 50
+end
+
+local function BuildHUDPageDetail(entry, bodyLimit)
+    local contextParts = {}
+    if SafeText(entry and entry.encounter) then
+        contextParts[#contextParts + 1] = entry.encounter
+    end
+    if SafeText(entry and entry.source) then
+        contextParts[#contextParts + 1] = entry.source
+    elseif SafeText(entry and entry.mob) then
+        contextParts[#contextParts + 1] = entry.mob
+    end
+
+    local summary = TrimSummary(entry and entry.body, bodyLimit or 92)
+    if #contextParts > 0 and summary then
+        return table.concat(contextParts, " • ") .. " - " .. summary
+    end
+    if #contextParts > 0 then
+        return table.concat(contextParts, " • ")
+    end
+    return summary
+end
+
+local function FormatClockDuration(seconds)
+    if type(seconds) ~= "number" or seconds <= 0 then
+        return nil
+    end
+
+    local total = math.floor(seconds + 0.5)
+    return format("%d:%02d", math.floor(total / 60), total % 60)
+end
+
+local function CreateTimerHUDEntry(timerInfo)
+    if not (timerInfo and timerInfo.timeLimitSeconds) then
+        return nil
+    end
+
+    local detail = "Beat timer: " .. (timerInfo.timeLimitLabel or FormatClockDuration(timerInfo.timeLimitSeconds) or tostring(timerInfo.timeLimitSeconds))
+    if timerInfo.source == "api" then
+        detail = detail .. " - live M+ timer"
+    end
+
+    return {
+        title = "Dungeon Timer",
+        detail = detail,
+        detailColor = { 1.0, 0.78, 0.36 },
+        icon = 134376,
+        priority = 1,
+        severityWeight = 3,
+        sortLabel = "dungeon timer",
+    }
+end
+
+local function SplitNormalizedTipText(value, fallbackTitle)
+    local text = SafeText(value)
+    if not text then return fallbackTitle or "Tip", nil, nil end
+
+    local prefix, body = text:match("^(.-):%s*(.+)$")
+    if prefix and body then
+        return prefix, body, prefix
+    end
+
+    return fallbackTitle or "Tip", text, nil
 end
 
 local function BuildPreviewCandidates(data)
@@ -318,11 +480,9 @@ local function BuildPreviewDispelEntries(data, instanceCtx, config)
 
     local profile = GetProfileForFilter()
     local entries = {}
-    local seen = {}
-
-    for _, danger in ipairs(instanceCtx.dangers or {}) do
+    for _, danger in ipairs(instanceCtx.keyDispels or {}) do
         local capabilityID = danger.capability
-        if IsDispelCapability(capabilityID) and not seen[MakeEntryKey(danger)] then
+        if IsDispelCapability(capabilityID) or capabilityID == "offensive_dispel" or capabilityID == "soothe" then
             local capability = data.capabilities and data.capabilities[capabilityID] or nil
             local mineOnly = (config.filterMode or "mine") == "mine"
             if (not mineOnly) or ProfileHasCapability(profile, capability) then
@@ -340,7 +500,6 @@ local function BuildPreviewDispelEntries(data, instanceCtx, config)
                     severityWeight = GetSeverityWeight(danger.severity),
                     sortLabel = (SafeText(danger.mechanic) or ""):lower(),
                 }
-                seen[MakeEntryKey(danger)] = true
             end
         end
     end
@@ -364,33 +523,27 @@ local function BuildPreviewInterruptEntries(data, instanceCtx)
     end
 
     local entries = {}
-    for index, stop in ipairs(instanceCtx.interruptPriority or {}) do
-        local matched = nil
-        for _, danger in ipairs(instanceCtx.dangers or {}) do
-            local sameSpell = SafeText(danger.mechanic) == SafeText(stop.spell)
-                or SafeText(danger.spellName) == SafeText(stop.spell)
-            local sameMob = SafeText(danger.source) == SafeText(stop.mob)
-            if sameSpell and sameMob then
-                matched = danger
-                break
-            end
-        end
-
-        local title = SafeText(stop.spell) or SafeText(matched and matched.mechanic) or "Interrupt"
-        local detail = SafeText(stop.mob) or SafeText(matched and matched.source) or "Unknown Mob"
+    for index, stop in ipairs(instanceCtx.keyInterrupts or {}) do
+        local title = SafeText(stop.spell) or SafeText(stop.spellName) or "Interrupt"
+        local detail = BuildHUDPageDetail({
+            encounter = stop.encounter,
+            source = stop.mob or "Unknown Mob",
+            body = stop.tip,
+        }, 88)
         entries[#entries + 1] = {
             title = title,
             detail = detail,
             detailColor = { 0.85, 0.72, 0.32 },
-            icon = GetDangerIcon(data, matched or {
+            icon = GetDangerIcon(data, {
                 mechanic = title,
-                source = detail,
-                spellID = matched and matched.spellID or nil,
-                capability = matched and matched.capability or "interrupt",
-                type = matched and matched.type or "interrupt",
+                source = stop.mob,
+                spellID = stop.spellID or ResolveSpellID(title),
+                capability = "interrupt",
+                type = "interrupt",
+                icon = stop.icon,
             }, FALLBACK_INTERRUPT_ICON),
             priority = index,
-            severityWeight = GetSeverityWeight((matched and matched.severity) or stop.danger),
+            severityWeight = GetSeverityWeight(stop.danger),
             sortLabel = title:lower(),
         }
     end
@@ -406,6 +559,87 @@ local function BuildPreviewInterruptEntries(data, instanceCtx)
             return a.sortLabel < b.sortLabel
         end
         return (a.detail or "") < (b.detail or "")
+    end)
+
+    return entries
+end
+
+local function BuildPreviewBossEntries(_, _, instanceCtx)
+    local entries = {}
+
+    for index, text in ipairs(instanceCtx and instanceCtx.bossTips or {}) do
+        local title, detail, encounter = SplitNormalizedTipText(text, "Boss Tip")
+        entries[#entries + 1] = {
+            title = title,
+            detail = BuildHUDPageDetail({
+                encounter = encounter,
+                body = detail,
+            }, 104),
+            detailColor = { 1.0, 0.78, 0.36 },
+            icon = FALLBACK_BOSS_ICON,
+            priority = GetBossSortRank(encounter or title) + index,
+            severityWeight = 3,
+            sortLabel = (title or ""):lower(),
+        }
+    end
+
+    table_sort(entries, function(a, b)
+        if a.priority ~= b.priority then
+            return a.priority < b.priority
+        end
+        if a.severityWeight ~= b.severityWeight then
+            return a.severityWeight > b.severityWeight
+        end
+        return a.sortLabel < b.sortLabel
+    end)
+
+    return entries
+end
+
+local function BuildPreviewTrickEntries(_, ctx, instanceCtx)
+    local entries = {}
+    local seen = {}
+
+    if S.db and S.db.showDungeonTimers ~= false then
+        local timerEntry = CreateTimerHUDEntry(GetDungeonTimerInfo(ctx, instanceCtx))
+        if timerEntry then
+            entries[#entries + 1] = timerEntry
+            seen.timer = true
+        end
+    end
+
+    for _, text in ipairs(instanceCtx and instanceCtx.tipsAndTricks or {}) do
+        local title, detail, encounter = SplitNormalizedTipText(text, "Tip")
+        local signature = table.concat({
+            SafeText(title) or "",
+            SafeText(encounter) or "",
+            SafeText(detail) or "",
+        }, "|")
+        if not seen[signature] then
+            entries[#entries + 1] = {
+                title = title,
+                detail = BuildHUDPageDetail({
+                    encounter = encounter,
+                    body = detail,
+                }, 100),
+                detailColor = { 0.85, 0.78, 0.42 },
+                icon = FALLBACK_TRICK_ICON,
+                priority = 2,
+                severityWeight = 2,
+                sortLabel = (title or ""):lower(),
+            }
+            seen[signature] = true
+        end
+    end
+
+    table_sort(entries, function(a, b)
+        if a.priority ~= b.priority then
+            return a.priority < b.priority
+        end
+        if a.severityWeight ~= b.severityWeight then
+            return a.severityWeight > b.severityWeight
+        end
+        return a.sortLabel < b.sortLabel
     end)
 
     return entries
@@ -431,8 +665,12 @@ local function GetPreviewEntries(kind)
                 previewConfig.filterMode = "all"
                 entries = BuildPreviewDispelEntries(data, candidate.instanceCtx, previewConfig)
             end
-        else
+        elseif kind == "interrupt" then
             entries = BuildPreviewInterruptEntries(data, candidate.instanceCtx)
+        elseif kind == "boss" then
+            entries = BuildPreviewBossEntries(data, candidate.ctx, candidate.instanceCtx)
+        else
+            entries = BuildPreviewTrickEntries(data, candidate.ctx, candidate.instanceCtx)
         end
 
         if entries and #entries > 0 then
@@ -441,15 +679,6 @@ local function GetPreviewEntries(kind)
     end
 
     return {}
-end
-
-local function GetToolkitDangers(data, ctx)
-    if not (data and ctx and R.EvaluatePlayerToolkit) then
-        return nil
-    end
-
-    local toolkit = R.EvaluatePlayerToolkit(data, ctx)
-    return toolkit and toolkit.dangers or nil
 end
 
 IsDispelCapability = function(capabilityID)
@@ -483,14 +712,6 @@ ProfileHasCapability = function(profile, capability)
     end
 
     return false
-end
-
-MakeEntryKey = function(danger)
-    return table.concat({
-        SafeText(danger and danger.capability) or "",
-        SafeText(danger and danger.mechanic) or "",
-        SafeText(danger and danger.source) or "",
-    }, "|")
 end
 
 GetDangerIcon = function(data, danger, fallbackIcon)
@@ -533,114 +754,35 @@ GetDangerIcon = function(data, danger, fallbackIcon)
 end
 
 BuildDispelEntries = function(data, ctx, instanceCtx, config)
-    if not (data and ctx and instanceCtx) then
+    if not (data and instanceCtx and config) then
         return {}
     end
 
-    local dangers = GetToolkitDangers(data, ctx)
-    if not dangers then
-        return {}
-    end
-
-    local capabilityPriority = {}
-    for index, capabilityID in ipairs(instanceCtx.dispelPriority or {}) do
-        capabilityPriority[capabilityID] = index
-    end
-
-    local profile = GetProfileForFilter()
-    local entries = {}
-    local seen = {}
-
-    for _, danger in ipairs(dangers) do
-        local capabilityID = danger.capability
-        if IsDispelCapability(capabilityID) and not seen[MakeEntryKey(danger)] then
-            local capability = data.capabilities and data.capabilities[capabilityID] or nil
-            local mineOnly = (config.filterMode or "mine") == "mine"
-            if (not mineOnly) or ProfileHasCapability(profile, capability) then
-                local meta = DISPEL_TYPE_META[capabilityID] or {
-                    label = capability and capability.label or "Dispel",
-                    color = { 1, 1, 1 },
-                }
-
-                entries[#entries + 1] = {
-                    title = SafeText(danger.mechanic) or SafeText(capability and capability.label) or "Tracked Dispel",
-                    detail = meta.label,
-                    detailColor = meta.color,
-                    icon = GetDangerIcon(data, danger, FALLBACK_ICON),
-                    priority = capabilityPriority[capabilityID] or 999,
-                    severityWeight = GetSeverityWeight(danger.severity),
-                    sortLabel = (SafeText(danger.mechanic) or ""):lower(),
-                }
-                seen[MakeEntryKey(danger)] = true
-            end
-        end
-    end
-
-    table.sort(entries, function(a, b)
-        if a.priority ~= b.priority then
-            return a.priority < b.priority
-        end
-        if a.severityWeight ~= b.severityWeight then
-            return a.severityWeight > b.severityWeight
-        end
-        return a.sortLabel < b.sortLabel
-    end)
-
-    return entries
+    return BuildPreviewDispelEntries(data, instanceCtx, config)
 end
 
 BuildInterruptEntries = function(data, ctx, instanceCtx)
-    if not (data and ctx and instanceCtx) then
+    if not (data and instanceCtx) then
         return {}
     end
 
-    local dangers = GetToolkitDangers(data, ctx)
-    if not dangers then
+    return BuildPreviewInterruptEntries(data, instanceCtx)
+end
+
+BuildBossEntries = function(data, ctx, instanceCtx)
+    if not (data and ctx) then
         return {}
     end
 
-    local explicitPriority = {}
-    for index, stop in ipairs(instanceCtx.interruptPriority or {}) do
-        local key = format("%s|%s", SafeText(stop.spell) or "", SafeText(stop.mob) or "")
-        explicitPriority[key] = index
+    return BuildPreviewBossEntries(data, ctx, instanceCtx)
+end
+
+BuildTrickEntries = function(data, ctx, instanceCtx)
+    if not (data and ctx) then
+        return {}
     end
 
-    local entries = {}
-    local seen = {}
-    for _, danger in ipairs(dangers) do
-        local isInterrupt = danger.type == "interrupt" or danger.capability == "interrupt"
-        if isInterrupt and not seen[MakeEntryKey(danger)] then
-            local title = SafeText(danger.mechanic) or "Interrupt"
-            local mob = SafeText(danger.source) or "Unknown Mob"
-            local key = format("%s|%s", title, mob)
-
-            entries[#entries + 1] = {
-                title = title,
-                detail = mob,
-                detailColor = { 0.85, 0.72, 0.32 },
-                icon = GetDangerIcon(data, danger, FALLBACK_INTERRUPT_ICON),
-                priority = explicitPriority[key] or 999,
-                severityWeight = GetSeverityWeight(danger.severity),
-                sortLabel = title:lower(),
-            }
-            seen[MakeEntryKey(danger)] = true
-        end
-    end
-
-    table.sort(entries, function(a, b)
-        if a.priority ~= b.priority then
-            return a.priority < b.priority
-        end
-        if a.severityWeight ~= b.severityWeight then
-            return a.severityWeight > b.severityWeight
-        end
-        if a.sortLabel ~= b.sortLabel then
-            return a.sortLabel < b.sortLabel
-        end
-        return (a.detail or "") < (b.detail or "")
-    end)
-
-    return entries
+    return BuildPreviewTrickEntries(data, ctx, instanceCtx)
 end
 
 local function GetRowHeight(config)
@@ -732,10 +874,7 @@ local function HideExtraRows(kind, fromIndex, poolName)
 end
 
 local function GetSectionTitle(kind)
-    if kind == "dispel" then
-        return "Dispel HUD"
-    end
-    return "Interrupt HUD"
+    return (HUD_META[kind] and HUD_META[kind].title) or "Reminders HUD"
 end
 
 local function EnsureSection(kind)
@@ -759,7 +898,7 @@ local function EnsureSection(kind)
         locked = config.locked or false,
     })
     section:SetFrameStrata("MEDIUM")
-    section:RestorePosition(config.point, FALLBACK_POINT[kind])
+    section:RestorePosition(config.point, HUD_META[kind] and HUD_META[kind].fallbackPoint or nil)
     section.OnMove = function(_, state)
         local db = GetHUDDB(kind)
         if db and state then
@@ -901,61 +1040,61 @@ local function HideHUD(kind)
     end
 end
 
-local function RefreshDispelHUD(data, ctx, instanceCtx)
-    local config = GetHUDDB("dispel")
-    if not config or config.enabled == false then
-        HideHUD("dispel")
-        return
+local function GetEntriesForKind(kind, data, ctx, instanceCtx, config)
+    if kind == "dispel" then
+        return BuildDispelEntries(data, ctx, instanceCtx, config)
     end
-
-    if not instanceCtx then
-        if IsHUDSettingsPreviewActive("dispel") then
-            LayoutEntries("dispel", GetPreviewEntries("dispel"))
-        else
-            HideHUD("dispel")
-        end
-        return
+    if kind == "interrupt" then
+        return BuildInterruptEntries(data, ctx, instanceCtx)
     end
-
-    local entries = BuildDispelEntries(data, ctx, instanceCtx, config)
-
-    local emptyText = nil
-    if #entries == 0 then
-        if (config.filterMode or "mine") == "mine" then
-            emptyText = "No dispels you can handle in this content."
-        else
-            emptyText = "No tracked dispels in this content."
-        end
+    if kind == "boss" then
+        return BuildBossEntries(data, ctx, instanceCtx)
     end
-    LayoutEntries("dispel", entries, emptyText)
+    return BuildTrickEntries(data, ctx, instanceCtx)
 end
 
-local function RefreshInterruptHUD(data, ctx, instanceCtx)
-    local config = GetHUDDB("interrupt")
+local function GetEmptyTextForKind(kind, config)
+    if kind == "dispel" then
+        if (config.filterMode or "all") == "mine" then
+            return "No dispels you can handle in this content."
+        end
+        return "No tracked dispels in this content."
+    end
+    if kind == "interrupt" then
+        return "No tracked interrupts in this content."
+    end
+    if kind == "boss" then
+        return "No boss tips in this content."
+    end
+    return "No extra tricks in this content."
+end
+
+local function RefreshHUD(kind, data, ctx, instanceCtx)
+    local config = GetHUDDB(kind)
     if not config or config.enabled == false then
-        HideHUD("interrupt")
+        HideHUD(kind)
         return
     end
 
     if not instanceCtx then
-        if IsHUDSettingsPreviewActive("interrupt") then
-            LayoutEntries("interrupt", GetPreviewEntries("interrupt"))
+        if IsHUDSettingsPreviewActive(kind) then
+            LayoutEntries(kind, GetPreviewEntries(kind))
         else
-            HideHUD("interrupt")
+            HideHUD(kind)
         end
         return
     end
 
-    local entries = BuildInterruptEntries(data, ctx, instanceCtx)
-
-    local emptyText = (#entries == 0) and "No tracked interrupts in this content." or nil
-    LayoutEntries("interrupt", entries, emptyText)
+    local entries = GetEntriesForKind(kind, data, ctx, instanceCtx, config)
+    local emptyText = (#entries == 0) and GetEmptyTextForKind(kind, config) or nil
+    LayoutEntries(kind, entries, emptyText)
 end
 
 function R.RefreshHUDs()
     if not S.isEnabled then
-        HideHUD("dispel")
-        HideHUD("interrupt")
+        for _, kind in ipairs(HUD_KINDS) do
+            HideHUD(kind)
+        end
         return
     end
 
@@ -966,13 +1105,15 @@ function R.RefreshHUDs()
     EnsureHUDDB(S.db)
 
     local data, ctx, instanceCtx = GetContextData()
-    RefreshDispelHUD(data, ctx, instanceCtx)
-    RefreshInterruptHUD(data, ctx, instanceCtx)
+    for _, kind in ipairs(HUD_KINDS) do
+        RefreshHUD(kind, data, ctx, instanceCtx)
+    end
 end
 
 function R.HideHUDs()
-    HideHUD("dispel")
-    HideHUD("interrupt")
+    for _, kind in ipairs(HUD_KINDS) do
+        HideHUD(kind)
+    end
 end
 
 function R.EnsureHUDDB(moduleDB)
@@ -988,7 +1129,7 @@ function R.ResetHUDPosition(kind)
 
     config.point = nil
     if section then
-        section:RestorePosition(nil, FALLBACK_POINT[kind])
+        section:RestorePosition(nil, HUD_META[kind] and HUD_META[kind].fallbackPoint or nil)
     end
 end
 
@@ -1002,7 +1143,7 @@ local function BuildSpecificHUDTab(parent, kind)
     local RIGHT_X = 260
     local yOff = 0
 
-    local title = kind == "dispel" and "Dispel HUD" or "Interrupt HUD"
+    local title = GetSectionTitle(kind)
     local header = MedaUI:CreateSectionHeader(parent, title)
     header:SetPoint("TOPLEFT", LEFT_X, yOff)
     yOff = yOff - 44
@@ -1043,13 +1184,13 @@ local function BuildSpecificHUDTab(parent, kind)
 
     if kind == "dispel" then
         local filterDd = MedaUI:CreateLabeledDropdown(parent, "Filter", 200, {
-            { value = "mine", label = "Dispellable By Me" },
-            { value = "all", label = "Show All Dispels" },
+            { value = "all", label = "Show Group Dispels" },
+            { value = "mine", label = "Only Mine" },
         })
         filterDd:SetPoint("TOPLEFT", RIGHT_X, yOff + 8)
-        filterDd:SetSelected(config.filterMode or "mine")
+        filterDd:SetSelected(config.filterMode or "all")
         filterDd.OnValueChanged = function(_, value)
-            config.filterMode = value or "mine"
+            config.filterMode = value or "all"
             R.RefreshHUDs()
         end
     end
@@ -1110,7 +1251,7 @@ local function BuildSpecificHUDTab(parent, kind)
     end
     yOff = yOff - 62
 
-    local resetLabel = kind == "dispel" and "Reset Dispel HUD" or "Reset Interrupt HUD"
+    local resetLabel = "Reset " .. GetSectionTitle(kind)
     local resetBtn = MedaUI:CreateButton(parent, resetLabel, 160)
     resetBtn:SetPoint("TOPLEFT", LEFT_X, yOff)
     resetBtn.OnClick = function()

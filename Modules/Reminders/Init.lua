@@ -920,6 +920,12 @@ local function BuildTrackingPage(parent, moduleDB)
     affCb:SetChecked(S.db.showAffixTips ~= false)
     affCb.OnValueChanged = function(_, val) S.db.showAffixTips = val; RunPipeline(false) end
     affCb:SetPoint("TOPLEFT", RIGHT_X, yOff)
+    yOff = yOff - 28
+
+    local timerCb = MedaUI:CreateCheckbox(parent, "Show dungeon timers")
+    timerCb:SetChecked(S.db.showDungeonTimers ~= false)
+    timerCb.OnValueChanged = function(_, val) S.db.showDungeonTimers = val; RunPipeline(false) end
+    timerCb:SetPoint("TOPLEFT", LEFT_X + 16, yOff)
 
     return 500
 end
@@ -1088,7 +1094,10 @@ local function ShouldAutoPreviewSettingsPage()
 end
 
 local function IsHUDSettingsPage(pageName)
-    return pageName == "dispelhud" or pageName == "interrupthud"
+    return pageName == "dispelhud"
+        or pageName == "interrupthud"
+        or pageName == "bosstipshud"
+        or pageName == "tipsandtrickshud"
 end
 
 local function RefreshSettingsPreview(pageName)
@@ -1119,6 +1128,10 @@ function R.IsHUDSettingsPreviewActive(kind)
         return activePageId == "dispelhud"
     elseif kind == "interrupt" then
         return activePageId == "interrupthud"
+    elseif kind == "boss" then
+        return activePageId == "bosstipshud"
+    elseif kind == "tricks" then
+        return activePageId == "tipsandtrickshud"
     end
 
     return false
@@ -1137,6 +1150,10 @@ local function BuildPage(pageName, parent)
         height = R.BuildHUDSettingsTab(parent, moduleDB, "dispel")
     elseif pageName == "interrupthud" and R.BuildHUDSettingsTab then
         height = R.BuildHUDSettingsTab(parent, moduleDB, "interrupt")
+    elseif pageName == "bosstipshud" and R.BuildHUDSettingsTab then
+        height = R.BuildHUDSettingsTab(parent, moduleDB, "boss")
+    elseif pageName == "tipsandtrickshud" and R.BuildHUDSettingsTab then
+        height = R.BuildHUDSettingsTab(parent, moduleDB, "tricks")
     end
     RefreshSettingsPreview(pageName)
     return height
@@ -1232,12 +1249,13 @@ local MODULE_DEFAULTS = {
 
     showInterrupts = true,
     showAffixTips  = true,
+    showDungeonTimers = true,
     huds = {
         dispel = {
             enabled = true,
             showIcons = true,
             locked = false,
-            filterMode = "mine",
+            filterMode = "all",
             font = "default",
             outline = "outline",
             titleSize = 13,
@@ -1260,6 +1278,32 @@ local MODULE_DEFAULTS = {
             expanded = false,
             point = nil,
         },
+        boss = {
+            enabled = true,
+            showIcons = true,
+            locked = false,
+            font = "default",
+            outline = "outline",
+            titleSize = 13,
+            detailSize = 11,
+            iconSize = 18,
+            topX = 5,
+            expanded = false,
+            point = nil,
+        },
+        tricks = {
+            enabled = true,
+            showIcons = true,
+            locked = false,
+            font = "default",
+            outline = "outline",
+            titleSize = 13,
+            detailSize = 11,
+            iconSize = 18,
+            topX = 5,
+            expanded = false,
+            point = nil,
+        },
     },
 }
 
@@ -1271,6 +1315,7 @@ MedaAuras:RegisterModule({
     author        = "Medalink",
     description   = "Data-driven group composition checker and dungeon prep assistant. "
                  .. "Shows dispel coverage, utility gaps, interrupt priorities, affix tips, "
+                 .. "dungeon timers, "
                  .. "full build recommendations (talents, stats, gear, enchants, consumables), "
                  .. "and a pre-key prep checklist for dungeons, delves, and more.",
     sidebarDesc   = "Pre-key prep checklist with dispel coverage, utility gaps, and build tips.",
@@ -1282,8 +1327,10 @@ MedaAuras:RegisterModule({
         { id = "tracking", label = "Tracking" },
         { id = "sources", label = "Sources" },
         { id = "appearance", label = "Appearance" },
-        { id = "dispelhud", label = "Dispel HUD" },
-        { id = "interrupthud", label = "Interrupt HUD" },
+        { id = "dispelhud", label = "Key Dispels" },
+        { id = "interrupthud", label = "Key Interrupts" },
+        { id = "bosstipshud", label = "Boss Tips" },
+        { id = "tipsandtrickshud", label = "Tips & Tricks" },
     },
     pageHeights   = {
         tracking = 500,
@@ -1291,6 +1338,8 @@ MedaAuras:RegisterModule({
         appearance = 500,
         dispelhud = 720,
         interrupthud = 720,
+        bosstipshud = 720,
+        tipsandtrickshud = 720,
     },
     buildPage     = BuildPage,
     onPageCacheRestore = function(pageName)

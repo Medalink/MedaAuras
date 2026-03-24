@@ -39,6 +39,7 @@ local S = R.state or {
     prepRows = {},
     prepHeaders = {},
     currentAffixes = nil,
+    challengeMapTimerCache = nil,
     playerRows = {},
     playerHeaders = {},
     playerToolkit = nil,
@@ -273,6 +274,141 @@ local function RefreshAffixes()
             LogDebug(format("Current affixes: %s", table.concat(S.currentAffixes, ", ")))
         end
     end
+end
+
+local function NormalizeDurationSeconds(value)
+    if type(value) ~= "number" or value <= 0 then
+        return nil
+    end
+
+    if value > 100000 then
+        return math.floor((value / 1000) + 0.5)
+    end
+
+    return math.floor(value + 0.5)
+end
+
+local function NormalizeDungeonName(value)
+    if type(value) ~= "string" or value == "" then
+        return nil
+    end
+
+    local text = value:lower()
+    text = text:gsub("%s+%-%-.*$", "")
+    text = text:gsub("[^%w%s]", " ")
+    text = text:gsub("%s+", " ")
+    text = text:match("^%s*(.-)%s*$")
+    return text ~= "" and text or nil
+end
+
+local function BuildChallengeMapTimerCache()
+    if S.challengeMapTimerCache then
+        return S.challengeMapTimerCache
+    end
+
+    local cache = {}
+    if not (C_ChallengeMode and C_ChallengeMode.GetMapTable and C_ChallengeMode.GetMapUIInfo) then
+        S.challengeMapTimerCache = cache
+        return cache
+    end
+
+    local mapIDs = C_ChallengeMode.GetMapTable()
+    if type(mapIDs) ~= "table" then
+        S.challengeMapTimerCache = cache
+        return cache
+    end
+
+    for _, mapChallengeModeID in ipairs(mapIDs) do
+        local ok, name, resolvedID, timeLimit = pcall(C_ChallengeMode.GetMapUIInfo, mapChallengeModeID)
+        local seconds = NormalizeDurationSeconds(timeLimit)
+        local normalized = NormalizeDungeonName(name)
+        if ok and normalized and seconds then
+            cache[normalized] = {
+                name = name,
+                mapChallengeModeID = resolvedID or mapChallengeModeID,
+                timeLimitSeconds = seconds,
+                source = "api",
+            }
+        end
+    end
+
+    S.challengeMapTimerCache = cache
+    return cache
+end
+
+local function GetDungeonDataTimerInfo(instanceCtx)
+    if not instanceCtx then
+        return nil
+    end
+
+    local timer = instanceCtx.timer
+    if type(timer) == "table" then
+        local seconds = NormalizeDurationSeconds(timer.seconds or timer.timeLimitSeconds or timer.timeLimit)
+        if seconds then
+            return {
+                name = instanceCtx.name,
+                timeLimitSeconds = seconds,
+                timeLimitLabel = timer.label,
+                source = timer.source or "data",
+                challengeMapID = timer.challengeMapID or timer.challengeMapId or timer.challenge_map_id,
+            }
+        end
+    end
+
+    local candidates = {
+        instanceCtx.timeLimitSeconds,
+        instanceCtx.timerSeconds,
+        instanceCtx.timeLimit,
+        instanceCtx.mythicPlusTimer,
+        instanceCtx.mythicPlusTimeLimit,
+        instanceCtx.meta and instanceCtx.meta.timeLimitSeconds,
+        instanceCtx.meta and instanceCtx.meta.timerSeconds,
+    }
+
+    for _, candidate in ipairs(candidates) do
+        local seconds = NormalizeDurationSeconds(candidate)
+        if seconds then
+            return {
+                name = instanceCtx.name,
+                timeLimitSeconds = seconds,
+                timeLimitLabel = instanceCtx.timeLimitLabel or (instanceCtx.meta and instanceCtx.meta.timeLimitLabel),
+                source = "data",
+                challengeMapID = instanceCtx.challengeMapID
+                    or instanceCtx.challengeMapId
+                    or (instanceCtx.meta and (instanceCtx.meta.challengeModeID or instanceCtx.meta.challengeMapID)),
+            }
+        end
+    end
+
+    return nil
+end
+
+local function GetDungeonTimerInfo(ctx, instanceCtx)
+    if not ctx or ctx.instanceType ~= "party" then
+        return nil
+    end
+
+    local timerInfo = GetDungeonDataTimerInfo(instanceCtx)
+    if timerInfo then
+        return timerInfo
+    end
+
+    local cache = BuildChallengeMapTimerCache()
+    local candidates = {
+        instanceCtx and instanceCtx.name,
+        instanceCtx and instanceCtx.meta and instanceCtx.meta.clientMapName,
+        ctx.instanceName,
+        instanceCtx and instanceCtx.header,
+    }
+
+    for _, candidate in ipairs(candidates) do
+        local normalized = NormalizeDungeonName(candidate)
+        if normalized and cache[normalized] then
+            return cache[normalized]
+        end
+    end
+
+    return nil
 end
 
 local function TriggerMatches(trigger, ctx)
@@ -2585,6 +2721,7 @@ R.GetContextKey = GetContextKey
 R.ResolveDungeonByName = ResolveDungeonByName
 R.GetCurrentContext = GetCurrentContext
 R.RefreshAffixes = RefreshAffixes
+R.GetDungeonTimerInfo = GetDungeonTimerInfo
 R.ResolveConditionKey = ResolveConditionKey
 R.MergeOutput = MergeOutput
 R.CheckPersonalReminder = CheckPersonalReminder

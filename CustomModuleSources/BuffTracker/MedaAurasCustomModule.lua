@@ -1,25 +1,40 @@
 local MedaUI = LibStub("MedaUI-2.0")
 
+local C_CooldownViewer = _G and _G.C_CooldownViewer or nil
+local C_DelvesUI = _G and _G.C_DelvesUI or nil
+local C_PartyInfo = _G and _G.C_PartyInfo or nil
+local C_Timer = C_Timer
 local C_Spell = C_Spell
 local C_UnitAuras = C_UnitAuras
+local AuraUtil = AuraUtil
 local CreateFrame = CreateFrame
 local GetTime = GetTime
+local InCombatLockdown = InCombatLockdown
 local STANDARD_TEXT_FONT = STANDARD_TEXT_FONT
 local UIParent = UIParent
 local UnitExists = UnitExists
+local UnitBuff = UnitBuff
+local UnitInPartyIsAI = _G and _G.UnitInPartyIsAI or nil
+local UnitName = UnitName
 local format = format
 local ipairs = ipairs
 local math_floor = math.floor
 local math_max = math.max
 local math_min = math.min
+local pairs = pairs
+local strfind = string.find
 local tonumber = tonumber
 local tostring = tostring
 local unpack = unpack or table.unpack
 local wipe = wipe
+local GetAuraDataByAuraInstanceID = C_UnitAuras and C_UnitAuras.GetAuraDataByAuraInstanceID or nil
+local GetAuraDataByIndex = C_UnitAuras and C_UnitAuras.GetAuraDataByIndex or nil
+local GetAuraDataBySpellName = C_UnitAuras and C_UnitAuras.GetAuraDataBySpellName or nil
+local GetPlayerAuraBySpellID = C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID or nil
 
 local MODULE_ID = "padding"
 local MODULE_NAME = "Padding"
-local MODULE_VERSION = "0.8"
+local MODULE_VERSION = "0.25"
 local MODULE_AUTHOR = "Medalink"
 local MODULE_DESCRIPTION = "Shows one draggable icon per configured player buff with countdown timers."
 
@@ -30,6 +45,34 @@ local SUCCESS_COLOR = { 0.3, 0.85, 0.3 }
 local WARNING_COLOR = { 1.0, 0.7, 0.2 }
 local ERROR_COLOR = { 1.0, 0.35, 0.35 }
 local AURA_WATCH_KEY = "PaddingPlayerBuffs"
+local PROBE_AURA_ID = 1249975
+local PROBE_NAME = "Vampiric Revitalization"
+local PROBE_SYNTHETIC_DURATION = 15
+local PROBE_MAX_STACKS = 4
+local PROBE_VERBOSE_LOGS = false
+local PROBE_PARTY_ACTIVITY_DEBOUNCE = 0.35
+local PROBE_PARTY_ACTIVITY_GRACE = 0.5
+local PROBE_PARTY_ACTIVITY_SPELLS = {
+    [1250162] = "fumes_a", -- Crimson Vial Fumes
+    [1250741] = "fumes_b", -- Crimson Vial Fumes
+}
+local PROBE_PARTY_SPELLS = {
+    [1249953] = { name = "Vampiric Reaping" },
+    [1249956] = { name = "Vampiric Reaping" },
+    [1249969] = { name = "Reaped Orb" },
+    [1250821] = { name = "Vampiric Reaping" },
+    [1285815] = { name = "Vampiric Reaping" },
+    [1285818] = { name = "Vampiric Reaping" },
+    [1285821] = { name = "Vampiric Reaping" },
+    [1285825] = { name = "Vampiric Reaping" },
+    [1290656] = { name = "Vampiric Reaping" },
+}
+local BLIZZARD_BUFF_VIEWERS = {
+    "BuffIconCooldownViewer",
+    "BuffBarCooldownViewer",
+    "EssentialCooldownViewer",
+    "UtilityCooldownViewer",
+}
 
 local state = {
     db = nil,
@@ -39,11 +82,30 @@ local state = {
     runtimeDisplays = {},
     trackedSpells = {},
     trackedLookup = {},
+    heldAuras = {},
+    probeAuraInstanceIDs = {},
+    partySpellHandle = nil,
+    probePartySourceName = nil,
+    probePartySourceUnit = nil,
+    probePartyStartedAt = 0,
+    probePartyLastActivityAt = 0,
+    probePartyLastSpellID = nil,
+    probePartySeenActivitySpells = {},
+    probePartyPreviousSeenActivitySpells = {},
+    probePartyPreviousProcID = 0,
+    probePartyPreviousStartedAt = 0,
+    probePartyProcTimeline = {},
+    probePartyStartStacks = 0,
+    probePartyProcID = 0,
     eventFrame = nil,
     elapsed = 0,
+    probeElapsed = 0,
+    probeAuraSignature = nil,
 }
 
 local IsSettingsPreviewVisible
+local SnapshotProbeAura
+local RefreshRuntimeDisplay
 
 local MODULE_DEFAULTS = {
     enabled = false,
@@ -152,6 +214,16 @@ local function RefreshConfiguredSpells(db)
     db.spellIds = ids
     db.spellIdsText = BuildSpellText(ids)
     state.trackedSpells, state.trackedLookup = BuildSpellEntries(ids)
+
+    for spellId in pairs(state.heldAuras) do
+        if not state.trackedLookup[spellId] then
+            state.heldAuras[spellId] = nil
+        end
+    end
+
+    if not state.trackedLookup[PROBE_AURA_ID] then
+        wipe(state.probeAuraInstanceIDs)
+    end
 end
 
 local function FormatRemaining(seconds)
@@ -173,13 +245,968 @@ local function FormatRemaining(seconds)
     return format("%.1f", seconds)
 end
 
-local function GetAuraTracker()
-    return MedaAuras and MedaAuras.ns and MedaAuras.ns.Services and MedaAuras.ns.Services.GroupAuraTracker or nil
+local function GetKnownSpellTracker()
+    return MedaAuras and MedaAuras.ns and MedaAuras.ns.Services and MedaAuras.ns.Services.KnownSpellTracker or nil
+end
+
+local function GetPartySpellWatcher()
+    return MedaAuras and MedaAuras.ns and MedaAuras.ns.Services and MedaAuras.ns.Services.PartySpellWatcher or nil
+end
+
+local function LogDebug(msg)
+    if MedaAuras and MedaAuras.LogDebug then
+        MedaAuras.LogDebug(format("[Padding] %s", msg))
+    end
+end
+
+local function SafeEquals(left, right)
+    if left == nil or right == nil then
+        return false
+    end
+
+    local ok, equal = pcall(function()
+        return left == right
+    end)
+    return ok and equal or false
+end
+
+local function NormalizeAuraInfo(aura, fallbackIcon)
+    if type(aura) ~= "table" then
+        return nil
+    end
+
+    return {
+        icon = aura.icon or aura.iconID or fallbackIcon,
+        duration = aura.duration,
+        expirationTime = aura.expirationTime,
+        applications = aura.applications or aura.stackCount or aura.count or aura.charges,
+    }
+end
+
+local function GetAuraSpellID(aura)
+    if type(aura) ~= "table" then
+        return nil
+    end
+
+    return tonumber(aura.spellId or aura.spellID)
+end
+
+local function GetAuraInstanceID(aura)
+    if type(aura) ~= "table" then
+        return nil
+    end
+
+    return tonumber(aura.auraInstanceID)
+end
+
+local function GetAuraApplicationCount(aura)
+    if type(aura) ~= "table" then
+        return nil
+    end
+
+    return tonumber(aura.applications)
+        or tonumber(aura.stackCount)
+        or tonumber(aura.count)
+        or tonumber(aura.charges)
+end
+
+local function IsProbeAuraInfo(aura)
+    if type(aura) ~= "table" then
+        return false
+    end
+
+    local spellId = GetAuraSpellID(aura)
+    if spellId and SafeEquals(spellId, PROBE_AURA_ID) then
+        return true
+    end
+
+    return SafeEquals(aura.name, PROBE_NAME)
+end
+
+local function NormalizeCooldownViewerInfo(info, fallbackIcon)
+    if type(info) ~= "table" then
+        return nil
+    end
+
+    local duration = tonumber(info.duration) or nil
+    local startTime = tonumber(info.startTime) or nil
+    local expirationTime = nil
+    if duration and duration > 0 and startTime then
+        expirationTime = startTime + duration
+    end
+
+    return {
+        icon = info.iconFileID or info.icon or fallbackIcon,
+        duration = duration,
+        expirationTime = expirationTime,
+        applications = tonumber(info.charges) or tonumber(info.stackCount) or tonumber(info.count) or 0,
+    }
+end
+
+local function CopyAuraInfo(aura)
+    if type(aura) ~= "table" then
+        return nil
+    end
+
+    return {
+        icon = aura.icon,
+        duration = aura.duration,
+        expirationTime = aura.expirationTime,
+        applications = aura.applications,
+        syntheticHold = aura.syntheticHold,
+    }
+end
+
+local function GetHeldAura(spellId)
+    local heldAura = state.heldAuras[spellId]
+    if type(heldAura) ~= "table" then
+        return nil
+    end
+
+    local expirationTime = tonumber(heldAura.expirationTime) or 0
+    if expirationTime > 0 and expirationTime <= GetTime() then
+        state.heldAuras[spellId] = nil
+        return nil
+    end
+
+    return CopyAuraInfo(heldAura)
+end
+
+local function AuraMatchesEntry(aura, entry)
+    if type(aura) ~= "table" or not entry then
+        return false
+    end
+
+    if aura.name and entry.name and SafeEquals(aura.name, entry.name) then
+        return true
+    end
+
+    local auraIcon = aura.icon or aura.iconID
+    return auraIcon and entry.icon and SafeEquals(auraIcon, entry.icon) or false
+end
+
+local function BuildLegacyAuraInfo(index, entry)
+    if not UnitBuff then
+        return nil
+    end
+
+    local ok, name, icon, count, _, duration, expirationTime = pcall(UnitBuff, "player", index, "HELPFUL")
+    if not ok or not name then
+        return nil
+    end
+
+    if not SafeEquals(name, entry.name) and not (icon and entry.icon and SafeEquals(icon, entry.icon)) then
+        return nil
+    end
+
+    return {
+        icon = icon or entry.icon,
+        duration = duration,
+        expirationTime = expirationTime,
+        applications = count,
+    }
+end
+
+local function ShouldProbeAura()
+    return state.trackedLookup[PROBE_AURA_ID] ~= nil
+end
+
+local function GetCooldownViewerSpellID(child, info)
+    if type(info) == "table" then
+        local overrideSpellID = tonumber(info.overrideSpellID)
+        if overrideSpellID and overrideSpellID > 0 then
+            return overrideSpellID
+        end
+
+        local spellID = tonumber(info.spellID)
+        if spellID and spellID > 0 then
+            return spellID
+        end
+    end
+
+    if child and child.spellID then
+        local spellID = tonumber(child.spellID)
+        if spellID and spellID > 0 then
+            return spellID
+        end
+    end
+
+    if child and child.GetSpellID and type(child.GetSpellID) == "function" then
+        local ok, spellID = pcall(child.GetSpellID, child)
+        spellID = ok and tonumber(spellID) or nil
+        if spellID and spellID > 0 then
+            return spellID
+        end
+    end
+
+    return nil
+end
+
+local function GetCooldownViewerInfo(child)
+    if not child or not C_CooldownViewer or not C_CooldownViewer.GetCooldownViewerCooldownInfo then
+        return nil
+    end
+
+    local cooldownID = child.cooldownID or (child.cooldownInfo and child.cooldownInfo.cooldownID)
+    if not cooldownID then
+        return nil
+    end
+
+    local ok, info = pcall(C_CooldownViewer.GetCooldownViewerCooldownInfo, cooldownID)
+    if ok then
+        return info
+    end
+
+    return nil
+end
+
+local function CollectCooldownViewerAuras(parent, depth, auraBySpellId)
+    if not parent or depth > 4 then
+        return
+    end
+
+    local ok, children = pcall(function()
+        return { parent:GetChildren() }
+    end)
+    if not ok or not children then
+        return
+    end
+
+    for _, child in ipairs(children) do
+        local info = GetCooldownViewerInfo(child)
+        local spellID = GetCooldownViewerSpellID(child, info)
+        if spellID and not auraBySpellId[spellID] then
+            auraBySpellId[spellID] = NormalizeCooldownViewerInfo(info, child.icon and child.icon.GetTexture and child.icon:GetTexture() or nil)
+        end
+
+        CollectCooldownViewerAuras(child, depth + 1, auraBySpellId)
+    end
+end
+
+local function GetCooldownViewerAuraMap()
+    local auraBySpellId = {}
+    if not C_CooldownViewer then
+        return auraBySpellId
+    end
+
+    for _, viewerName in ipairs(BLIZZARD_BUFF_VIEWERS) do
+        local viewer = _G[viewerName]
+        if viewer then
+            CollectCooldownViewerAuras(viewer, 0, auraBySpellId)
+        end
+    end
+
+    return auraBySpellId
+end
+
+local function SetHeldAura(spellId, aura, reason, syntheticHold)
+    local entry = state.trackedLookup[spellId]
+    if not entry then
+        return
+    end
+
+    local now = GetTime()
+    local heldAura = state.heldAuras[spellId] or {}
+    local normalizedAura = NormalizeAuraInfo(aura, entry.icon) or {}
+    local duration = tonumber(normalizedAura.duration) or tonumber(heldAura.duration) or PROBE_SYNTHETIC_DURATION
+    local expirationTime = tonumber(normalizedAura.expirationTime) or (now + duration)
+    local applications = GetAuraApplicationCount(normalizedAura)
+        or GetAuraApplicationCount(aura)
+        or tonumber(heldAura.applications)
+        or 1
+
+    heldAura.icon = normalizedAura.icon or heldAura.icon or entry.icon
+    heldAura.duration = duration
+    heldAura.expirationTime = expirationTime
+    heldAura.applications = math_max(applications, 1)
+    heldAura.syntheticHold = syntheticHold ~= false
+    state.heldAuras[spellId] = heldAura
+    LogDebug(format(
+        "SyntheticHold reason=%s spell=%s duration=%s exp=%s stacks=%s",
+        tostring(reason),
+        tostring(spellId),
+        tostring(heldAura.duration),
+        tostring(heldAura.expirationTime),
+        tostring(heldAura.applications)
+    ))
+end
+
+local function SetSyntheticHeldAura(spellId, duration, applications, reason)
+    SetHeldAura(spellId, {
+        duration = duration,
+        expirationTime = GetTime() + duration,
+        applications = applications,
+    }, reason, true)
+end
+
+local function GetSyntheticStackCount(spellId)
+    local heldAura = GetHeldAura(spellId)
+    if heldAura and heldAura.expirationTime and heldAura.expirationTime > GetTime() then
+        return tonumber(heldAura.applications) or 0
+    end
+    return 0
+end
+
+local function HandleProbeAuraInfo(aura, reason)
+    if not ShouldProbeAura() or not IsProbeAuraInfo(aura) then
+        return false
+    end
+
+    local auraInstanceID = GetAuraInstanceID(aura)
+    if auraInstanceID then
+        state.probeAuraInstanceIDs[auraInstanceID] = true
+    end
+
+    LogDebug(format(
+        "ProbeAuraUpdate[%s] instance=%s stacks=%s dur=%s exp=%s",
+        tostring(reason),
+        tostring(auraInstanceID),
+        tostring(GetAuraApplicationCount(aura) or 0),
+        tostring(aura.duration),
+        tostring(aura.expirationTime)
+    ))
+
+    SetHeldAura(PROBE_AURA_ID, aura, reason, true)
+    SnapshotProbeAura(reason, true)
+    return true
+end
+
+local function HandleProbeAuraUpdateInfo(updateInfo)
+    if not ShouldProbeAura() or type(updateInfo) ~= "table" then
+        return
+    end
+
+    if type(updateInfo.addedAuras) == "table" then
+        for _, aura in ipairs(updateInfo.addedAuras) do
+            HandleProbeAuraInfo(aura, "UNIT_AURA:add")
+        end
+    end
+
+    if GetAuraDataByAuraInstanceID and type(updateInfo.updatedAuraInstanceIDs) == "table" then
+        for _, auraInstanceID in ipairs(updateInfo.updatedAuraInstanceIDs) do
+            local ok, aura = pcall(GetAuraDataByAuraInstanceID, "player", auraInstanceID)
+            if ok and aura then
+                HandleProbeAuraInfo(aura, "UNIT_AURA:update")
+            end
+        end
+    end
+
+    if type(updateInfo.removedAuraInstanceIDs) == "table" then
+        for _, auraInstanceID in ipairs(updateInfo.removedAuraInstanceIDs) do
+            if state.probeAuraInstanceIDs[auraInstanceID] then
+                if InCombatLockdown and InCombatLockdown() then
+                    LogDebug(format("ProbeAuraUpdate[UNIT_AURA:remove] ignored in-combat instance=%s", tostring(auraInstanceID)))
+                    SnapshotProbeAura("UNIT_AURA:remove-ignored", true)
+                    return
+                end
+
+                state.probeAuraInstanceIDs[auraInstanceID] = nil
+                state.heldAuras[PROBE_AURA_ID] = nil
+                state.probePartySourceName = nil
+                state.probePartySourceUnit = nil
+                state.probePartyStartedAt = 0
+                state.probePartyLastActivityAt = 0
+                state.probePartyLastSpellID = nil
+                wipe(state.probePartySeenActivitySpells)
+                LogDebug(format("ProbeAuraUpdate[UNIT_AURA:remove] instance=%s", tostring(auraInstanceID)))
+                SnapshotProbeAura("UNIT_AURA:remove", true)
+            end
+        end
+    end
+end
+
+local function GetProbeSyntheticStacks()
+    local heldAura = state.heldAuras[PROBE_AURA_ID]
+    if type(heldAura) ~= "table" then
+        return 0
+    end
+
+    return tonumber(heldAura.applications) or 0
+end
+
+local function GetProbeActualStacks()
+    local trackerStacks
+    local byIDStacks
+    local byNameStacks
+
+    local tracker = GetKnownSpellTracker()
+    if tracker and tracker.GetPlayerSpellState then
+        local trackerState = tracker:GetPlayerSpellState(AURA_WATCH_KEY, PROBE_AURA_ID)
+        if trackerState and trackerState.active then
+            trackerStacks = tonumber(trackerState.applications) or 0
+        end
+    end
+
+    if GetPlayerAuraBySpellID then
+        local ok, aura = pcall(GetPlayerAuraBySpellID, PROBE_AURA_ID)
+        if ok and aura then
+            byIDStacks = GetAuraApplicationCount(aura) or 0
+        end
+    end
+
+    if GetAuraDataBySpellName then
+        local ok, aura = pcall(GetAuraDataBySpellName, "player", PROBE_NAME, "HELPFUL")
+        if ok and aura then
+            byNameStacks = GetAuraApplicationCount(aura) or 0
+        end
+    end
+
+    return {
+        tracker = trackerStacks,
+        byID = byIDStacks,
+        byName = byNameStacks,
+    }
+end
+
+local function GetProbeVisibleAura()
+    if GetPlayerAuraBySpellID then
+        local ok, aura = pcall(GetPlayerAuraBySpellID, PROBE_AURA_ID)
+        if ok and type(aura) == "table" then
+            local normalizedAura = NormalizeAuraInfo(aura)
+            if normalizedAura and (GetAuraApplicationCount(normalizedAura) or 0) > 0 then
+                return normalizedAura, "byID"
+            end
+        end
+    end
+
+    if GetAuraDataBySpellName then
+        local ok, aura = pcall(GetAuraDataBySpellName, "player", PROBE_NAME, "HELPFUL")
+        if ok and type(aura) == "table" then
+            local normalizedAura = NormalizeAuraInfo(aura)
+            if normalizedAura and (GetAuraApplicationCount(normalizedAura) or 0) > 0 then
+                return normalizedAura, "byName"
+            end
+        end
+    end
+
+    return nil, nil
+end
+
+local function ReconcileProbeVisibleAura(reason)
+    if not ShouldProbeAura() then
+        return false
+    end
+
+    local visibleAura, visibleSource = GetProbeVisibleAura()
+    if not visibleAura then
+        return false
+    end
+
+    local visibleStacks = GetAuraApplicationCount(visibleAura) or 0
+    local currentStacks = GetSyntheticStackCount(PROBE_AURA_ID)
+    local currentHeld = GetHeldAura(PROBE_AURA_ID)
+    local currentExpiration = currentHeld and tonumber(currentHeld.expirationTime) or 0
+    local visibleExpiration = tonumber(visibleAura.expirationTime) or 0
+
+    if visibleStacks ~= currentStacks
+        or (visibleExpiration > 0 and (currentExpiration <= 0 or math.abs(visibleExpiration - currentExpiration) > 0.05)) then
+        SetHeldAura(PROBE_AURA_ID, visibleAura, tostring(reason) .. ":" .. tostring(visibleSource), false)
+        LogDebug(format(
+            "ProbeVisibleSync reason=%s source=%s stacks=%s exp=%s",
+            tostring(reason),
+            tostring(visibleSource),
+            tostring(visibleStacks),
+            tostring(visibleAura.expirationTime)
+        ))
+        return true
+    end
+
+    return false
+end
+
+local function FormatProbeActualStacks(actual)
+    actual = actual or {}
+    return format(
+        "tracker=%s byID=%s byName=%s",
+        tostring(actual.tracker),
+        tostring(actual.byID),
+        tostring(actual.byName)
+    )
+end
+
+local function CopyKeySet(source)
+    local target = {}
+    for key, value in pairs(source or {}) do
+        if value then
+            target[key] = true
+        end
+    end
+    return target
+end
+
+local function FormatProbeSeenKeys(seen)
+    local keys = {}
+    for key in pairs(seen or {}) do
+        keys[#keys + 1] = tostring(key)
+    end
+    table.sort(keys)
+    return (#keys > 0 and table.concat(keys, ",") or "none")
+end
+
+local function HasProbeSeenActivity()
+    return next(state.probePartySeenActivitySpells or {}) ~= nil
+end
+
+local function AppendProbeProcTimeline(kind, spellId, now)
+    local elapsed = 0
+    if now and state.probePartyStartedAt and state.probePartyStartedAt > 0 then
+        elapsed = math_max(0, now - state.probePartyStartedAt)
+    end
+
+    local timeline = state.probePartyProcTimeline
+    timeline[#timeline + 1] = {
+        kind = tostring(kind),
+        spellId = tonumber(spellId) or spellId,
+        elapsed = elapsed,
+    }
+end
+
+local function FormatProbeProcTimeline()
+    local parts = {}
+    for _, event in ipairs(state.probePartyProcTimeline or {}) do
+        parts[#parts + 1] = format("%s:%s@%.3f", tostring(event.kind), tostring(event.spellId), tonumber(event.elapsed) or 0)
+    end
+    return (#parts > 0 and table.concat(parts, ",") or "none")
+end
+
+local function BuildProbeModelSummary()
+    local startStacks = tonumber(state.probePartyStartStacks) or 0
+    local seen = {}
+
+    for _, event in ipairs(state.probePartyProcTimeline or {}) do
+        if event.kind ~= "start" then
+            seen[event.spellId] = true
+        end
+    end
+
+    local function CountDistinct(ids)
+        local total = startStacks
+        for _, id in ipairs(ids) do
+            if seen[id] then
+                total = total + 1
+            end
+        end
+        return math_min(PROBE_MAX_STACKS, total)
+    end
+
+    local fumesSeparate = CountDistinct({ 1250162, 1250741 })
+    local fumesAny = math_min(PROBE_MAX_STACKS, startStacks + ((seen[1250162] or seen[1250741]) and 1 or 0))
+    local ruptureFumes = CountDistinct({ 1247770, 1250162, 1250741 })
+    local ruptureSpreeFumes = CountDistinct({ 1247770, 1248011, 1250162, 1250741 })
+
+    return format(
+        "start=%s fumesSep=%s fumesAny=%s ruptureFumes=%s ruptureSpreeFumes=%s",
+        tostring(startStacks),
+        tostring(fumesSeparate),
+        tostring(fumesAny),
+        tostring(ruptureFumes),
+        tostring(ruptureSpreeFumes)
+    )
+end
+
+local function GetProbePreferredStartStacks(currentStacks)
+    local actual = GetProbeActualStacks()
+    local preferredStacks
+    local preferredSource
+
+    if actual.byID ~= nil then
+        preferredStacks = tonumber(actual.byID) or 0
+        preferredSource = "byID"
+    elseif actual.byName ~= nil then
+        preferredStacks = tonumber(actual.byName) or 0
+        preferredSource = "byName"
+    end
+
+    if preferredStacks and preferredStacks > 0 then
+        return preferredStacks, preferredSource, actual
+    end
+
+    if currentStacks > 0 then
+        return currentStacks, "synthetic", actual
+    end
+
+    return 1, "default", actual
+end
+
+local function LogProbeCombatEndCompare(reason)
+    if not ShouldProbeAura() then
+        return
+    end
+
+    local syntheticStacks = GetProbeSyntheticStacks()
+    local actual = GetProbeActualStacks()
+    LogDebug(format(
+        "CombatEndCompare[%s] proc=%s synthetic=%s tracker=%s byID=%s byName=%s seen=%s prevProc=%s prevSeen=%s models={%s} timeline=%s",
+        tostring(reason),
+        tostring(state.probePartyProcID),
+        tostring(syntheticStacks),
+        tostring(actual and actual.tracker),
+        tostring(actual and actual.byID),
+        tostring(actual and actual.byName),
+        FormatProbeSeenKeys(state.probePartySeenActivitySpells),
+        tostring(state.probePartyPreviousProcID),
+        FormatProbeSeenKeys(state.probePartyPreviousSeenActivitySpells),
+        BuildProbeModelSummary(),
+        FormatProbeProcTimeline()
+    ))
+end
+
+local function DescribeAuraForLog(aura)
+    if type(aura) ~= "table" then
+        return "inactive"
+    end
+
+    return format(
+        "active icon=%s dur=%s exp=%s stacks=%s",
+        tostring(aura.icon or aura.iconID),
+        tostring(aura.duration),
+        tostring(aura.expirationTime),
+        tostring(aura.applications or aura.stackCount or aura.count or aura.charges or 0)
+    )
+end
+
+SnapshotProbeAura = function(reason, force)
+    if not PROBE_VERBOSE_LOGS then
+        return
+    end
+
+    if not ShouldProbeAura() then
+        return
+    end
+
+    local parts = {}
+    local entry = state.trackedLookup[PROBE_AURA_ID]
+    local tracker = GetKnownSpellTracker()
+
+    if tracker and tracker.GetPlayerSpellState then
+        local trackerState = tracker:GetPlayerSpellState(AURA_WATCH_KEY, PROBE_AURA_ID)
+        if trackerState then
+            local trackerSummary = format(
+                "tracker active=%s synthetic=%s dur=%s exp=%s stacks=%s",
+                tostring(trackerState.active),
+                tostring(trackerState.syntheticHold),
+                tostring(trackerState.duration),
+                tostring(trackerState.expirationTime),
+                tostring(trackerState.applications)
+            )
+            if force then
+                trackerSummary = trackerSummary .. format(" lastSeen=%s", tostring(trackerState.lastSeen))
+            end
+            parts[#parts + 1] = trackerSummary
+        else
+            parts[#parts + 1] = "tracker inactive"
+        end
+    end
+
+    if GetPlayerAuraBySpellID then
+        local ok, aura = pcall(GetPlayerAuraBySpellID, PROBE_AURA_ID)
+        parts[#parts + 1] = ok and ("byID " .. DescribeAuraForLog(aura)) or "byID error"
+    end
+
+    if GetAuraDataBySpellName then
+        local ok, aura = pcall(GetAuraDataBySpellName, "player", PROBE_NAME, "HELPFUL")
+        parts[#parts + 1] = ok and ("byName " .. DescribeAuraForLog(aura)) or "byName error"
+    end
+
+    if AuraUtil and AuraUtil.FindAuraByName then
+        local ok, aura = pcall(AuraUtil.FindAuraByName, PROBE_NAME, "player", "HELPFUL")
+        if ok then
+            if type(aura) == "table" then
+                parts[#parts + 1] = "AuraUtil " .. DescribeAuraForLog(aura)
+            else
+                parts[#parts + 1] = format("AuraUtil match=%s", tostring(aura ~= nil))
+            end
+        else
+            parts[#parts + 1] = "AuraUtil error"
+        end
+    end
+
+    do
+        local viewerAura = GetCooldownViewerAuraMap()[PROBE_AURA_ID]
+        parts[#parts + 1] = "viewer " .. DescribeAuraForLog(viewerAura)
+    end
+
+    if entry then
+        for index = 1, 40 do
+            local aura = BuildLegacyAuraInfo(index, entry)
+            if aura then
+                parts[#parts + 1] = format("UnitBuff[%d] %s", index, DescribeAuraForLog(aura))
+                break
+            end
+
+            local ok, name = pcall(UnitBuff, "player", index, "HELPFUL")
+            if not ok or not name then
+                break
+            end
+        end
+    end
+
+    local signature = table.concat(parts, " | ")
+    if force or signature ~= state.probeAuraSignature then
+        state.probeAuraSignature = signature
+        LogDebug(format("ProbeAura[%s] %s", tostring(reason), signature ~= "" and signature or "no-data"))
+    end
+end
+
+local function IsPlayerAssistTarget(assistedPlayer)
+    if type(assistedPlayer) ~= "string" or assistedPlayer == "" then
+        return false
+    end
+
+    local playerName = UnitName and UnitName("player") or nil
+    if type(playerName) ~= "string" or playerName == "" then
+        return false
+    end
+
+    return assistedPlayer == playerName or strfind(assistedPlayer, playerName .. "-", 1, true) == 1
+end
+
+local function OnDelveAssistAction(data)
+    if type(data) ~= "table" then
+        if PROBE_VERBOSE_LOGS then
+            LogDebug("DelveAssist invalid payload")
+        end
+        return
+    end
+
+    if PROBE_VERBOSE_LOGS then
+        LogDebug(format(
+            "DelveAssist action=%s player=%s creature=%s spell=%s map=%s",
+            tostring(data.assistAction),
+            tostring(data.assistedPlayer),
+            tostring(data.creatureName),
+            tostring(data.receivedSpellID),
+            tostring(data.mapName)
+        ))
+    end
+
+    if not ShouldProbeAura() or not IsPlayerAssistTarget(data.assistedPlayer) then
+        return
+    end
+
+    if tonumber(data.receivedSpellID) == PROBE_AURA_ID then
+        SetSyntheticHeldAura(PROBE_AURA_ID, PROBE_SYNTHETIC_DURATION, nil, "DELVE_ASSIST_ACTION")
+        SnapshotProbeAura("DELVE_ASSIST_ACTION", true)
+    end
+end
+
+local function ShouldUsePartySpellProbe()
+    return state.trackedLookup[PROBE_AURA_ID] ~= nil
+        and C_PartyInfo
+        and C_PartyInfo.IsDelveInProgress
+        and C_PartyInfo.IsDelveInProgress()
+end
+
+local function IsProbePartySource(name, unit)
+    if state.probePartySourceUnit and unit and state.probePartySourceUnit == unit then
+        return true
+    end
+
+    return state.probePartySourceName and name and SafeEquals(state.probePartySourceName, name) or false
+end
+
+local function RememberProbePartySource(name, unit, spellId)
+    state.probePartySourceName = name
+    state.probePartySourceUnit = unit
+    state.probePartyLastActivityAt = GetTime()
+    state.probePartyLastSpellID = spellId
+end
+
+local function LogProbePartyEvent(kind, name, unit, spellId, currentStacks, extra, now)
+    local elapsed = 0
+    if now and state.probePartyStartedAt and state.probePartyStartedAt > 0 then
+        elapsed = math_max(0, now - state.probePartyStartedAt)
+    end
+
+    local actual = GetProbeActualStacks()
+    local heldAura = GetHeldAura(PROBE_AURA_ID)
+    local holdRemaining = nil
+    if heldAura and heldAura.expirationTime then
+        holdRemaining = math_max(0, (tonumber(heldAura.expirationTime) or 0) - GetTime())
+    end
+
+    LogDebug(format(
+        "PartyEvent proc=%s kind=%s name=%s unit=%s spell=%s elapsed=%.3f stacks=%s hold=%.3f actual={%s} %s",
+        tostring(state.probePartyProcID),
+        tostring(kind),
+        tostring(name),
+        tostring(unit),
+        tostring(spellId),
+        elapsed,
+        tostring(currentStacks),
+        tonumber(holdRemaining) or -1,
+        FormatProbeActualStacks(actual),
+        tostring(extra or "")
+    ))
+end
+
+local function OnProbePartySpell(name, spellId, unit)
+    if not ShouldUsePartySpellProbe() then
+        return
+    end
+
+    if not unit or not UnitInPartyIsAI or not UnitInPartyIsAI(unit) then
+        return
+    end
+
+    local now = GetTime()
+    local matchedSpell = PROBE_PARTY_SPELLS[spellId]
+    local currentStacks = GetSyntheticStackCount(PROBE_AURA_ID)
+    if ReconcileProbeVisibleAura("PARTY_VISIBLE:" .. tostring(spellId)) then
+        currentStacks = GetSyntheticStackCount(PROBE_AURA_ID)
+        LogProbePartyEvent(
+            "sync",
+            name,
+            unit,
+            spellId,
+            currentStacks,
+            "source=visible",
+            now
+        )
+    end
+
+    if matchedSpell then
+        local startStacks, startSource = GetProbePreferredStartStacks(currentStacks)
+        local previousProcID = state.probePartyProcID
+        local previousStartedAt = state.probePartyStartedAt or 0
+        local previousElapsed = 0
+        if previousStartedAt > 0 then
+            previousElapsed = math_max(0, now - previousStartedAt)
+        end
+        state.probePartyPreviousProcID = previousProcID
+        state.probePartyPreviousStartedAt = previousStartedAt
+        state.probePartyPreviousSeenActivitySpells = CopyKeySet(state.probePartySeenActivitySpells)
+
+        state.probePartyProcID = state.probePartyProcID + 1
+        wipe(state.probePartySeenActivitySpells)
+        wipe(state.probePartyProcTimeline)
+        state.probePartyStartedAt = now
+        state.probePartyStartStacks = startStacks
+        RememberProbePartySource(name, unit, spellId)
+        AppendProbeProcTimeline("start", spellId, now)
+        LogProbePartyEvent(
+            "start",
+            name,
+            unit,
+            spellId,
+            currentStacks,
+            format(
+                "spellName=%s prevStacks=%s startStacks=%s startSource=%s prevProc=%s prevElapsed=%.3f prevSeen=%s",
+                tostring(matchedSpell.name),
+                tostring(currentStacks),
+                tostring(startStacks),
+                tostring(startSource),
+                tostring(previousProcID),
+                previousElapsed,
+                FormatProbeSeenKeys(state.probePartyPreviousSeenActivitySpells)
+            ),
+            now
+        )
+
+        SetSyntheticHeldAura(PROBE_AURA_ID, PROBE_SYNTHETIC_DURATION, startStacks, "PARTY_SPELL:" .. tostring(spellId))
+        SnapshotProbeAura("PARTY_SPELL:" .. tostring(spellId), true)
+        RefreshRuntimeDisplay()
+        return
+    end
+
+    if not IsProbePartySource(name, unit) then
+        return
+    end
+
+    AppendProbeProcTimeline("spell", spellId, now)
+
+    if currentStacks <= 0 then
+        return
+    end
+
+    local activityKey = PROBE_PARTY_ACTIVITY_SPELLS[spellId]
+    if not activityKey and spellId == 1247770 and currentStacks >= 3 and not HasProbeSeenActivity() then
+        activityKey = "rupture_carry"
+    end
+    if not activityKey then
+        LogProbePartyEvent("skip", name, unit, spellId, currentStacks, "reason=not-whitelist", now)
+        return
+    end
+
+    if state.probePartySeenActivitySpells[activityKey] then
+        LogProbePartyEvent("skip", name, unit, spellId, currentStacks, "reason=seen key=" .. tostring(activityKey), now)
+        return
+    end
+
+    if (now - (state.probePartyStartedAt or 0)) < PROBE_PARTY_ACTIVITY_GRACE then
+        LogProbePartyEvent("skip", name, unit, spellId, currentStacks, format("reason=grace dt=%.3f key=%s", now - (state.probePartyStartedAt or 0), tostring(activityKey)), now)
+        return
+    end
+
+    if spellId == state.probePartyLastSpellID and (now - (state.probePartyLastActivityAt or 0)) < PROBE_PARTY_ACTIVITY_DEBOUNCE then
+        LogProbePartyEvent("skip", name, unit, spellId, currentStacks, format("reason=debounce dt=%.3f key=%s", now - (state.probePartyLastActivityAt or 0), tostring(activityKey)), now)
+        return
+    end
+
+    if currentStacks >= PROBE_MAX_STACKS then
+        LogProbePartyEvent(
+            "refresh",
+            name,
+            unit,
+            spellId,
+            currentStacks,
+            format("key=%s next=%s", tostring(activityKey), tostring(currentStacks)),
+            now
+        )
+        RememberProbePartySource(name, unit, spellId)
+        SetSyntheticHeldAura(PROBE_AURA_ID, PROBE_SYNTHETIC_DURATION, currentStacks, "PARTY_REFRESH:" .. tostring(spellId))
+        SnapshotProbeAura("PARTY_REFRESH:" .. tostring(spellId), true)
+        RefreshRuntimeDisplay()
+        return
+    end
+
+    LogProbePartyEvent(
+        "accept",
+        name,
+        unit,
+        spellId,
+        currentStacks,
+        format(
+            "key=%s next=%s prevProc=%s prevSeen=%s",
+            tostring(activityKey),
+            tostring(math_min(PROBE_MAX_STACKS, currentStacks + 1)),
+            tostring(state.probePartyPreviousProcID),
+            tostring(state.probePartyPreviousSeenActivitySpells and state.probePartyPreviousSeenActivitySpells[activityKey] and true or false)
+        ),
+        now
+    )
+
+    state.probePartySeenActivitySpells[activityKey] = true
+    RememberProbePartySource(name, unit, spellId)
+    SetSyntheticHeldAura(PROBE_AURA_ID, PROBE_SYNTHETIC_DURATION, math_min(PROBE_MAX_STACKS, currentStacks + 1), "PARTY_ACTIVITY:" .. tostring(spellId))
+    SnapshotProbeAura("PARTY_ACTIVITY:" .. tostring(spellId), true)
+    RefreshRuntimeDisplay()
+end
+
+local function SyncPartySpellWatcher()
+    local watcher = GetPartySpellWatcher()
+    if not watcher or not watcher.Initialize or not watcher.OnAnyPartySpell then
+        return
+    end
+
+    if state.partySpellHandle then
+        if watcher.Unregister then
+            watcher:Unregister(state.partySpellHandle)
+        end
+        state.partySpellHandle = nil
+    end
+
+    if not ShouldProbeAura() then
+        return
+    end
+
+    watcher:Initialize()
+    state.partySpellHandle = watcher:OnAnyPartySpell(OnProbePartySpell)
 end
 
 local function SyncAuraWatch()
-    local tracker = GetAuraTracker()
-    if not tracker or not tracker.Initialize or not tracker.RegisterWatch then
+    local tracker = GetKnownSpellTracker()
+    if not tracker or not tracker.Initialize or not tracker.RegisterPlayerWatch then
         return
     end
 
@@ -201,24 +1228,25 @@ local function SyncAuraWatch()
         }
     end
 
-    tracker:RegisterWatch(AURA_WATCH_KEY, {
+    tracker:RegisterPlayerWatch(AURA_WATCH_KEY, {
         spells = spells,
         filter = "HELPFUL",
-        rescanMode = "unit",
     })
 
-    if tracker.RequestWatchScan then
-        tracker:RequestWatchScan(AURA_WATCH_KEY, "player")
+    if tracker.RequestPlayerScan then
+        tracker:RequestPlayerScan(AURA_WATCH_KEY)
     end
 end
 
 local function GetTrackedAuraMap()
     local auraBySpellId = {}
-    local tracker = GetAuraTracker()
+    local tracker = GetKnownSpellTracker()
+    local inCombat = InCombatLockdown and InCombatLockdown()
+    local cooldownViewerAuraBySpellId = nil
 
-    if tracker and tracker.GetUnitSpellState then
+    if tracker and tracker.GetPlayerSpellState then
         for _, entry in ipairs(state.trackedSpells) do
-            local auraState = tracker:GetUnitSpellState(AURA_WATCH_KEY, "player", entry.spellId)
+            local auraState = tracker:GetPlayerSpellState(AURA_WATCH_KEY, entry.spellId)
             if auraState and auraState.active then
                 auraBySpellId[entry.spellId] = {
                     spellId = entry.spellId,
@@ -226,26 +1254,143 @@ local function GetTrackedAuraMap()
                     duration = auraState.duration,
                     expirationTime = auraState.expirationTime,
                     applications = auraState.applications,
+                    syntheticHold = auraState.syntheticHold,
                 }
             end
         end
-
-        if next(auraBySpellId) then
-            return auraBySpellId
-        end
     end
 
-    if not UnitExists("player") or not C_UnitAuras or not C_UnitAuras.GetBuffDataByIndex then
+    if not UnitExists or not UnitExists("player") then
         return auraBySpellId
     end
 
-    for index = 1, 255 do
-        local ok, aura = pcall(C_UnitAuras.GetBuffDataByIndex, "player", index)
-        if not ok or not aura then
-            break
+    if GetPlayerAuraBySpellID then
+        for _, entry in ipairs(state.trackedSpells) do
+            if not auraBySpellId[entry.spellId] then
+                local ok, aura = pcall(GetPlayerAuraBySpellID, entry.spellId)
+                if ok and aura then
+                    auraBySpellId[entry.spellId] = NormalizeAuraInfo(aura, entry.icon)
+                end
+            end
         end
-        if aura.spellId and state.trackedLookup[aura.spellId] then
-            auraBySpellId[aura.spellId] = aura
+    end
+
+    if GetAuraDataBySpellName then
+        for _, entry in ipairs(state.trackedSpells) do
+            if not auraBySpellId[entry.spellId] then
+                local ok, aura = pcall(GetAuraDataBySpellName, "player", entry.name, "HELPFUL")
+                if ok and aura then
+                    auraBySpellId[entry.spellId] = NormalizeAuraInfo(aura, entry.icon)
+                end
+            end
+        end
+    end
+
+    if AuraUtil and AuraUtil.FindAuraByName then
+        for _, entry in ipairs(state.trackedSpells) do
+            if not auraBySpellId[entry.spellId] then
+                local ok, aura = pcall(AuraUtil.FindAuraByName, entry.name, "player", "HELPFUL")
+                if ok and aura then
+                    if type(aura) == "table" then
+                        auraBySpellId[entry.spellId] = NormalizeAuraInfo(aura, entry.icon)
+                    else
+                        auraBySpellId[entry.spellId] = {
+                            icon = entry.icon,
+                        }
+                    end
+                end
+            end
+        end
+    end
+
+    if GetAuraDataByIndex then
+        for index = 1, 40 do
+            local ok, aura = pcall(GetAuraDataByIndex, "player", index, "HELPFUL")
+            if not ok or not aura then
+                break
+            end
+
+            for _, entry in ipairs(state.trackedSpells) do
+                if not auraBySpellId[entry.spellId] and AuraMatchesEntry(aura, entry) then
+                    auraBySpellId[entry.spellId] = NormalizeAuraInfo(aura, entry.icon)
+                    break
+                end
+            end
+        end
+    elseif C_UnitAuras and C_UnitAuras.GetBuffDataByIndex then
+        for index = 1, 40 do
+            local ok, aura = pcall(C_UnitAuras.GetBuffDataByIndex, "player", index)
+            if not ok or not aura then
+                break
+            end
+
+            for _, entry in ipairs(state.trackedSpells) do
+                if not auraBySpellId[entry.spellId] and AuraMatchesEntry(aura, entry) then
+                    auraBySpellId[entry.spellId] = NormalizeAuraInfo(aura, entry.icon)
+                    break
+                end
+            end
+        end
+    end
+
+    for index = 1, 40 do
+        local anyFound = false
+
+        for _, entry in ipairs(state.trackedSpells) do
+            if not auraBySpellId[entry.spellId] then
+                local aura = BuildLegacyAuraInfo(index, entry)
+                if aura then
+                    auraBySpellId[entry.spellId] = aura
+                    anyFound = true
+                end
+            end
+        end
+
+        if not anyFound then
+            local ok, name = pcall(UnitBuff, "player", index, "HELPFUL")
+            if not ok or not name then
+                break
+            end
+        end
+    end
+
+    if inCombat or C_CooldownViewer then
+        cooldownViewerAuraBySpellId = GetCooldownViewerAuraMap()
+    end
+
+    if cooldownViewerAuraBySpellId then
+        for _, entry in ipairs(state.trackedSpells) do
+            if not auraBySpellId[entry.spellId] and cooldownViewerAuraBySpellId[entry.spellId] then
+                auraBySpellId[entry.spellId] = NormalizeAuraInfo(cooldownViewerAuraBySpellId[entry.spellId], entry.icon)
+            end
+        end
+    end
+
+    for _, entry in ipairs(state.trackedSpells) do
+        local spellId = entry.spellId
+        local activeAura = auraBySpellId[spellId]
+        local heldAura = GetHeldAura(spellId)
+
+        if activeAura then
+            local activeStacks = GetAuraApplicationCount(activeAura) or 0
+            local heldStacks = GetAuraApplicationCount(heldAura) or 0
+            local activeExpiration = tonumber(activeAura.expirationTime) or 0
+            local heldExpiration = tonumber(heldAura and heldAura.expirationTime) or 0
+
+            if heldAura
+                and heldExpiration > activeExpiration
+                and heldStacks >= activeStacks then
+                auraBySpellId[spellId] = heldAura
+                state.heldAuras[spellId] = CopyAuraInfo(heldAura)
+            else
+                state.heldAuras[spellId] = CopyAuraInfo(activeAura)
+            end
+        elseif inCombat then
+            if heldAura then
+                auraBySpellId[spellId] = heldAura
+            end
+        else
+            state.heldAuras[spellId] = nil
         end
     end
 
@@ -463,7 +1608,7 @@ local function ShouldShowAnyDisplay(db)
     return (db and db.enabled) or ShouldShowSettingsPreview() or ShouldShowUnlockedPreview(db)
 end
 
-local function RefreshRuntimeDisplay()
+RefreshRuntimeDisplay = function()
     local db = state.db
     local host = EnsureRuntimeHost()
     local showSettingsPreview = ShouldShowSettingsPreview()
@@ -612,10 +1757,64 @@ local function EnsureEventFrame()
     end
 
     local frame = CreateFrame("Frame")
-    frame:SetScript("OnEvent", function(_, event, unit)
+    frame:SetScript("OnEvent", function(_, event, ...)
+        if event == "DELVE_ASSIST_ACTION" then
+            OnDelveAssistAction(...)
+            RefreshRuntimeDisplay()
+            return
+        end
+
+        local unit, updateInfo = ...
         if event == "UNIT_AURA" and unit ~= "player" then
             return
         end
+
+        if event == "UNIT_AURA" then
+            HandleProbeAuraUpdateInfo(updateInfo)
+            SnapshotProbeAura("UNIT_AURA", false)
+        elseif event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" or event == "PLAYER_ENTERING_WORLD" then
+            if event == "PLAYER_REGEN_ENABLED" then
+                ReconcileProbeVisibleAura("PLAYER_REGEN_ENABLED")
+                LogProbeCombatEndCompare("immediate")
+                if C_Timer and C_Timer.After then
+                    C_Timer.After(0.15, function()
+                        ReconcileProbeVisibleAura("PLAYER_REGEN_ENABLED_DELAYED")
+                        LogProbeCombatEndCompare("delayed")
+                    end)
+                end
+            end
+            if event == "PLAYER_REGEN_ENABLED" or event == "PLAYER_ENTERING_WORLD" then
+                state.probePartySourceName = nil
+                state.probePartySourceUnit = nil
+                state.probePartyStartedAt = 0
+                state.probePartyLastActivityAt = 0
+                state.probePartyLastSpellID = nil
+                wipe(state.probePartySeenActivitySpells)
+            end
+            SnapshotProbeAura(event, true)
+        end
+
+        RefreshRuntimeDisplay()
+    end)
+    frame:SetScript("OnUpdate", function(_, elapsed)
+        if not ShouldProbeAura() then
+            state.probeElapsed = 0
+            return
+        end
+
+        if not (InCombatLockdown and InCombatLockdown()) then
+            state.probeElapsed = 0
+            return
+        end
+
+        state.probeElapsed = state.probeElapsed + elapsed
+        if state.probeElapsed < 0.2 then
+            return
+        end
+
+        state.probeElapsed = 0
+        ReconcileProbeVisibleAura("combat-poll")
+        SnapshotProbeAura("combat-poll", false)
         RefreshRuntimeDisplay()
     end)
     state.eventFrame = frame
@@ -624,8 +1823,20 @@ end
 
 local function RegisterEvents()
     local frame = EnsureEventFrame()
+    if C_DelvesUI then
+        frame:RegisterEvent("DELVE_ASSIST_ACTION")
+    end
     frame:RegisterEvent("PLAYER_ENTERING_WORLD")
-    frame:RegisterEvent("UNIT_AURA")
+    frame:RegisterEvent("PLAYER_REGEN_DISABLED")
+    frame:RegisterEvent("PLAYER_REGEN_ENABLED")
+    if frame.RegisterUnitEvent then
+        local ok = pcall(frame.RegisterUnitEvent, frame, "UNIT_AURA", "player")
+        if not ok then
+            frame:RegisterEvent("UNIT_AURA")
+        end
+    else
+        frame:RegisterEvent("UNIT_AURA")
+    end
 end
 
 local function UnregisterEvents()
@@ -638,6 +1849,7 @@ local function OnInitialize(db)
     state.db = db
     RefreshConfiguredSpells(db)
     SyncAuraWatch()
+    SyncPartySpellWatcher()
     EnsureRuntimeHost()
 end
 
@@ -645,11 +1857,17 @@ local function OnEnable(db)
     state.db = db
     RefreshConfiguredSpells(db)
     SyncAuraWatch()
+    SyncPartySpellWatcher()
     RegisterEvents()
     RefreshRuntimeDisplay()
 end
 
 local function OnDisable()
+    local watcher = GetPartySpellWatcher()
+    if watcher and watcher.Unregister and state.partySpellHandle then
+        watcher:Unregister(state.partySpellHandle)
+        state.partySpellHandle = nil
+    end
     if not ShouldShowSettingsPreview() then
         UnregisterEvents()
     end
@@ -680,6 +1898,7 @@ local function BuildConfig(parent, db)
     state.configPreviewActive = true
     RefreshConfiguredSpells(db)
     SyncAuraWatch()
+    SyncPartySpellWatcher()
     RegisterEvents()
 
     local cleanup = CreateFrame("Frame", nil, parent)

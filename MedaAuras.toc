@@ -61,9 +61,19 @@ Modules\Reminders\Init.lua
 Modules\GoneFishin.lua
 Modules\ShutIt.lua
 Modules\LazyCast.lua
+Modules\MissingPet\Init.lua
+Modules\MissingPet\Runtime.lua
+Modules\MissingPet\Display.lua
+Modules\MissingPet\Settings.lua
+Modules\SoulstoneReminder\Init.lua
+Modules\SoulstoneReminder\Runtime.lua
+Modules\SoulstoneReminder\Display.lua
+Modules\SoulstoneReminder\Settings.lua
 Modules\Interrupted.lua
-Modules\Cracked.lua
-
+Modules\Cracked\Init.lua
+Modules\Cracked\Runtime.lua
+Modules\Cracked\Display.lua
+Modules\Cracked\Settings.lua
 # Prophecy Module
 Modules\Prophecy\Init.lua
 Modules\Prophecy\Settings.lua

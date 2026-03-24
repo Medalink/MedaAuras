@@ -10,9 +10,7 @@ local tostring = tostring
 local type = type
 local UnitName = UnitName
 local UnitExists = UnitExists
-local UnitGUID = UnitGUID
 local CreateFrame = CreateFrame
-local C_Timer = C_Timer
 
 local PartySpellWatcher = {}
 ns.Services.PartySpellWatcher = PartySpellWatcher
@@ -341,8 +339,8 @@ local function FireSpellMatches(name, taintedID, unit, cleanID, launderInfo, cas
             candidate and candidate.lookupTable or nil,
             entry.entryToID
         )
-        local fullEquality
-        local candidateEquality
+        local fullEquality = nil
+        local candidateEquality = nil
 
         local chosenID, chosenData
         local confidence = "blocked"
@@ -365,11 +363,6 @@ local function FireSpellMatches(name, taintedID, unit, cleanID, launderInfo, cas
                     chosenData = candidateEquality.matchData
                     confidence = "exact"
                     chosenBy = "candidate-equality"
-                elseif #candidate.knownIDs == 1 then
-                    chosenID = candidate.knownIDs[1]
-                    chosenData = candidate.lookupTable[chosenID]
-                    confidence = "likely"
-                    chosenBy = "single-candidate"
                 elseif not fullEquality then
                     fullEquality = MatchTaintedAgainstTable(taintedID, entry.knownIDs, entry.lookupTable)
                 end
@@ -419,8 +412,8 @@ local function FireSpellMatches(name, taintedID, unit, cleanID, launderInfo, cas
             chosenBy
         ))
 
-        if chosenID and chosenData and (confidence == "exact" or confidence == "likely") then
-            Log(format("SpellMatch[%d:%s]: %s matched %s (%d) confidence=%s via=%s",
+        if chosenID and chosenData and confidence == "exact" then
+            LogDebug(format("SpellMatch[%d:%s]: %s matched %s (%d) confidence=%s via=%s",
                 handle, label, name, chosenData.name or "spell", chosenID, confidence, chosenBy))
             local debugInfo = {
                 castID = castID,
@@ -466,7 +459,6 @@ local function OnPartyCast(partyIndex, isOwnerOfPet)
 
         castSequence = castSequence + 1
         recentPartyCasts[cleanName] = GetTime()
-
         local cleanID, launderInfo = LaunderSpellID(eSpellID)
         LogDebug(format("Cast[%d] PARTY SPELL: name=%s unit=%s pet=%s cleanID=%s",
             castSequence, cleanName, ownerUnit, tostring(isOwnerOfPet), SafeStr(cleanID)))
@@ -620,11 +612,10 @@ function PartySpellWatcher:Initialize()
     if initialized then return end
     initialized = true
 
-    Log("Initializing")
     SetupMobInterruptTracking()
     SetupRosterTracking()
     RegisterPartyWatchers()
-    Log("Initialized OK")
+    LogDebug("Initialized")
 end
 
 function PartySpellWatcher:OnPartyInterrupt(callback)
@@ -671,7 +662,7 @@ function PartySpellWatcher:OnPartySpellMatch(lookupTable, callback)
         label = config.label,
         entryToID = config.entryToID,
     }
-    Log(format("OnPartySpellMatch registered: handle=%d spells=%d label=%s",
+    LogDebug(format("OnPartySpellMatch registered: handle=%d spells=%d label=%s",
         handle, #knownIDs, tostring(config.label)))
     return handle
 end

@@ -2,8 +2,10 @@ local ADDON_NAME, ns = ...
 
 local MedaUI = LibStub("MedaUI-2.0")
 local Pixel = MedaUI.Pixel
+local C_Secrets = _G and _G.C_Secrets or nil
 local debugstack = debugstack
 local format = format
+local issecretvalue = issecretvalue
 local geterrorhandler = geterrorhandler
 local pcall = pcall
 local tostring = tostring
@@ -70,6 +72,70 @@ end
 
 ns.SafeStr = SafeStr
 MedaAuras.SafeStr = SafeStr
+
+local function IsSecretValue(value)
+    if not issecretvalue then
+        return false
+    end
+    if value == nil then
+        return false
+    end
+    return issecretvalue(value)
+end
+
+local function IsValueNonSecret(value)
+    return not IsSecretValue(value)
+end
+
+local function IsSpellAuraNonSecret(spellID)
+    if not issecretvalue or spellID == nil then
+        return true
+    end
+    if issecretvalue(spellID) then
+        return false
+    end
+    if C_Secrets and C_Secrets.ShouldSpellAuraBeSecret then
+        local ok, result = pcall(C_Secrets.ShouldSpellAuraBeSecret, spellID)
+        if ok and result ~= nil then
+            return not result
+        end
+    end
+    return true
+end
+
+local function IsAuraNonSecret(auraInfo)
+    if not auraInfo then
+        return false
+    end
+    return IsSpellAuraNonSecret(auraInfo.spellId)
+end
+
+local function SafeNumber(value)
+    if type(value) ~= "number" or not IsValueNonSecret(value) then
+        return nil
+    end
+    return value
+end
+
+local function SafeBoolean(value)
+    if type(value) ~= "boolean" or not IsValueNonSecret(value) then
+        return nil
+    end
+    return value
+end
+
+ns.IsSecretValue = IsSecretValue
+ns.IsValueNonSecret = IsValueNonSecret
+ns.IsSpellAuraNonSecret = IsSpellAuraNonSecret
+ns.IsAuraNonSecret = IsAuraNonSecret
+ns.SafeNumber = SafeNumber
+ns.SafeBoolean = SafeBoolean
+MedaAuras.IsSecretValue = IsSecretValue
+MedaAuras.IsValueNonSecret = IsValueNonSecret
+MedaAuras.IsSpellAuraNonSecret = IsSpellAuraNonSecret
+MedaAuras.IsAuraNonSecret = IsAuraNonSecret
+MedaAuras.SafeNumber = SafeNumber
+MedaAuras.SafeBoolean = SafeBoolean
 
 -- ============================================================================
 -- Logging (routes to MedaDebug when available)
