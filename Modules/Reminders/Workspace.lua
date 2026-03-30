@@ -112,6 +112,18 @@ local function GetLoadoutAvailabilityNote(...)
     return R.GetLoadoutAvailabilityNote(...)
 end
 
+local function BuildTalentDetailLine(...)
+    return R.BuildTalentDetailLine(...)
+end
+
+local function SelectTalentBuildsForDisplay(...)
+    return R.SelectTalentBuildsForDisplay(...)
+end
+
+local function BuildConsumableCategoryRecommendations(...)
+    return R.BuildConsumableCategoryRecommendations(...)
+end
+
 local function BuildSpellMap(...)
     return R.BuildSpellMap(...)
 end
@@ -2294,11 +2306,12 @@ local function BuildGroupCoverageDetail(result, structured, primaryDanger)
     end
 
     if primaryDanger then
-        local dangerText = primaryDanger.mechanic or primaryDanger.tip
-        if dangerText then
+        local dangerText = SafeText(primaryDanger.tip) or SafeText(primaryDanger.mechanic)
+        local dangerSummary = TrimSummary(dangerText, 120)
+        if dangerSummary then
             local mob = SafeText(primaryDanger.source)
             local prefix = mob and format("Dungeon pressure from %s: ", mob) or "Dungeon pressure: "
-            parts[#parts + 1] = prefix .. TrimSummary(primaryDanger.tip or primaryDanger.mechanic, 120)
+            parts[#parts + 1] = prefix .. dangerSummary
         end
     end
 
@@ -3305,6 +3318,29 @@ local function RenderRecommendationList(parent, yOff, title, rec, usedSet, maxVi
     })
 end
 
+local function RenderConsumableRecommendationSections(parent, yOff, title, rec, usedSet, perCategoryLimit)
+    local sections = BuildConsumableCategoryRecommendations(rec, perCategoryLimit or 2)
+    if not sections or #sections == 0 then
+        return yOff
+    end
+
+    for _, section in ipairs(sections) do
+        yOff = RenderRecommendationCardGrid(parent, yOff, title .. " - " .. section.title, section.rec, usedSet, {
+            maxVisible = perCategoryLimit or 2,
+            countLabel = "picks",
+            defaultLabel = "Consumable",
+            labelFunc = function(_, fallback)
+                return fallback or "Consumable"
+            end,
+            detailFunc = function(item)
+                return BuildRecommendationCardDetailText(item)
+            end,
+        })
+    end
+
+    return yOff
+end
+
 local function RenderTalentBuilds(parent, yOff, recs, usedSet)
     if not recs or #recs == 0 then return yOff end
 
@@ -3322,16 +3358,14 @@ local function RenderTalentBuilds(parent, yOff, recs, usedSet)
     titleFS:SetText("Recommended Talent Builds")
 
     local innerY = -30
-    local shown = math.min(#recs, 4)
+    local selectedRecs = SelectTalentBuildsForDisplay(recs, 2) or recs
+    local shown = math.min(#selectedRecs, 4)
     for i = 1, shown do
-        local rec = recs[i]
+        local rec = selectedRecs[i]
         local availabilityNote = GetLoadoutAvailabilityNote(rec)
         MarkSource(usedSet, rec.source)
         local hero = rec.heroTree and rec.heroTree ~= "" and rec.heroTree or "Build"
-        local detail = FormatSourceBadge(rec.source)
-        if rec.notes and rec.notes ~= "" then
-            detail = detail .. "  |cffbbbbbb" .. rec.notes:gsub(", raid.*", "") .. "|r"
-        end
+        local detail = BuildTalentDetailLine(rec)
 
         local heroFS = card:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         heroFS:SetPoint("TOPLEFT", 10, innerY)
@@ -3422,8 +3456,8 @@ local function RenderPersonalOverview(content, yOff, ctx, buckets, usedSet)
 
     yOff = RenderTalentBuilds(content, yOff, buckets.talent, usedSet)
     yOff = RenderStatsCard(content, yOff, buckets.stats, usedSet)
-    yOff = RenderRecommendationList(content, yOff, "Top Trinkets", buckets.trinkets[1], usedSet, 3)
-    yOff = RenderRecommendationList(content, yOff, "Recommended Consumables", buckets.consumables[1], usedSet, 3)
+    yOff = RenderRecommendationList(content, yOff, "Top Trinkets", buckets.trinkets[1], usedSet, 8)
+    yOff = RenderConsumableRecommendationSections(content, yOff, "Recommended Consumables", buckets.consumables[1], usedSet, 2)
 
     return yOff
 end
@@ -3468,9 +3502,9 @@ local function RenderPersonalPage(ctx)
     elseif S.uiState.selectedPersonalTab == "gear" then
         yOff = RenderGearRecommendationGrid(content, yOff, "Popular Gear", buckets.gear[1], usedSet, 8)
     elseif S.uiState.selectedPersonalTab == "trinkets" then
-        yOff = RenderRecommendationList(content, yOff, "Top Trinkets", buckets.trinkets[1], usedSet, 6)
+        yOff = RenderRecommendationList(content, yOff, "Top Trinkets", buckets.trinkets[1], usedSet, 8)
     elseif S.uiState.selectedPersonalTab == "consumes" then
-        yOff = RenderRecommendationList(content, yOff, "Recommended Consumables", buckets.consumables[1], usedSet, 6)
+        yOff = RenderConsumableRecommendationSections(content, yOff, "Recommended Consumables", buckets.consumables[1], usedSet, 2)
     elseif S.uiState.selectedPersonalTab == "enchants" then
         yOff = RenderRecommendationList(content, yOff, "Enchants & Gems", buckets.enchants[1], usedSet, 6)
     elseif S.uiState.selectedPersonalTab == "talents" then

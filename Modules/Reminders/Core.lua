@@ -172,6 +172,21 @@ local CONTENT_CATEGORIES = {
     { key = "delve", label = "Delves / Open World" },
 }
 
+local TALENT_SOURCE_PRIORITY = {
+    archon = 1,
+    wowhead = 2,
+    icyveins = 3,
+}
+
+local CONSUMABLE_CATEGORY_ORDER = {
+    ["Weapon Buff"] = 1,
+    ["Combat Potion"] = 2,
+    ["Flask"] = 3,
+    ["Food"] = 4,
+    ["Health Potion"] = 5,
+    ["Augment Rune"] = 6,
+}
+
 local function ClassifyBuildContentType(rec)
     if rec.contentType and rec.contentType ~= "" then
         return rec.contentType
@@ -261,6 +276,205 @@ local function GetCurrentContext()
         end
     end
     return ctx
+end
+
+local function GetEffectiveContext()
+    return S.overrideContext or S.lastContext or GetCurrentContext()
+end
+
+local function CloneRecommendationWithItems(rec, items)
+    local clone = {}
+    for key, value in pairs(rec or {}) do
+        clone[key] = value
+    end
+
+    local content = {}
+    for key, value in pairs((rec and rec.content) or {}) do
+        content[key] = value
+    end
+    content.items = items
+    clone.content = content
+    return clone
+end
+
+local function CompareTalentBuilds(a, b)
+    local sourceA = TALENT_SOURCE_PRIORITY[a.source or "unknown"] or 99
+    local sourceB = TALENT_SOURCE_PRIORITY[b.source or "unknown"] or 99
+    if sourceA ~= sourceB then
+        return sourceA < sourceB
+    end
+
+    local popA = a.popularity or 0
+    local popB = b.popularity or 0
+    if popA ~= popB then
+        return popA > popB
+    end
+
+    local keyA = a.keyLevel or 0
+    local keyB = b.keyLevel or 0
+    if keyA ~= keyB then
+        return keyA > keyB
+    end
+
+    local heroA = a.heroTree or ""
+    local heroB = b.heroTree or ""
+    if heroA ~= heroB then
+        return heroA < heroB
+    end
+
+    return (a.notes or "") < (b.notes or "")
+end
+
+local function BuildTalentDetailLine(rec)
+    local detailLine = FormatSourceBadge(rec.source)
+
+    if rec.source == "archon" then
+        if rec.popularity then
+            detailLine = detailLine .. format("  |cffffffff%.0f%% pop|r", rec.popularity)
+        end
+        if rec.keyLevel then
+            detailLine = detailLine .. format("  |cff88bbff+%d key|r", rec.keyLevel)
+        end
+        if rec.content and rec.content.dps then
+            detailLine = detailLine .. format("  |cffaaddaa%s DPS|r", rec.content.dps)
+        end
+        return detailLine
+    end
+
+    local label = rec.notes or ""
+    local parts = { strsplit(",", label) }
+    local cleanLabel = strtrim(parts[1] or "")
+    if cleanLabel ~= "" then
+        detailLine = detailLine .. "  |cffbbbbbb" .. cleanLabel .. "|r"
+    end
+
+    return detailLine
+end
+
+local function SelectTalentBuildsForDisplay(builds, maxVisiblePerSource)
+    if not builds or #builds == 0 then
+        return {}, {}
+    end
+
+    local ordered = {}
+    for i = 1, #builds do
+        ordered[i] = builds[i]
+    end
+    table.sort(ordered, CompareTalentBuilds)
+
+    if not maxVisiblePerSource or maxVisiblePerSource <= 0 then
+        return ordered, {}
+    end
+
+    local sourceOrder = {}
+    local sourceBuckets = {}
+    for _, rec in ipairs(ordered) do
+        local src = rec.source or "unknown"
+        if not sourceBuckets[src] then
+            sourceBuckets[src] = {}
+            sourceOrder[#sourceOrder + 1] = src
+        end
+        sourceBuckets[src][#sourceBuckets[src] + 1] = rec
+    end
+
+    local keepSet = {}
+    for _, src in ipairs(sourceOrder) do
+        local bucket = sourceBuckets[src]
+        local kept = 0
+        local seenHeroTrees = {}
+
+        for _, rec in ipairs(bucket) do
+            local heroTree = rec.heroTree
+            if heroTree and heroTree ~= "" and not seenHeroTrees[heroTree] and kept < maxVisiblePerSource then
+                keepSet[rec] = true
+                seenHeroTrees[heroTree] = true
+                kept = kept + 1
+            end
+        end
+
+        for _, rec in ipairs(bucket) do
+            if not keepSet[rec] and kept < maxVisiblePerSource then
+                keepSet[rec] = true
+                kept = kept + 1
+            end
+        end
+    end
+
+    local visible = {}
+    local overflow = {}
+    for _, rec in ipairs(ordered) do
+        if keepSet[rec] then
+            visible[#visible + 1] = rec
+        else
+            overflow[#overflow + 1] = rec
+        end
+    end
+
+    return visible, overflow
+end
+
+local function BuildConsumableCategoryRecommendations(rec, perCategoryLimit)
+    if not rec or not rec.content or type(rec.content.items) ~= "table" or #rec.content.items == 0 then
+        return {}
+    end
+
+    local grouped = {}
+    for _, item in ipairs(rec.content.items) do
+        local category = (item.category and item.category ~= "" and item.category) or "Other"
+        if not grouped[category] then
+            grouped[category] = {}
+        end
+        grouped[category][#grouped[category] + 1] = item
+    end
+
+    local categories = {}
+    for category, items in pairs(grouped) do
+        table.sort(items, function(a, b)
+            local popA = a and a.popularity or 0
+            local popB = b and b.popularity or 0
+            if popA ~= popB then
+                return popA > popB
+            end
+            return (a and a.name or "") < (b and b.name or "")
+        end)
+        categories[#categories + 1] = category
+    end
+
+    table.sort(categories, function(a, b)
+        local orderA = CONSUMABLE_CATEGORY_ORDER[a] or 99
+        local orderB = CONSUMABLE_CATEGORY_ORDER[b] or 99
+        if orderA ~= orderB then
+            return orderA < orderB
+        end
+
+        local itemsA = grouped[a]
+        local itemsB = grouped[b]
+        local popA = (itemsA and itemsA[1] and itemsA[1].popularity) or 0
+        local popB = (itemsB and itemsB[1] and itemsB[1].popularity) or 0
+        if popA ~= popB then
+            return popA > popB
+        end
+
+        return a < b
+    end)
+
+    local sections = {}
+    for _, category in ipairs(categories) do
+        local items = grouped[category]
+        local limit = math.min(#items, perCategoryLimit or #items)
+        local visibleItems = {}
+        for i = 1, limit do
+            visibleItems[i] = items[i]
+        end
+
+        sections[#sections + 1] = {
+            key = category:gsub("[^%w]+", "_"):lower(),
+            title = category,
+            rec = CloneRecommendationWithItems(rec, visibleItems),
+        }
+    end
+
+    return sections
 end
 
 local function RefreshAffixes()
@@ -1905,7 +2119,7 @@ local function RenderTalentsTab(content)
     if not data then return end
 
     local yOff = -4
-    local ctx = S.lastContext or {}
+    local ctx = GetEffectiveContext() or {}
     local Theme = MedaUI.Theme
     local MAX_VISIBLE_BUILDS = 2
 
@@ -1929,10 +2143,10 @@ local function RenderTalentsTab(content)
         yOff = yOff - noteFS:GetStringHeight() - 12
     end
 
-    -- Determine player spec
-    local _, playerClass = UnitClass("player")
-    local specIdx = GetSpecialization()
-    local playerSpec = specIdx and GetSpecializationInfo(specIdx)
+    -- Respect browse-mode spec selection when present.
+    local viewer = GetViewerProfile()
+    local playerClass = viewer and viewer.classToken or select(2, UnitClass("player"))
+    local playerSpec = viewer and viewer.specID or (GetSpecialization() and GetSpecializationInfo(GetSpecialization()))
 
     if not playerClass or not playerSpec then
         local noSpec = content:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -2023,27 +2237,7 @@ local function RenderTalentsTab(content)
         end
 
         -- Source badge + stats on second line
-        local badge = FormatSourceBadge(rec.source)
-        local detailLine = badge
-
-        if rec.source == "archon" then
-            if rec.popularity then
-                detailLine = detailLine .. format("  |cffffffff%.0f%% pop|r", rec.popularity)
-            end
-            if rec.keyLevel then
-                detailLine = detailLine .. format("  |cff88bbff+%d key|r", rec.keyLevel)
-            end
-            if rec.content and rec.content.dps then
-                detailLine = detailLine .. format("  |cffaaddaa%s DPS|r", rec.content.dps)
-            end
-        else
-            local label = rec.notes or ""
-            local parts = { strsplit(",", label) }
-            local cleanLabel = strtrim(parts[1] or "")
-            if cleanLabel ~= "" then
-                detailLine = detailLine .. "  |cffbbbbbb" .. cleanLabel .. "|r"
-            end
-        end
+        local detailLine = BuildTalentDetailLine(rec)
 
         local detailFS = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         detailFS:SetPoint("TOPLEFT", heroFS, "BOTTOMLEFT", 0, -2)
@@ -2104,18 +2298,7 @@ local function RenderTalentsTab(content)
             if builds and #builds > 0 then
                 anyRendered = true
 
-                local sourceCount = {}
-                local topBuilds = {}
-                local overflowBuilds = {}
-                for _, rec in ipairs(builds) do
-                    local src = rec.source or "unknown"
-                    sourceCount[src] = (sourceCount[src] or 0) + 1
-                    if sourceCount[src] <= MAX_VISIBLE_BUILDS then
-                        topBuilds[#topBuilds + 1] = rec
-                    else
-                        overflowBuilds[#overflowBuilds + 1] = rec
-                    end
-                end
+                local topBuilds, overflowBuilds = SelectTalentBuildsForDisplay(builds, MAX_VISIBLE_BUILDS)
 
                 local sectionKey = "talent_" .. cat.key
                 local sectionExpanded = S.talentSectionExpanded[sectionKey] or false
@@ -2272,9 +2455,30 @@ local function RenderTalentsTab(content)
         if #recs == 0 then return end
         local rec = recs[1]
         if not rec.content or not rec.content.items or #rec.content.items == 0 then return end
+
+        if rec.buildType == "consumables" then
+            local sections = BuildConsumableCategoryRecommendations(rec, 2)
+            for _, section in ipairs(sections) do
+                yOff = RenderRecommendationCardGrid(content, yOff, title .. " - " .. section.title, section.rec, nil, {
+                    sectionKey = sectionKey .. "_" .. section.key,
+                    maxVisible = 2,
+                    countLabel = "picks",
+                    expandState = S.talentSectionExpanded,
+                    onToggle = function()
+                        RenderTalentsTab(content)
+                    end,
+                    defaultLabel = "Consumable",
+                    labelFunc = function(_, fallback)
+                        return fallback or "Consumable"
+                    end,
+                })
+            end
+            return
+        end
+
         yOff = RenderRecommendationCardGrid(content, yOff, title, rec, nil, {
             sectionKey = sectionKey,
-            maxVisible = 2,
+            maxVisible = rec.buildType == "trinkets" and 8 or 2,
             countLabel = "picks",
             expandState = S.talentSectionExpanded,
             onToggle = function()
@@ -2446,7 +2650,7 @@ local function RenderPrepTab(content)
 
     local Theme = MedaUI.Theme
     local yOff = -4
-    local ctx = S.lastContext or {}
+    local ctx = GetEffectiveContext() or {}
 
     -- Affix summary at top of prep tab
     if S.currentAffixes then
@@ -2643,10 +2847,10 @@ local function RenderPrepTab(content)
         yOff = yOff - 8
     end
 
-    -- Recommended consumables & enchants from data
-    local _, playerClass = UnitClass("player")
-    local specIdx = GetSpecialization()
-    local playerSpec = specIdx and GetSpecializationInfo(specIdx)
+    -- Respect browse-mode spec selection when present.
+    local viewer = GetViewerProfile()
+    local playerClass = viewer and viewer.classToken or select(2, UnitClass("player"))
+    local playerSpec = viewer and viewer.specID or (GetSpecialization() and GetSpecializationInfo(GetSpecialization()))
 
     if playerClass and playerSpec then
         local specKey = playerClass .. "_" .. playerSpec
@@ -2674,6 +2878,27 @@ local function RenderPrepTab(content)
 
             local function RenderPrepItemSection(rec, title, sectionKey)
                 if not rec then return end
+
+                if rec.buildType == "consumables" then
+                    local sections = BuildConsumableCategoryRecommendations(rec, 2)
+                    for _, section in ipairs(sections) do
+                        yOff = RenderRecommendationCardGrid(content, yOff, title .. " - " .. section.title, section.rec, nil, {
+                            sectionKey = sectionKey .. "_" .. section.key,
+                            maxVisible = 2,
+                            countLabel = "picks",
+                            expandState = S.prepSectionExpanded,
+                            onToggle = function()
+                                RenderPrepTab(content)
+                            end,
+                            defaultLabel = "Consumable",
+                            labelFunc = function(_, fallback)
+                                return fallback or "Consumable"
+                            end,
+                        })
+                    end
+                    return
+                end
+
                 yOff = RenderRecommendationCardGrid(content, yOff, title, rec, nil, {
                     sectionKey = sectionKey,
                     maxVisible = 2,
@@ -2743,6 +2968,9 @@ R.BuildSpellMap = BuildSpellMap
 R.ShowCopyPopup = ShowCopyPopup
 R.CanCopyLoadoutCode = CanCopyLoadoutCode
 R.GetLoadoutAvailabilityNote = GetLoadoutAvailabilityNote
+R.BuildTalentDetailLine = BuildTalentDetailLine
+R.SelectTalentBuildsForDisplay = SelectTalentBuildsForDisplay
+R.BuildConsumableCategoryRecommendations = BuildConsumableCategoryRecommendations
 R.ReleaseTalentRows = ReleaseTalentRows
 R.ReleaseTalentHeaders = ReleaseTalentHeaders
 R.ReleasePrepRows = ReleasePrepRows
