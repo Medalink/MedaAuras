@@ -8,12 +8,15 @@ if MedaAuras and MedaAuras.Log then
 end
 
 -- ============================================================================
--- All defensive spells keyed by spellID (fast lookup after laundering)
+-- All tracked spells keyed by spellID (fast lookup after laundering)
+--
+-- This table is mostly defensives, but it also carries a small opt-in set of
+-- important buffs and risky raid effects that share the same filtered aura path.
 --
 -- category:
 --   "external"  = cast on another player (Pain Suppression, Ironbark, etc.)
---   "party"     = party-wide / raid CD (Rallying Cry, Darkness, etc.)
---   "major"     = major personal (long CD, strong effect)
+--   "party"     = party-wide / raid CD or raid-important effect
+--   "major"     = major personal or important self buff
 --   "personal"  = shorter personal CD
 --
 -- cd       = base cooldown in seconds
@@ -32,8 +35,10 @@ DefensiveData.ALL_DEFENSIVES = {
     [31821]  = { name = "Aura Mastery",        cd = 180, duration = 8,  icon = 135872,  category = "party",    class = "PALADIN", talentSpellID = 31821 },
     [201633] = { name = "Earthen Wall Totem",  cd = 60,  duration = 15, icon = 136098,  category = "party",    class = "SHAMAN", talentSpellID = 201633 },
     [8178]   = { name = "Grounding Totem",     cd = 24,  duration = 3,  icon = 136039,  category = "party",    class = "SHAMAN", talentSpellID = 8178 },
+    [64843]  = { name = "Divine Hymn",         cd = 180, duration = 5,  icon = 237540,  category = "party",    class = "PRIEST" },
 
     -- ========== EXTERNALS (cast on others) ==========
+    [1044]   = { name = "Blessing of Freedom", cd = 25,  duration = 8,  icon = 135968,  category = "external", class = "PALADIN" },
     [33206]  = { name = "Pain Suppression",       cd = 180, duration = 8,  icon = 135936, category = "external", class = "PRIEST", talentSpellID = 33206 },
     [102342] = { name = "Ironbark",               cd = 90,  duration = 12, icon = 572025, category = "external", class = "DRUID" },
     [1022]   = { name = "Blessing of Protection", cd = 300, duration = 10, icon = 135964, category = "external", class = "PALADIN", talentSpellID = 1022 },
@@ -74,6 +79,19 @@ DefensiveData.ALL_DEFENSIVES = {
     [114893] = { name = "Stone Bulwark Totem",  cd = 120, duration = 30, icon = 538572,  category = "major",    class = "SHAMAN" },
     [108416] = { name = "Dark Pact",            cd = 60,  duration = 20, icon = 136146,  category = "major",    class = "WARLOCK", talentSpellID = 108416 },
     [12975]  = { name = "Last Stand",           cd = 120, duration = 15, icon = 135871,  category = "major",    class = "WARRIOR" },
+    [31884]  = { name = "Avenging Wrath",       cd = 120, duration = 20, icon = 135875,  category = "major",    class = "PALADIN" },
+    [216331] = { name = "Avenging Crusader",    cd = 60,  duration = 10, icon = 460689,  category = "major",    class = "PALADIN", talentSpellID = 216331 },
+    [51271]  = { name = "Pillar of Frost",      cd = 45,  duration = 12, icon = 458718,  category = "major",    class = "DEATHKNIGHT" },
+    [102543] = { name = "Incarnation: Avatar of Ashamane", cd = 180, duration = 20, icon = 571586, category = "major", class = "DRUID", talentSpellID = 102543 },
+    [102560] = { name = "Incarnation: Chosen of Elune", cd = 180, duration = 20, icon = 571586, category = "major", class = "DRUID", talentSpellID = 102560 },
+    [106951] = { name = "Berserk",              cd = 180, duration = 15, icon = 132242,  category = "major",    class = "DRUID", talentSpellID = 106951 },
+    [107574] = { name = "Avatar",               cd = 90,  duration = 20, icon = 613534,  category = "major",    class = "WARRIOR", talentSpellID = 107574 },
+    [132578] = { name = "Invoke Niuzao, the Black Ox", cd = 120, duration = 25, icon = 627607, category = "major", class = "MONK" },
+    [190319] = { name = "Combustion",           cd = 120, duration = 10, icon = 135824,  category = "major",    class = "MAGE" },
+    [228260] = { name = "Voidform",             cd = 120, duration = 20, icon = 1386546, category = "major",    class = "PRIEST" },
+    [288613] = { name = "Trueshot",             cd = 120, duration = 15, icon = 132329,  category = "major",    class = "HUNTER" },
+    [365362] = { name = "Arcane Surge",         cd = 90,  duration = 15, icon = 4667417, category = "major",    class = "MAGE" },
+    [375087] = { name = "Dragonrage",           cd = 120, duration = 18, icon = 4622452, category = "major",    class = "EVOKER" },
 
     -- ========== MINOR PERSONALS ==========
     [22812]  = { name = "Barkskin",             cd = 60,  duration = 8,  icon = 136097,  category = "personal", class = "DRUID" },
@@ -171,11 +189,16 @@ DefensiveData.CATEGORY_INFO = {
 
 DefensiveData.SPELL_SPEC_WHITELIST = {
     [871]    = { [73] = true },                 -- Shield Wall (Protection Warrior)
+    [107574] = { [71] = true, [72] = true, [73] = true }, -- Avatar (Warrior)
     [118038] = { [71] = true },                 -- Die by the Sword (Arms Warrior)
     [184364] = { [72] = true },                 -- Enraged Regeneration (Fury Warrior)
+    [51271]  = { [251] = true },                -- Pillar of Frost (Frost Death Knight)
     [49028]  = { [250] = true },                -- Dancing Rune Weapon (Blood Death Knight)
     [55233]  = { [250] = true },                -- Vampiric Blood (Blood Death Knight)
     [194679] = { [250] = true },                -- Rune Tap (Blood Death Knight)
+    [102560] = { [102] = true },                -- Incarnation: Chosen of Elune (Balance Druid)
+    [102543] = { [103] = true },                -- Incarnation: Avatar of Ashamane (Feral Druid)
+    [106951] = { [103] = true },                -- Berserk (Feral Druid)
     [61336]  = { [103] = true, [104] = true }, -- Survival Instincts (Feral/Guardian)
     [102342] = { [105] = true },                -- Ironbark (Restoration Druid)
     [200851] = { [104] = true },                -- Rage of the Sleeper (Guardian Druid)
@@ -183,13 +206,22 @@ DefensiveData.SPELL_SPEC_WHITELIST = {
     [22842]  = { [104] = true },                -- Frenzied Regeneration (Guardian Druid)
     [198589] = { [577] = true },                -- Blur (Havoc Demon Hunter)
     [196555] = { [577] = true },                -- Netherwalk (Havoc Demon Hunter)
+    [288613] = { [254] = true },                -- Trueshot (Marksmanship Hunter)
+    [190319] = { [63] = true },                 -- Combustion (Fire Mage)
+    [365362] = { [62] = true },                 -- Arcane Surge (Arcane Mage)
+    [132578] = { [268] = true },                -- Invoke Niuzao, the Black Ox (Brewmaster Monk)
     [116849] = { [270] = true },                -- Life Cocoon (Mistweaver Monk)
+    [1044]   = { [65] = true, [66] = true, [70] = true }, -- Blessing of Freedom (Paladin)
+    [31884]  = { [65] = true, [66] = true, [70] = true }, -- Avenging Wrath (Paladin)
+    [216331] = { [65] = true },                 -- Avenging Crusader (Holy Paladin)
     [357170] = { [1473] = true },               -- Time Dilation (Augmentation Evoker)
     [33206]  = { [256] = true },                -- Pain Suppression (Discipline Priest)
     [62618]  = { [256] = true },                -- Power Word: Barrier (Discipline Priest)
     [47788]  = { [257] = true },                -- Guardian Spirit (Holy Priest)
+    [64843]  = { [257] = true },                -- Divine Hymn (Holy Priest)
     [197268] = { [257] = true },                -- Ray of Hope (Holy Priest)
     [47585]  = { [258] = true },                -- Dispersion (Shadow Priest)
+    [228260] = { [258] = true },                -- Voidform (Shadow Priest)
     [31821]  = { [65] = true },                 -- Aura Mastery (Holy Paladin)
     [31850]  = { [66] = true },                 -- Ardent Defender (Protection Paladin)
     [212641] = { [66] = true },                 -- Guardian of Ancient Kings (Protection Paladin)
@@ -198,6 +230,7 @@ DefensiveData.SPELL_SPEC_WHITELIST = {
     [389539] = { [70] = true },                 -- Sentinel (Retribution Paladin)
     [201633] = { [264] = true },                -- Earthen Wall Totem (Restoration Shaman)
     [98008]  = { [264] = true },                -- Spirit Link Totem (Restoration Shaman)
+    [375087] = { [1467] = true },               -- Dragonrage (Devastation Evoker)
     [374227] = { [1468] = true },               -- Zephyr (Preservation Evoker)
     [370960] = { [1468] = true },               -- Emerald Communion (Preservation Evoker)
 }
@@ -211,6 +244,120 @@ DefensiveData.DEFENSIVE_TALENT_OVERRIDES = {
         duration = 6,
         maxCharges = 2,
     },
+}
+
+-- ============================================================================
+-- Base spell IDs that are confirmed by the current supported tracking path.
+--
+-- Cracked uses this subset so the default catalog stays limited to abilities
+-- with a known-good aura/rule path.
+-- ============================================================================
+
+DefensiveData.CONFIRMED_DEFENSIVE_IDS = {
+    [498] = true,
+    [642] = true,
+    [871] = true,
+    [1022] = true,
+    [5277] = true,
+    [6940] = true,
+    [19236] = true,
+    [22812] = true,
+    [31224] = true,
+    [31850] = true,
+    [33206] = true,
+    [45438] = true,
+    [47585] = true,
+    [47788] = true,
+    [48707] = true,
+    [48792] = true,
+    [55233] = true,
+    [102342] = true,
+    [102558] = true,
+    [104773] = true,
+    [108271] = true,
+    [115203] = true,
+    [116849] = true,
+    [118038] = true,
+    [184364] = true,
+    [186265] = true,
+    [198589] = true,
+    [204018] = true,
+    [264735] = true,
+    [342246] = true,
+    [357170] = true,
+    [363916] = true,
+    [389539] = true,
+}
+
+-- ============================================================================
+-- Experimental defensive spell IDs that are reasonable candidates for the
+-- current tracking path but are not yet confirmed.
+-- ============================================================================
+
+DefensiveData.EXPERIMENTAL_DEFENSIVE_IDS = {
+    [586] = true,
+    [1966] = true,
+    [3411] = true,
+    [12975] = true,
+    [197268] = true,
+    [22842] = true,
+    [23920] = true,
+    [49028] = true,
+    [61336] = true,
+    [108416] = true,
+    [114893] = true,
+    [122278] = true,
+    [122783] = true,
+    [125174] = true,
+    [184662] = true,
+    [194679] = true,
+    [196555] = true,
+    [200851] = true,
+    [205191] = true,
+    [212641] = true,
+    [370960] = true,
+    [374348] = true,
+}
+
+-- ============================================================================
+-- Experimental important-buff spell IDs that appear to be exposed through the
+-- same filtered aura buckets but are not part of the default defensive subset.
+-- ============================================================================
+
+DefensiveData.EXPERIMENTAL_IMPORTANT_BUFF_IDS = {
+    [1044] = true,
+    [64843] = true,
+    [31884] = true,
+    [216331] = true,
+    [51271] = true,
+    [102543] = true,
+    [102560] = true,
+    [106951] = true,
+    [107574] = true,
+    [132578] = true,
+    [190319] = true,
+    [228260] = true,
+    [288613] = true,
+    [365362] = true,
+    [375087] = true,
+}
+
+-- ============================================================================
+-- Risky raid-effect spell IDs use the same filtered aura path, but many are
+-- raid-wide, totem-based, or ground-based effects and can be less reliable as
+-- per-unit aura evidence.
+-- ============================================================================
+
+DefensiveData.RISKY_RAID_EFFECT_IDS = {
+    [8178] = true,
+    [31821] = true,
+    [51052] = true,
+    [62618] = true,
+    [97462] = true,
+    [98008] = true,
+    [196718] = true,
+    [201633] = true,
+    [374227] = true,
 }
 
 DefensiveData.GROUP_BUFFS = {

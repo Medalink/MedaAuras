@@ -24,11 +24,11 @@ local layoutRefreshTimer
 local layoutRefreshScope
 
 local PREVIEW_MOCK = {
-    { name = "Tanksworth", class = "WARRIOR", spellID = 97462, baseCd = 180, duration = 10, cdOffset = 60 },
+    { name = "Tanksworth", class = "WARRIOR", spellID = 871, baseCd = 180, duration = 8, cdOffset = 60 },
     { name = "Stabsworth", class = "ROGUE", spellID = 31224, baseCd = 120, duration = 5, cdOffset = 0 },
     { name = "Frostbyte", class = "MAGE", spellID = 45438, baseCd = 240, duration = 10, cdOffset = 100 },
     { name = "Healbot", class = "PRIEST", spellID = 33206, baseCd = 180, duration = 8, cdOffset = 30 },
-    { name = "Felrush", class = "DEMONHUNTER", spellID = 196718, baseCd = 180, duration = 8, cdOffset = 0 },
+    { name = "Felrush", class = "DEMONHUNTER", spellID = 198589, baseCd = 60, duration = 10, cdOffset = 0 },
 }
 
 local function GetPreviewPaneId()
@@ -498,16 +498,19 @@ function C.BuildSettingsPage(parent, moduleDB)
             RefreshVisualState()
         end
 
+        local modeControl = modeDD.GetControl and modeDD:GetControl() or modeDD
         local resetBtn = MedaUI:CreateButton(p, "Reset Pane Positions", 180)
-        resetBtn:SetPoint("TOPLEFT", RIGHT_X, yOff + 16)
+        resetBtn:SetPoint("TOPLEFT", modeControl, "TOPRIGHT", 40, 0)
         resetBtn.OnClick = ResetPanePositions
-        yOff = yOff - 58
+        yOff = yOff - 66
 
         local info = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         info:SetPoint("TOPLEFT", LEFT_X, yOff)
+        info:SetWidth(420)
+        info:SetJustifyH("LEFT")
         info:SetTextColor(unpack(MedaUI.Theme.textDim))
         info:SetText("Linked category tabs inherit the Everything style until you unlink them.")
-        yOff = yOff - 28
+        yOff = yOff - 34
 
         local catHeader = MedaUI:CreateSectionHeader(p, "Tracked Categories")
         catHeader:SetPoint("TOPLEFT", LEFT_X, yOff)
@@ -557,6 +560,41 @@ function C.BuildSettingsPage(parent, moduleDB)
             end
             RefreshVisualState()
             RebuildPreview()
+        end
+
+        local function RefreshTrackedCatalogOptions()
+            if C.RefreshTrackedDefensiveState then
+                C.RefreshTrackedDefensiveState(moduleDB)
+            elseif C.SetDB then
+                C.SetDB(moduleDB)
+            end
+            RefreshVisualState()
+            RebuildPreview()
+        end
+
+        local experimentalCB = MedaUI:CreateCheckbox(p, "Track Experimental Defensives")
+        experimentalCB:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        experimentalCB:SetChecked(moduleDB.trackExperimentalDefensives == true)
+        experimentalCB.OnValueChanged = function(_, checked)
+            moduleDB.trackExperimentalDefensives = checked and true or false
+            RefreshTrackedCatalogOptions()
+        end
+        yOff = yOff - 30
+
+        local importantCB = MedaUI:CreateCheckbox(p, "Track Experimental Important Buffs")
+        importantCB:SetPoint("TOPLEFT", LEFT_X, yOff)
+        importantCB:SetChecked(moduleDB.trackExperimentalImportantBuffs == true)
+        importantCB.OnValueChanged = function(_, checked)
+            moduleDB.trackExperimentalImportantBuffs = checked and true or false
+            RefreshTrackedCatalogOptions()
+        end
+
+        local riskyRaidCB = MedaUI:CreateCheckbox(p, "Track Risky Raid Effects")
+        riskyRaidCB:SetPoint("TOPLEFT", RIGHT_X, yOff)
+        riskyRaidCB:SetChecked(moduleDB.trackRiskyRaidEffects == true)
+        riskyRaidCB.OnValueChanged = function(_, checked)
+            moduleDB.trackRiskyRaidEffects = checked and true or false
+            RefreshTrackedCatalogOptions()
         end
         yOff = yOff - 45
 
@@ -626,16 +664,18 @@ function C.BuildSettingsPage(parent, moduleDB)
 
         local linkCB
         local stateLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        stateLabel:SetWidth(420)
+        stateLabel:SetJustifyH("LEFT")
         stateLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
 
         if paneId ~= "all" then
             linkCB = MedaUI:CreateCheckbox(p, "Link To Shared Style")
             linkCB:SetPoint("TOPLEFT", LEFT_X, yOff)
-            yOff = yOff - 28
+            yOff = yOff - 32
         end
 
         stateLabel:SetPoint("TOPLEFT", LEFT_X, yOff)
-        yOff = yOff - 24
+        yOff = yOff - 30
 
         local previewButton
         local previewLabel
@@ -647,9 +687,10 @@ function C.BuildSettingsPage(parent, moduleDB)
             previewLabel:SetPoint("TOPLEFT", previewButton, "BOTTOMLEFT", 0, -8)
             previewLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
             previewLabel:SetWidth(420)
+            previewLabel:SetHeight(42)
             previewLabel:SetJustifyH("LEFT")
             previewLabel:SetText("Populate the live Cracked panes with every defensive and group buff we track.")
-            yOff = yOff - 56
+            yOff = yOff - 84
         end
 
         local fontDD = MedaUI:CreateLabeledDropdown(p, "Font", 200, MedaUI:GetFontList(), "font")

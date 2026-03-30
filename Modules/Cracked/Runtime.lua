@@ -43,9 +43,12 @@ local GetSpecializationInfo = GetSpecializationInfo
 local DD = ns.DefensiveData
 local ALL_DEFENSIVES     = DD.ALL_DEFENSIVES
 local CLASS_COLORS       = DD.CLASS_COLORS
-local CLASS_DEFENSIVE_IDS = DD.CLASS_DEFENSIVE_IDS
 local CATEGORY_INFO      = DD.CATEGORY_INFO
 local ENTRY_TO_ID        = DD.ENTRY_TO_ID
+local CONFIRMED_DEFENSIVE_IDS = DD.CONFIRMED_DEFENSIVE_IDS or {}
+local EXPERIMENTAL_DEFENSIVE_IDS = DD.EXPERIMENTAL_DEFENSIVE_IDS or {}
+local EXPERIMENTAL_IMPORTANT_BUFF_IDS = DD.EXPERIMENTAL_IMPORTANT_BUFF_IDS or {}
+local RISKY_RAID_EFFECT_IDS = DD.RISKY_RAID_EFFECT_IDS or {}
 local SPELL_SPEC_WHITELIST = DD.SPELL_SPEC_WHITELIST or {}
 local DEFENSIVE_TALENT_OVERRIDES = DD.DEFENSIVE_TALENT_OVERRIDES or {}
 local GROUP_BUFFS = DD.GROUP_BUFFS or {}
@@ -119,16 +122,16 @@ local PANE_LABELS = {
     all = "Everything",
     external = "Externals",
     party = "Party CDs",
-    major = "Major Personals",
-    personal = "Minor Personals",
+    major = "Major CDs",
+    personal = "Minor CDs",
     buffs = "Group Buffs",
 }
 local PANE_TITLES = {
-    all = "Defensives",
+    all = "Cooldowns",
     external = "Externals",
     party = "Party CDs",
-    major = "Major Personals",
-    personal = "Minor Personals",
+    major = "Major CDs",
+    personal = "Minor CDs",
     buffs = "Group Buffs",
 }
 local CLASS_DISPLAY_NAMES = {
@@ -163,17 +166,72 @@ local LEGACY_STYLE_KEYS = {
     "iconSize",
 }
 
-local WATCH_SPELLS = {}
-for spellID, defData in pairs(ALL_DEFENSIVES) do
-    WATCH_SPELLS[#WATCH_SPELLS + 1] = {
-        spellID = spellID,
-        name = defData.name,
-        filter = "HELPFUL",
+local function BuildDefensiveAuraFilters(defData)
+    if not defData then
+        return { "HELPFUL" }
+    end
+
+    if defData.category == "external" then
+        return {
+            "HELPFUL|EXTERNAL_DEFENSIVE",
+        }
+    end
+
+    return {
+        "HELPFUL|BIG_DEFENSIVE",
+        "HELPFUL|IMPORTANT",
     }
 end
-sort(WATCH_SPELLS, function(a, b)
-    return a.spellID < b.spellID
-end)
+
+local TRACKED_DEFENSIVES = {}
+local TRACKED_CLASS_DEFENSIVE_IDS = {}
+local TRACKED_WATCH_SPELLS = {}
+
+local function ShouldTrackExperimentalDefensives()
+    return db and db.trackExperimentalDefensives == true
+end
+
+local function ShouldTrackExperimentalImportantBuffs()
+    return db and db.trackExperimentalImportantBuffs == true
+end
+
+local function ShouldTrackRiskyRaidEffects()
+    return db and db.trackRiskyRaidEffects == true
+end
+
+local function RebuildTrackedDefensiveCatalog()
+    TRACKED_DEFENSIVES = {}
+    TRACKED_CLASS_DEFENSIVE_IDS = {}
+    TRACKED_WATCH_SPELLS = {}
+
+    for spellID, defData in pairs(ALL_DEFENSIVES) do
+        local include = CONFIRMED_DEFENSIVE_IDS[spellID]
+            or (ShouldTrackExperimentalDefensives() and EXPERIMENTAL_DEFENSIVE_IDS[spellID])
+            or (ShouldTrackExperimentalImportantBuffs() and EXPERIMENTAL_IMPORTANT_BUFF_IDS[spellID])
+            or (ShouldTrackRiskyRaidEffects() and RISKY_RAID_EFFECT_IDS[spellID])
+
+        if include then
+            TRACKED_DEFENSIVES[spellID] = defData
+            TRACKED_CLASS_DEFENSIVE_IDS[defData.class] = TRACKED_CLASS_DEFENSIVE_IDS[defData.class] or {}
+            TRACKED_CLASS_DEFENSIVE_IDS[defData.class][#TRACKED_CLASS_DEFENSIVE_IDS[defData.class] + 1] = spellID
+            TRACKED_WATCH_SPELLS[#TRACKED_WATCH_SPELLS + 1] = {
+                spellID = spellID,
+                name = defData.name,
+                filter = "HELPFUL",
+                filters = BuildDefensiveAuraFilters(defData),
+                icon = defData.icon,
+            }
+        end
+    end
+
+    for _, ids in pairs(TRACKED_CLASS_DEFENSIVE_IDS) do
+        sort(ids)
+    end
+
+    sort(TRACKED_WATCH_SPELLS, function(a, b)
+        return a.spellID < b.spellID
+    end)
+end
 
 local GROUP_BUFF_WATCH_SPELLS = {}
 for _, buffData in pairs(GROUP_BUFFS) do
@@ -182,6 +240,7 @@ for _, buffData in pairs(GROUP_BUFFS) do
             spellID = provider.spellID,
             name = provider.name,
             filter = "HELPFUL",
+            icon = buffData.icon,
         }
     end
 end
@@ -199,6 +258,8 @@ do
     end
     MAX_BARS = math.max(MAX_BARS, totalTracked)
 end
+
+RebuildTrackedDefensiveCatalog()
 
 -- ============================================================================
 -- Logging
@@ -449,13 +510,13 @@ local function BuildCatalogPreviewEntries(now)
     local spellIDs = {}
     local index = 0
 
-    for spellID in pairs(ALL_DEFENSIVES) do
+    for spellID in pairs(TRACKED_DEFENSIVES) do
         spellIDs[#spellIDs + 1] = spellID
     end
 
     table.sort(spellIDs, function(a, b)
-        local left = ALL_DEFENSIVES[a]
-        local right = ALL_DEFENSIVES[b]
+        local left = TRACKED_DEFENSIVES[a]
+        local right = TRACKED_DEFENSIVES[b]
         local leftPriority = CATEGORY_INFO[left.category] and CATEGORY_INFO[left.category].priority or 99
         local rightPriority = CATEGORY_INFO[right.category] and CATEGORY_INFO[right.category].priority or 99
         if leftPriority ~= rightPriority then
@@ -465,7 +526,7 @@ local function BuildCatalogPreviewEntries(now)
     end)
 
     for _, spellID in ipairs(spellIDs) do
-        local defData = ALL_DEFENSIVES[spellID]
+        local defData = TRACKED_DEFENSIVES[spellID]
         local categoryInfo = CATEGORY_INFO[defData.category]
         local stateMode = index % 3
         local activeDuration = math.max(3, math.min(defData.duration or 0, 12))
@@ -780,7 +841,7 @@ local function LogPlayerTrackingSnapshot(reason)
     local parts = {}
     local now = GetTime()
     for spellID, cd in pairs(myCds) do
-        local defData = ALL_DEFENSIVES[spellID]
+        local defData = TRACKED_DEFENSIVES[spellID]
         if defData then
             NormalizeChargeState(cd, now)
             local cdEnd = type(cd.cdEnd) == "number" and cd.cdEnd or 0
@@ -821,8 +882,9 @@ local function RefreshAuraWatches()
     end
 
     tracker:RegisterWatch(AURA_WATCH_KEY, {
-        spells = WATCH_SPELLS,
+        spells = TRACKED_WATCH_SPELLS,
         filter = "HELPFUL",
+        allowDirectLookup = false,
         rescanMode = BuildAuraRescanMode(),
     })
 
@@ -1016,7 +1078,7 @@ local function IsReadyForPartyRegistration(unit)
 end
 
 local function BuildCandidateSet(cls, specID, unit)
-    local ids = CLASS_DEFENSIVE_IDS[cls]
+    local ids = TRACKED_CLASS_DEFENSIVE_IDS[cls]
     local candidateLookup = {}
     local candidateIDs = {}
     local classWideCount = 0
@@ -1026,7 +1088,7 @@ local function BuildCandidateSet(cls, specID, unit)
     end
 
     for _, spellID in ipairs(ids) do
-        local data = ALL_DEFENSIVES[spellID]
+        local data = TRACKED_DEFENSIVES[spellID]
         if data and IsCategoryEnabled(data.category) then
             classWideCount = classWideCount + 1
             local allowed = true
@@ -1051,7 +1113,7 @@ local function BuildCandidateSet(cls, specID, unit)
 end
 
 local function BuildCandidateDecisionSummary(cls, specID, unit)
-    local ids = CLASS_DEFENSIVE_IDS[cls]
+    local ids = TRACKED_CLASS_DEFENSIVE_IDS[cls]
     local included = {}
     local excluded = {}
 
@@ -1060,7 +1122,7 @@ local function BuildCandidateDecisionSummary(cls, specID, unit)
     end
 
     for _, spellID in ipairs(ids) do
-        local data = ALL_DEFENSIVES[spellID]
+        local data = TRACKED_DEFENSIVES[spellID]
         if data and IsCategoryEnabled(data.category) then
             local reason = nil
             local whitelist = SPELL_SPEC_WHITELIST[spellID]
@@ -1095,7 +1157,7 @@ local function UpdateMemberDefensives(name, cls, specID, reason, unit)
     local cds = {}
 
     for _, spellID in ipairs(candidateIDs) do
-        local data = ALL_DEFENSIVES[spellID]
+        local data = TRACKED_DEFENSIVES[spellID]
         local existing = oldInfo and oldInfo.cds and oldInfo.cds[spellID]
         local state = existing or {
             baseCd = data.cd,
@@ -1163,14 +1225,14 @@ local function FindMyDefensives()
     end
     wipe(myCds)
 
-    local ids = CLASS_DEFENSIVE_IDS[cls]
+    local ids = TRACKED_CLASS_DEFENSIVE_IDS[cls]
     if not ids then
         return
     end
 
     local count = 0
     for _, spellID in ipairs(ids) do
-        local data = ALL_DEFENSIVES[spellID]
+        local data = TRACKED_DEFENSIVES[spellID]
         if data and IsCategoryEnabled(data.category) then
             local known = IsSpellKnown(spellID)
             if not known then
@@ -1250,7 +1312,7 @@ end
 -- Handle party defensive matched via PartySpellWatcher StatusBar equality test
 --
 -- PSW's OnPartySpellMatch uses StatusBar clamping to binary-test the tainted
--- spell ID against every key in ALL_DEFENSIVES.  On match, this callback
+-- spell ID against every key in the confirmed defensive lookup table. On match, this callback
 -- receives fully clean (name, cleanSpellID, defData, unit) args.
 -- ============================================================================
 
@@ -1263,7 +1325,7 @@ local function ProbeCandidateAuras(name, unit, debugInfo)
         local active = {}
         local memberInfo = partyMembers[name]
         for _, spellID in ipairs(debugInfo.candidateIDs) do
-            local defData = ALL_DEFENSIVES[spellID]
+            local defData = TRACKED_DEFENSIVES[spellID]
             if defData then
                 local auraName = memberInfo and memberInfo.cds and memberInfo.cds[spellID]
                     and memberInfo.cds[spellID].displayName or defData.name
@@ -1482,7 +1544,7 @@ local function SetupOwnTracking()
     playerCastFrame = CreateFrame("Frame")
     playerCastFrame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player")
     playerCastFrame:SetScript("OnEvent", function(_, _, unit, _, spellID)
-        local defData = ALL_DEFENSIVES[spellID]
+        local defData = TRACKED_DEFENSIVES[spellID]
         if not defData then return end
         if not IsCategoryEnabled(defData.category) then return end
 
@@ -1998,7 +2060,7 @@ local function CollectDisplayEntries()
 
     local function AddEntries(name, cls, cds, isPlayer, unit)
         for spellID, cd in pairs(cds) do
-            local defData = ALL_DEFENSIVES[spellID]
+            local defData = TRACKED_DEFENSIVES[spellID]
             if defData and IsCategoryEnabled(defData.category) then
                 if isPlayer then
                     SyncPlayerDefensiveCooldown(spellID, cd, defData)
@@ -2395,6 +2457,54 @@ local function OnInspectComplete(unit, name, class, specID)
     end
 end
 
+local function RegisterSpellMatchWatcher()
+    if spellMatchHandle then
+        ns.Services.PartySpellWatcher:Unregister(spellMatchHandle)
+        spellMatchHandle = nil
+    end
+
+    if not ns.Services.PartySpellWatcher or not ns.Services.PartySpellWatcher.OnPartySpellMatch then
+        return
+    end
+
+    ns.Services.PartySpellWatcher:Initialize()
+    spellMatchHandle = ns.Services.PartySpellWatcher:OnPartySpellMatch({
+        label = "CrackedDefensives",
+        lookupTable = TRACKED_DEFENSIVES,
+        candidateResolver = ResolveDefensiveCandidates,
+        entryToID = ENTRY_TO_ID,
+        callback = OnPartyDefensiveMatch,
+    })
+end
+
+local function RefreshTrackedDefensiveState(moduleDB)
+    if moduleDB then
+        db = moduleDB
+    end
+
+    RebuildTrackedDefensiveCatalog()
+
+    if not initialized then
+        return
+    end
+
+    if ns.Services.GroupAuraTracker and ns.Services.GroupAuraTracker.RegisterWatch then
+        RefreshAuraWatches()
+        if ns.Services.GroupAuraTracker.RequestFullRescan then
+            ns.Services.GroupAuraTracker:RequestFullRescan()
+        end
+    end
+
+    FindMyDefensives()
+    CleanPartyList()
+    AutoRegisterParty()
+    RegisterSpellMatchWatcher()
+
+    if C.RequestDisplayRefresh then
+        C.RequestDisplayRefresh()
+    end
+end
+
 -- ============================================================================
 -- Module Lifecycle
 -- ============================================================================
@@ -2402,9 +2512,11 @@ end
 local function OnInitialize(moduleDB)
     if initialized then
         db = moduleDB
+        RebuildTrackedDefensiveCatalog()
         return
     end
     db = moduleDB
+    RebuildTrackedDefensiveCatalog()
     if ns.Services.GroupInspector and ns.Services.GroupInspector.Initialize then
         ns.Services.GroupInspector:Initialize()
     end
@@ -2426,14 +2538,7 @@ local function OnInitialize(moduleDB)
 
     AutoRegisterParty()
 
-    ns.Services.PartySpellWatcher:Initialize()
-    spellMatchHandle = ns.Services.PartySpellWatcher:OnPartySpellMatch({
-        label = "CrackedDefensives",
-        lookupTable = ALL_DEFENSIVES,
-        candidateResolver = ResolveDefensiveCandidates,
-        entryToID = ENTRY_TO_ID,
-        callback = OnPartyDefensiveMatch,
-    })
+    RegisterSpellMatchWatcher()
 
     ns.Services.GroupInspector:RegisterInspectComplete("Cracked", OnInspectComplete)
 
@@ -2450,6 +2555,7 @@ end
 
 local function OnEnable(moduleDB)
     db = moduleDB
+    RebuildTrackedDefensiveCatalog()
     if not initialized then
         OnInitialize(moduleDB)
         return
@@ -2466,16 +2572,7 @@ local function OnEnable(moduleDB)
     SetupRosterEvents()
     AutoRegisterParty()
 
-    if not spellMatchHandle then
-        ns.Services.PartySpellWatcher:Initialize()
-        spellMatchHandle = ns.Services.PartySpellWatcher:OnPartySpellMatch({
-            label = "CrackedDefensives",
-            lookupTable = ALL_DEFENSIVES,
-            candidateResolver = ResolveDefensiveCandidates,
-            entryToID = ENTRY_TO_ID,
-            callback = OnPartyDefensiveMatch,
-        })
-    end
+    RegisterSpellMatchWatcher()
 
     ns.Services.GroupInspector:RegisterInspectComplete("Cracked", OnInspectComplete)
 
@@ -2522,6 +2619,7 @@ C.CreateUI = CreateUI
 C.DestroyUI = DestroyUI
 C.CheckZoneVisibility = CheckZoneVisibility
 C.RefreshAuraWatches = RefreshAuraWatches
+C.RefreshTrackedDefensiveState = RefreshTrackedDefensiveState
 C.BeginSettingsLivePreview = BeginSettingsLivePreview
 C.EndSettingsLivePreview = EndSettingsLivePreview
 C.RebuildPaneBars = RebuildPaneBars
@@ -2564,7 +2662,7 @@ C.GetBarLayoutForStyle = GetBarLayoutForStyle
 C.GetFontObj = GetFontObj
 C.BuildEntryLabel = BuildEntryLabel
 C.GetAllDefensives = function()
-    return ALL_DEFENSIVES
+    return TRACKED_DEFENSIVES
 end
 C.GetGroupBuffs = function()
     return GROUP_BUFFS
@@ -2589,4 +2687,5 @@ C.GetDB = function()
 end
 C.SetDB = function(moduleDB)
     db = moduleDB
+    RebuildTrackedDefensiveCatalog()
 end

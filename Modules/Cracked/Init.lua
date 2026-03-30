@@ -26,6 +26,9 @@ local MODULE_DEFAULTS = {
     showMajor = true,
     showPersonal = false,
     showMissingGroupBuffs = true,
+    trackExperimentalDefensives = false,
+    trackExperimentalImportantBuffs = false,
+    trackRiskyRaidEffects = false,
     forceFullAuraRescan = false,
     showInDungeon = true,
     showInRaid = true,
@@ -47,11 +50,12 @@ MedaAuras:RegisterModule({
     version = MODULE_VERSION,
     stability = MODULE_STABILITY,
     author = "Medalink",
-    description = "Tracks party defensive cooldowns in M+ and dungeons. "
-        .. "Detects when party members use defensive abilities and "
+    description = "Tracks the supported subset of party defensive cooldowns in M+ and dungeons, "
+        .. "with optional experimental important buffs and risky raid effects. "
+        .. "Detects when party members use supported abilities and "
         .. "displays cooldown bars with active/CD states, colored by class. "
-        .. "Uses secret laundering to read tainted party spell IDs.",
-    sidebarDesc = "Party defensive cooldown tracker (experimental).",
+        .. "Uses filtered aura tracking plus tainted spell-ID matching.",
+    sidebarDesc = "Party cooldown tracker (experimental).",
     defaults = MODULE_DEFAULTS,
     OnInitialize = function(moduleDB)
         if C.OnInitialize then
