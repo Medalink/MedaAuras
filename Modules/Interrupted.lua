@@ -14,18 +14,16 @@ local CreateFont = CreateFont
 local GetSpellBaseCooldown = GetSpellBaseCooldown
 local UnitName = UnitName
 local UnitClass = UnitClass
-local UnitGUID = UnitGUID
 local UnitGroupRolesAssigned = UnitGroupRolesAssigned
 local UnitExists = UnitExists
 local IsInGroup = IsInGroup
 local IsPlayerSpell = IsPlayerSpell
 local IsSpellKnown = IsSpellKnown
-local CombatLogGetCurrentEventInfo = CombatLogGetCurrentEventInfo
 local C_Spell = C_Spell
 local C_Timer = C_Timer
 
-if MedaAuras and MedaAuras.Log then
-    MedaAuras.Log("[Interrupted] File loaded OK")
+if MedaAuras and MedaAuras.LogDebug then
+    MedaAuras.LogDebug("[Interrupted] File loaded OK")
 end
 
 -- ============================================================================
@@ -77,8 +75,6 @@ local hasVisibleStunEntries = false
 local watcherHandle, mobKickHandle, stopWatcherHandle
 local UpdateDisplay
 local AutoRegisterParty, CleanPartyList
-local stopCombatFrame
-local stopCombatUsesCallbackEvent = false
 
 local DEFAULT_FONT_FACE = GameFontNormal and GameFontNormal:GetFont() or "Fonts\\FRIZQT__.TTF"
 local FONT_FLAGS = "OUTLINE"
@@ -89,9 +85,35 @@ local fontCache = {}
 -- Logging
 -- ============================================================================
 
-local function Log(msg)   MedaAuras.Log(format("[Interrupted] %s", msg)) end
-local function LogDebug(msg) MedaAuras.LogDebug(format("[Interrupted] %s", msg)) end
-local function LogWarn(msg)  MedaAuras.LogWarn(format("[Interrupted] %s", msg)) end
+local function Emit(immediate, lazy, msgOrFormat, ...)
+    local argCount = select("#", ...)
+    if argCount > 0 then
+        local args = { ... }
+        return lazy(function()
+            return format("[Interrupted] " .. tostring(msgOrFormat), unpack(args, 1, argCount))
+        end)
+    end
+
+    if type(msgOrFormat) == "function" then
+        return lazy(function()
+            return format("[Interrupted] %s", tostring(msgOrFormat()))
+        end)
+    end
+
+    return immediate(format("[Interrupted] %s", tostring(msgOrFormat)))
+end
+
+local function Log(msgOrFormat, ...)
+    return Emit(MedaAuras.LogDebug, MedaAuras.LogDebugLazy, msgOrFormat, ...)
+end
+
+local function LogDebug(msgOrFormat, ...)
+    return Emit(MedaAuras.LogDebug, MedaAuras.LogDebugLazy, msgOrFormat, ...)
+end
+
+local function LogWarn(msgOrFormat, ...)
+    return Emit(MedaAuras.LogWarn, MedaAuras.LogWarnLazy, msgOrFormat, ...)
+end
 
 local function UpdateMainFrameVisibility()
     if mainFrame then
@@ -975,18 +997,18 @@ local function OnPartyInterruptDetected(name, spellID, unit)
     local resolvedID = SPELL_ALIASES[spellID] or spellID
     local now = GetTime()
 
-    Log(format("PARTY INTERRUPT CALLBACK: name=%s spellID=%s resolved=%s unit=%s",
-        tostring(name), tostring(spellID), tostring(resolvedID), tostring(unit)))
+    Log("PARTY INTERRUPT CALLBACK: name=%s spellID=%s resolved=%s unit=%s",
+        tostring(name), tostring(spellID), tostring(resolvedID), tostring(unit))
 
     local info = partyMembers[name]
     if info then
         local baseCd = info.baseCd or (ALL_INTERRUPTS[resolvedID] and ALL_INTERRUPTS[resolvedID].cd) or 15
         info.cdEnd = now + baseCd
         info.lastKickTime = now
-        Log(format("  -> %s existing member, CD set to %ds (ends at %.1f)", name, baseCd, info.cdEnd))
+        Log("  -> %s existing member, CD set to %ds (ends at %.1f)", name, baseCd, info.cdEnd)
     else
         if noInterruptPlayers[name] then
-            LogDebug(format("  -> %s was marked no-kick, clearing due to observed interrupt", name))
+            LogDebug("  -> %s was marked no-kick, clearing due to observed interrupt", name)
             noInterruptPlayers[name] = nil
         end
         local ok, _, cls = pcall(UnitClass, unit)
@@ -996,12 +1018,12 @@ local function OnPartyInterruptDetected(name, spellID, unit)
         if InterruptResolver then
             expected = InterruptResolver:ResolvePartyPrimaryInterrupt(cls, specID, role)
         end
-        LogDebug(format("  -> %s not in partyMembers, UnitClass(%s): ok=%s cls=%s",
-            name, tostring(unit), tostring(ok), tostring(cls)))
+        LogDebug("  -> %s not in partyMembers, UnitClass(%s): ok=%s cls=%s",
+            name, tostring(unit), tostring(ok), tostring(cls))
         if ok and cls then
             local kickData = ALL_INTERRUPTS[resolvedID]
             if not kickData then
-                LogWarn(format("  -> Could not register %s: spell %s not in interrupt data", name, tostring(resolvedID)))
+                LogWarn("  -> Could not register %s: spell %s not in interrupt data", name, tostring(resolvedID))
                 return
             end
 
@@ -1015,10 +1037,9 @@ local function OnPartyInterruptDetected(name, spellID, unit)
             newInfo.cdEnd = now + baseCd
             newInfo.lastKickTime = now
             partyMembers[name] = newInfo
-            Log(format("  -> Late-registered %s (%s) from cast, CD=%d",
-                name, cls, baseCd))
+            Log("  -> Late-registered %s (%s) from cast, CD=%d", name, cls, baseCd)
         else
-            LogWarn(format("  -> Could not register %s: UnitClass failed", name))
+            LogWarn("  -> Could not register %s: UnitClass failed", name)
         end
     end
     UpdateDisplay()
@@ -1056,7 +1077,7 @@ local function OnPartyStopDetected(name, spellID, stopData, unit, debugInfo)
         classToken = select(2, UnitClass(unit))
     end
     if not classToken then
-        LogWarn(format("PARTY STOP: unable to resolve class for %s (%s)", tostring(name), tostring(unit)))
+        LogWarn("PARTY STOP: unable to resolve class for %s (%s)", tostring(name), tostring(unit))
         return
     end
 
@@ -1072,14 +1093,14 @@ local function OnPartyStopDetected(name, spellID, stopData, unit, debugInfo)
         return
     end
 
-    Log(format("PARTY STOP: %s cast %s (ID %d, cat=%s, CD=%ds, confidence=%s via=%s)",
+    Log("PARTY STOP: %s cast %s (ID %d, cat=%s, CD=%ds, confidence=%s via=%s)",
         tostring(name),
         tostring(stopInfo.spellName or stopData.name or spellID),
         tonumber(spellID) or 0,
         tostring(stopInfo.category or stopData.category or "stop"),
         tonumber(baseCd) or 0,
         tostring(debugInfo and debugInfo.confidence or "unknown"),
-        tostring(debugInfo and debugInfo.chosenBy or "unknown")))
+        tostring(debugInfo and debugInfo.chosenBy or "unknown"))
 
     UpdateDisplay()
 end
@@ -1091,7 +1112,7 @@ end
 local function OnMobKickConfirmed(name)
     local info = partyMembers[name]
     if not info then
-        LogDebug(format("OnMobKickConfirmed: %s not in partyMembers", tostring(name)))
+        LogDebug("OnMobKickConfirmed: %s not in partyMembers", tostring(name))
         return
     end
 
@@ -1108,8 +1129,8 @@ local function OnMobKickConfirmed(name)
     info.cdEnd = now + cd
     info.lastKickTime = now
 
-    Log(format("CONFIRMED KICK: %s -> CD %ds%s",
-        name, cd, reduction > 0 and format(" (base %d -%d on-kick)", baseCd, reduction) or ""))
+    Log("CONFIRMED KICK: %s -> CD %ds%s",
+        name, cd, reduction > 0 and format(" (base %d -%d on-kick)", baseCd, reduction) or "")
     UpdateDisplay()
 end
 
@@ -1136,8 +1157,8 @@ local function SetupOwnKickTracking()
                 cd = isInterrupt.cd
             end
             myKickCdEnd = GetTime() + cd
-            Log(format("OWN KICK: unit=%s spellID=%d (%s) CD=%ds (mySpellID=%s)",
-                tostring(unit), spellID, isInterrupt.name, cd, tostring(mySpellID)))
+            Log("OWN KICK: unit=%s spellID=%d (%s) CD=%ds (mySpellID=%s)",
+                tostring(unit), spellID, isInterrupt.name, cd, tostring(mySpellID))
         end
 
         local stopData, canonicalStopID = ResolveStopRecord(spellID, myClass)
@@ -1147,12 +1168,12 @@ local function SetupOwnKickTracking()
                 if canonicalStopID and canonicalStopID ~= stopInfo.spellID then
                     stopInfo.spellID = canonicalStopID
                 end
-                Log(format("OWN STOP: unit=%s spellID=%d (%s) cat=%s CD=%ds",
+                Log("OWN STOP: unit=%s spellID=%d (%s) cat=%s CD=%ds",
                     tostring(unit),
                     tonumber(spellID) or 0,
                     tostring(stopInfo.spellName or stopData.name),
                     tostring(stopInfo.category or stopData.category or "stop"),
-                    tonumber(stopInfo.baseCd or stopData.cd or 0) or 0))
+                    tonumber(stopInfo.baseCd or stopData.cd or 0) or 0)
             end
         end
     end)
@@ -1163,139 +1184,6 @@ local function TeardownOwnKickTracking()
     if playerCastFrame then
         playerCastFrame:UnregisterAllEvents()
         playerCastFrame = nil
-    end
-end
-
-local function ResolvePartySourceOwner(sourceGUID, sourceName)
-    if not sourceGUID then
-        return nil, nil, nil
-    end
-
-    if UnitGUID("player") == sourceGUID or UnitGUID("pet") == sourceGUID then
-        return myName or UnitName("player"), myClass or select(2, UnitClass("player")), "player"
-    end
-
-    for i = 1, 4 do
-        local unit = "party" .. i
-        if UnitExists(unit) and UnitGUID(unit) == sourceGUID then
-            return UnitName(unit), select(2, UnitClass(unit)), unit
-        end
-
-        local petUnit = "partypet" .. i
-        if UnitExists(petUnit) and UnitGUID(petUnit) == sourceGUID then
-            return UnitName(unit), select(2, UnitClass(unit)), unit
-        end
-    end
-
-    if sourceName and partyStopMembers[sourceName] then
-        local member = partyStopMembers[sourceName]
-        return sourceName, member and member.class or nil, member and member.unit or nil
-    end
-
-    return nil, nil, nil
-end
-
--- Retail 12.0 moved CLEU onto the restricted callback-event path. Registering
--- it through Frame:RegisterEvent() from the options toggle flow can trip the
--- protected-action popup, so prefer RegisterEventCallback when available.
-local function HandleStopCombatEvent()
-    local _, subEvent, _, sourceGUID, sourceName, _, _, _, _, _, _, spellID = CombatLogGetCurrentEventInfo()
-    if subEvent ~= "SPELL_CAST_SUCCESS" and subEvent ~= "SPELL_CREATE" and subEvent ~= "SPELL_SUMMON" then
-        return
-    end
-
-    local ownerName, classToken, ownerUnit = ResolvePartySourceOwner(sourceGUID, sourceName)
-    if not ownerName or not classToken then
-        return
-    end
-
-    local stopData, canonicalStopID = ResolveStopRecord(spellID, classToken)
-    if not stopData then
-        return
-    end
-
-    local now = GetTime()
-    if ownerUnit == "player" then
-        local stopInfo = EnsureStopEntry(myStops, stopData, myClass or classToken, true)
-        if stopInfo and ApplyStopCooldownStamp(stopInfo, stopInfo.baseCd or stopData.cd or 0, spellID, now) then
-            if canonicalStopID and canonicalStopID ~= stopInfo.spellID then
-                stopInfo.spellID = canonicalStopID
-            end
-            Log(format("OWN STOP [CLEU]: spellID=%d (%s) cat=%s CD=%ds",
-                tonumber(spellID) or 0,
-                tostring(stopInfo.spellName or stopData.name),
-                tostring(stopInfo.category or stopData.category or "stop"),
-                tonumber(stopInfo.baseCd or stopData.cd or 0) or 0))
-            UpdateDisplay()
-        end
-        return
-    end
-
-    local member = EnsurePartyStopMember(ownerName, classToken)
-    member.unit = ownerUnit or member.unit
-    local stopInfo = EnsureStopEntry(member.stops, stopData, classToken, false)
-    if stopInfo and ApplyStopCooldownStamp(stopInfo, stopInfo.baseCd or stopData.cd or 0, spellID, now) then
-        if canonicalStopID and canonicalStopID ~= stopInfo.spellID then
-            stopInfo.spellID = canonicalStopID
-        end
-        Log(format("PARTY STOP [CLEU]: %s cast %s (ID %d, cat=%s, CD=%ds)",
-            tostring(ownerName),
-            tostring(stopInfo.spellName or stopData.name or spellID),
-            tonumber(spellID) or 0,
-            tostring(stopInfo.category or stopData.category or "stop"),
-            tonumber(stopInfo.baseCd or stopData.cd or 0) or 0))
-        UpdateDisplay()
-    end
-end
-
-local function SetupStopCombatFallback()
-    if stopCombatFrame then
-        return
-    end
-
-    stopCombatFrame = CreateFrame("Frame")
-    stopCombatUsesCallbackEvent = false
-
-    if stopCombatFrame.RegisterEventCallback and stopCombatFrame.UnregisterEventCallback then
-        local ok, registered = pcall(
-            stopCombatFrame.RegisterEventCallback,
-            stopCombatFrame,
-            "COMBAT_LOG_EVENT_UNFILTERED",
-            HandleStopCombatEvent
-        )
-        if ok and registered ~= false then
-            stopCombatUsesCallbackEvent = true
-            LogDebug("SetupStopCombatFallback: registered COMBAT_LOG_EVENT_UNFILTERED via RegisterEventCallback")
-            return
-        end
-
-        LogWarn(format(
-            "SetupStopCombatFallback: callback registration failed, falling back to RegisterEvent (ok=%s registered=%s)",
-            tostring(ok),
-            tostring(registered)
-        ))
-    end
-
-    stopCombatFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
-    stopCombatFrame:SetScript("OnEvent", HandleStopCombatEvent)
-    LogDebug("SetupStopCombatFallback: registered COMBAT_LOG_EVENT_UNFILTERED via RegisterEvent")
-end
-
-local function TeardownStopCombatFallback()
-    if stopCombatFrame then
-        if stopCombatUsesCallbackEvent and stopCombatFrame.UnregisterEventCallback then
-            pcall(
-                stopCombatFrame.UnregisterEventCallback,
-                stopCombatFrame,
-                "COMBAT_LOG_EVENT_UNFILTERED",
-                HandleStopCombatEvent
-            )
-        else
-            stopCombatFrame:UnregisterAllEvents()
-        end
-        stopCombatFrame:SetScript("OnEvent", nil)
-        stopCombatUsesCallbackEvent = false
-        stopCombatFrame = nil
     end
 end
 
@@ -1505,8 +1393,8 @@ local function CheckZoneVisibility()
     else
         shouldShowByZone = db.showInOpenWorld
     end
-    LogDebug(format("CheckZoneVisibility: instanceType=%s showByZone=%s mainFrame=%s",
-        tostring(instanceType), tostring(shouldShowByZone), tostring(mainFrame ~= nil)))
+    LogDebug("CheckZoneVisibility: instanceType=%s showByZone=%s mainFrame=%s",
+        tostring(instanceType), tostring(shouldShowByZone), tostring(mainFrame ~= nil))
     UpdateMainFrameVisibility()
 end
 
@@ -1535,12 +1423,12 @@ UpdateDisplay = function()
         for n, info in pairs(partyMembers) do
             memberCount = memberCount + 1
             local rem = info.cdEnd > now and (info.cdEnd - now) or 0
-            LogDebug(format("  STATE: %s class=%s spell=%s cd=%.1fs",
-                n, info.class, tostring(info.spellID), rem))
+            LogDebug("  STATE: %s class=%s spell=%s cd=%.1fs",
+                n, info.class, tostring(info.spellID), rem)
         end
-        LogDebug(format("UpdateDisplay tick: mySpell=%s myCD=%.1f members=%d display=%d stuns=%d visible=%s",
+        LogDebug("UpdateDisplay tick: mySpell=%s myCD=%.1f members=%d display=%d stuns=%d visible=%s",
             tostring(mySpellID), GetPlayerCooldownRemaining(now),
-            memberCount, #displayEntries, #stunEntries, tostring(shouldShowByZone)))
+            memberCount, #displayEntries, #stunEntries, tostring(shouldShowByZone))
     end
 
     ApplyFrameEntries(mainFrame, bars, displayEntries)
@@ -1696,7 +1584,7 @@ local function SetupRosterEvents()
     rosterFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
     rosterFrame:RegisterEvent("ROLE_CHANGED_INFORM")
     rosterFrame:SetScript("OnEvent", function(_, event, arg1)
-        LogDebug(format("Roster event: %s arg1=%s", event, tostring(arg1)))
+        LogDebug("Roster event: %s arg1=%s", event, tostring(arg1))
         if event == "GROUP_ROSTER_UPDATE" then
             CleanPartyList()
             AutoRegisterParty()
@@ -1752,7 +1640,6 @@ local function OnInitialize(moduleDB)
 
     LogDebug("  Step 4: SetupOwnKickTracking")
     SetupOwnKickTracking()
-    SetupStopCombatFallback()
 
     LogDebug("  Step 5: SetupRosterEvents")
     SetupRosterEvents()
@@ -1795,7 +1682,6 @@ local function OnDisable()
     Log("OnDisable called")
     DestroyUI()
     TeardownOwnKickTracking()
-    TeardownStopCombatFallback()
     TeardownRosterEvents()
 
     if watcherHandle then
