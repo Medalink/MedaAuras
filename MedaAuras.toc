@@ -33,6 +33,7 @@ Data\Recommendations.lua
 Data\GoneFishinFish.lua
 Data\CreatureVO.lua
 Data\Interrupts.lua
+Data\Stops.lua
 Data\Defensives.lua
 Data\ProphecyData.lua
 Data\ProphecyTemplates.lua

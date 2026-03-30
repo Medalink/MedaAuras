@@ -13,9 +13,14 @@ local CreateFrame = CreateFrame
 local CreateFont = CreateFont
 local GetSpellBaseCooldown = GetSpellBaseCooldown
 local UnitName = UnitName
+local UnitClass = UnitClass
+local UnitGUID = UnitGUID
 local UnitGroupRolesAssigned = UnitGroupRolesAssigned
 local UnitExists = UnitExists
 local IsInGroup = IsInGroup
+local IsPlayerSpell = IsPlayerSpell
+local IsSpellKnown = IsSpellKnown
+local CombatLogGetCurrentEventInfo = CombatLogGetCurrentEventInfo
 local C_Spell = C_Spell
 local C_Timer = C_Timer
 
@@ -36,6 +41,7 @@ local MODULE_STABILITY = "experimental"
 -- ============================================================================
 
 local ID = ns.InterruptData
+local StopData = ns.StopData
 local ALL_INTERRUPTS      = ID.ALL_INTERRUPTS
 local CD_REDUCTION_TALENTS = ID.CD_REDUCTION_TALENTS
 local CD_ON_KICK_TALENTS  = ID.CD_ON_KICK_TALENTS
@@ -53,19 +59,26 @@ local OUTLINE_MAP = { none = "", outline = "OUTLINE", thick = "THICKOUTLINE" }
 
 local db
 local partyMembers = {}     -- [name] = { class, spellID, baseCd, cdEnd, onKickReduction, extraKicks }
+local partyStopMembers = {} -- [name] = { class, stops = { [spellID] = stopInfo } }
 local noInterruptPlayers = {} -- [name] = true
 local myName, myClass, mySpellID, myBaseCd, myIsPetSpell
 local myKickCdEnd = 0
+local myStops = {}          -- [spellID] = stopInfo
 
 local mainFrame, titleText, resizeHandle
+local stunFrame, stunTitleText, stunResizeHandle
 local bars = {}
+local stunBars = {}
 local updateTicker
 local isResizing = false
 local shouldShowByZone = true
 local hasVisibleEntries = false
-local watcherHandle, mobKickHandle
+local hasVisibleStunEntries = false
+local watcherHandle, mobKickHandle, stopWatcherHandle
 local UpdateDisplay
 local AutoRegisterParty, CleanPartyList
+local stopCombatFrame
+local stopCombatUsesCallbackEvent = false
 
 local DEFAULT_FONT_FACE = GameFontNormal and GameFontNormal:GetFont() or "Fonts\\FRIZQT__.TTF"
 local FONT_FLAGS = "OUTLINE"
@@ -81,14 +94,20 @@ local function LogDebug(msg) MedaAuras.LogDebug(format("[Interrupted] %s", msg))
 local function LogWarn(msg)  MedaAuras.LogWarn(format("[Interrupted] %s", msg)) end
 
 local function UpdateMainFrameVisibility()
-    if not mainFrame then
-        return
+    if mainFrame then
+        if shouldShowByZone and hasVisibleEntries then
+            mainFrame:Show()
+        else
+            mainFrame:Hide()
+        end
     end
 
-    if shouldShowByZone and hasVisibleEntries then
-        mainFrame:Show()
-    else
-        mainFrame:Hide()
+    if stunFrame then
+        if shouldShowByZone and db and db.splitStunsToSeparateWindow and hasVisibleStunEntries then
+            stunFrame:Show()
+        else
+            stunFrame:Hide()
+        end
     end
 end
 
@@ -125,6 +144,191 @@ local function GetCachedSpecID(unit)
 
     local info = inspector:GetUnitInfo(unit)
     return info and info.specID or nil
+end
+
+local function IsKnownPlayerSpell(spellID)
+    if not spellID then return false end
+
+    local ok, known = pcall(IsPlayerSpell, spellID)
+    if ok and known then
+        return true
+    end
+
+    local ok2, known2 = pcall(IsSpellKnown, spellID, true)
+    if ok2 and known2 then
+        return true
+    end
+
+    local ok3, known3 = pcall(IsSpellKnown, spellID)
+    return ok3 and known3 or false
+end
+
+local function GetStopRecord(spellID)
+    if not StopData or not StopData.GetStop then
+        return nil
+    end
+    return StopData:GetStop(spellID)
+end
+
+local function IsStunCategory(category)
+    return category == "stun"
+end
+
+local HARD_CC_CATEGORIES = {
+    stun = true,
+    fear = true,
+    disorient = true,
+    incap = true,
+    horror = true,
+    sleep = true,
+}
+
+local function IsHardCCCategory(category)
+    return HARD_CC_CATEGORIES[category] == true
+end
+
+local function ShouldHideStopCategory(category)
+    return db and db.hideHardCC == true and IsHardCCCategory(category)
+end
+
+local function GetStopBaseCooldown(stopInfo)
+    if not stopInfo then return 0 end
+    return stopInfo.baseCd or stopInfo.cd or stopInfo.baseCD or 0
+end
+
+local function ResolveStopRecord(spellID, classToken)
+    local direct = GetStopRecord(spellID)
+    if direct then
+        return direct, spellID
+    end
+
+    if not spellID or not classToken or not StopData or not StopData.GetClassStops then
+        return nil, nil
+    end
+
+    local spellInfo = C_Spell and C_Spell.GetSpellInfo and C_Spell.GetSpellInfo(spellID) or nil
+    local spellName = spellInfo and spellInfo.name or nil
+    if not spellName or spellName == "" then
+        return nil, nil
+    end
+
+    local classLookup = StopData:GetClassStops(classToken)
+    for knownSpellID, stopData in pairs(classLookup or {}) do
+        if stopData and stopData.name == spellName then
+            return stopData, knownSpellID
+        end
+    end
+
+    return nil, nil
+end
+
+local function EnsurePartyStopMember(name, classToken)
+    local info = partyStopMembers[name]
+    if not info then
+        info = {
+            class = classToken,
+            stops = {},
+        }
+        partyStopMembers[name] = info
+    end
+
+    if classToken then
+        info.class = classToken
+    end
+
+    if not info.stops then
+        info.stops = {}
+    end
+
+    return info
+end
+
+local function EnsureStopEntry(stopMap, stopData, ownerClass, defaultRegistered)
+    if not stopMap or not stopData then return nil end
+
+    local spellID = stopData.spellID or stopData.id
+    if not spellID then return nil end
+
+    local info = stopMap[spellID]
+    if not info then
+        info = {
+            spellID = spellID,
+            cdEnd = 0,
+        }
+        stopMap[spellID] = info
+    end
+
+    info.class = ownerClass or info.class or stopData.class
+    info.category = stopData.category or info.category or "stop"
+    info.spellName = stopData.name or info.spellName or ("Spell " .. tostring(spellID))
+    info.baseCd = GetStopBaseCooldown(stopData)
+    info.icon = stopData.icon or info.icon or FALLBACK_INTERRUPT_ICON
+    info.cooldownSpellID = info.cooldownSpellID or spellID
+    info.talentCheck = stopData.talentCheck or info.talentCheck
+    if defaultRegistered ~= nil then
+        info.defaultRegistered = defaultRegistered
+    end
+
+    return info
+end
+
+local function ApplyStopCooldownStamp(stopInfo, baseCd, observedSpellID, now)
+    if not stopInfo then
+        return false
+    end
+
+    local stampTime = now or GetTime()
+    if stopInfo.lastUse and (stampTime - stopInfo.lastUse) < 0.2 then
+        return false
+    end
+
+    stopInfo.baseCd = baseCd or stopInfo.baseCd or 0
+    stopInfo.cooldownSpellID = observedSpellID or stopInfo.cooldownSpellID or stopInfo.spellID
+    stopInfo.cdEnd = stampTime + (stopInfo.baseCd or 0)
+    stopInfo.lastUse = stampTime
+    return true
+end
+
+local function SyncPartyStopsForMember(unit, name, classToken, specID)
+    if not StopData or not StopData.GetDefaultStopsForSpec or not name or not classToken then
+        return
+    end
+
+    local member = EnsurePartyStopMember(name, classToken)
+    member.unit = unit
+    member.specID = specID
+
+    local defaults = StopData:GetDefaultStopsForSpec(specID, classToken)
+    if not defaults or #defaults == 0 then
+        return
+    end
+
+    local inspector = ns.Services and ns.Services.GroupInspector
+    local unitInfo = inspector and inspector.GetUnitInfo and inspector:GetUnitInfo(unit) or nil
+    local talentsKnown = unitInfo and unitInfo.talentsKnown
+    local keep = {}
+
+    for _, stopData in ipairs(defaults) do
+        local spellID = stopData.spellID or stopData.id
+        local allowed = true
+        if talentsKnown and stopData.talentCheck then
+            allowed = inspector and inspector.UnitHasTalentSpell
+                and inspector:UnitHasTalentSpell(unit, stopData.talentCheck) or false
+        end
+
+        if allowed and spellID then
+            keep[spellID] = true
+            EnsureStopEntry(member.stops, stopData, classToken, true)
+        end
+    end
+
+    if talentsKnown then
+        for spellID, stopInfo in pairs(member.stops) do
+            if stopInfo.defaultRegistered and stopInfo.talentCheck and not keep[spellID] and (stopInfo.cdEnd or 0) <= GetTime() then
+                member.stops[spellID] = nil
+            end
+        end
+    end
 end
 
 local function ApplyInterruptEntry(info, classToken, entry)
@@ -229,6 +433,51 @@ local function GetPlayerCooldownRemaining(now)
     return NormalizeRemainingCooldown(rem)
 end
 
+local function GetStopCooldownRemaining(stopInfo, now, readLiveCooldown)
+    if not stopInfo or not now then return 0 end
+
+    local rem = 0
+    if stopInfo.cdEnd and stopInfo.cdEnd > now then
+        rem = stopInfo.cdEnd - now
+    end
+
+    local cooldownSpellID = stopInfo.cooldownSpellID or stopInfo.spellID
+    if readLiveCooldown and cooldownSpellID and IsKnownPlayerSpell(cooldownSpellID) then
+        local ok, result = pcall(GetSpellCooldownRemaining, cooldownSpellID)
+        if ok and result and result > 0 then
+            rem = result
+        end
+    end
+
+    return NormalizeRemainingCooldown(rem)
+end
+
+local function BuildAbilityLabel(ownerName, abilityName)
+    local cleanOwner = ownerName or "?"
+    local cleanAbility = abilityName or "Stop"
+    return format("%s - %s", cleanOwner, cleanAbility)
+end
+
+local function BuildDisplayEntry(ownerName, classToken, abilityName, icon, baseCd, remaining, isPlayer, kind, category)
+    return {
+        name = ownerName or "?",
+        label = BuildAbilityLabel(ownerName, abilityName),
+        info = {
+            class = classToken,
+            baseCd = baseCd or 0,
+        },
+        data = {
+            name = abilityName or "Stop",
+            icon = icon or FALLBACK_INTERRUPT_ICON,
+            cd = baseCd or 0,
+        },
+        remaining = remaining or 0,
+        isPlayer = isPlayer == true,
+        kind = kind or "stop",
+        category = category,
+    }
+end
+
 local function SortByNextAvailable(entries)
     table.sort(entries, function(a, b)
         if a.remaining ~= b.remaining then
@@ -239,20 +488,27 @@ local function SortByNextAvailable(entries)
             return a.isPlayer and not b.isPlayer
         end
 
-        return a.name < b.name
+        if a.name ~= b.name then
+            return a.name < b.name
+        end
+
+        return (a.data and a.data.name or "") < (b.data and b.data.name or "")
     end)
 end
 
-local function GetRenderablePartyEntries(now)
+local function GetRenderablePartyInterruptEntries(now)
     local entries = {}
     for name, info in pairs(partyMembers) do
         local data = GetRenderableInterruptData(info)
         if data then
             entries[#entries + 1] = {
                 name = name,
+                label = BuildAbilityLabel(name, data.name),
                 info = info,
                 data = data,
                 remaining = GetPartyCooldownRemaining(info, now or GetTime()),
+                kind = "interrupt",
+                category = "interrupt",
             }
         end
     end
@@ -268,29 +524,117 @@ local function GetRenderablePartyEntries(now)
     return entries
 end
 
+local function GetRenderablePlayerStopEntries(now)
+    local entries = {}
+    for spellID, stopInfo in pairs(myStops) do
+        local stopData = GetStopRecord(spellID)
+        local abilityName = (stopData and stopData.name) or stopInfo.spellName
+        local icon = (stopData and stopData.icon) or stopInfo.icon
+        local baseCd = (stopData and stopData.cd) or stopInfo.baseCd or 0
+        entries[#entries + 1] = BuildDisplayEntry(
+            myName or "?",
+            myClass,
+            abilityName,
+            icon,
+            baseCd,
+            GetStopCooldownRemaining(stopInfo, now, true),
+            true,
+            "stop",
+            stopInfo.category
+        )
+    end
+    return entries
+end
+
+local function GetRenderablePartyStopEntries(now)
+    local entries = {}
+    for name, member in pairs(partyStopMembers) do
+        for spellID, stopInfo in pairs(member.stops or {}) do
+            local stopData = GetStopRecord(spellID)
+            local abilityName = (stopData and stopData.name) or stopInfo.spellName
+            local icon = (stopData and stopData.icon) or stopInfo.icon
+            local baseCd = (stopData and stopData.cd) or stopInfo.baseCd or 0
+            entries[#entries + 1] = BuildDisplayEntry(
+                name,
+                member.class or stopInfo.class,
+                abilityName,
+                icon,
+                baseCd,
+                GetStopCooldownRemaining(stopInfo, now, false),
+                false,
+                "stop",
+                stopInfo.category
+            )
+        end
+    end
+    return entries
+end
+
 local function GetDisplayEntries(now)
     local entries = {}
     local playerData = mySpellID and ALL_INTERRUPTS[mySpellID]
 
     if playerData then
-        entries[#entries + 1] = {
-            name = myName or "?",
-            info = {
-                class = myClass,
-                baseCd = myBaseCd or playerData.cd,
-            },
-            data = playerData,
-            remaining = GetPlayerCooldownRemaining(now),
-            isPlayer = true,
-        }
+        entries[#entries + 1] = BuildDisplayEntry(
+            myName or "?",
+            myClass,
+            playerData.name,
+            playerData.icon,
+            myBaseCd or playerData.cd,
+            GetPlayerCooldownRemaining(now),
+            true,
+            "interrupt",
+            "interrupt"
+        )
     end
 
-    local renderablePartyEntries = GetRenderablePartyEntries(now)
+    local playerStops = GetRenderablePlayerStopEntries(now)
+    for _, entry in ipairs(playerStops) do
+        if not ShouldHideStopCategory(entry.category)
+            and not (db and db.splitStunsToSeparateWindow and IsStunCategory(entry.category)) then
+            entries[#entries + 1] = entry
+        end
+    end
+
+    local renderablePartyEntries = GetRenderablePartyInterruptEntries(now)
     for _, entry in ipairs(renderablePartyEntries) do
         entries[#entries + 1] = entry
     end
 
+    local partyStops = GetRenderablePartyStopEntries(now)
+    for _, entry in ipairs(partyStops) do
+        if not ShouldHideStopCategory(entry.category)
+            and not (db and db.splitStunsToSeparateWindow and IsStunCategory(entry.category)) then
+            entries[#entries + 1] = entry
+        end
+    end
+
     if db and db.sortByNextAvailable ~= false then
+        SortByNextAvailable(entries)
+    end
+
+    return entries
+end
+
+local function GetStunDisplayEntries(now)
+    local entries = {}
+    if not (db and db.splitStunsToSeparateWindow) or ShouldHideStopCategory("stun") then
+        return entries
+    end
+
+    for _, entry in ipairs(GetRenderablePlayerStopEntries(now)) do
+        if IsStunCategory(entry.category) then
+            entries[#entries + 1] = entry
+        end
+    end
+
+    for _, entry in ipairs(GetRenderablePartyStopEntries(now)) do
+        if IsStunCategory(entry.category) then
+            entries[#entries + 1] = entry
+        end
+    end
+
+    if db.sortByNextAvailable ~= false then
         SortByNextAvailable(entries)
     end
 
@@ -385,6 +729,49 @@ local function GetDetectedPlayerInterrupts()
     return detected
 end
 
+local function GetDetectedPlayerStops()
+    if not StopData or not StopData.GetAllPlayerStopCandidates then
+        return {}
+    end
+
+    local detected = {}
+    local seen = {}
+    local specIndex = GetSpecialization()
+    local specID = specIndex and GetSpecializationInfo(specIndex)
+    local candidates = StopData:GetAllPlayerStopCandidates(myClass or select(2, UnitClass("player")), specID)
+
+    for _, entry in ipairs(candidates or {}) do
+        local spellID = entry.spellID or entry.id
+        if spellID and not seen[spellID] and IsKnownPlayerSpell(spellID) then
+            seen[spellID] = true
+            detected[#detected + 1] = {
+                spellID = spellID,
+                name = entry.name or ("Spell " .. tostring(spellID)),
+                cd = entry.cd or entry.baseCD or 0,
+                icon = entry.icon or FALLBACK_INTERRUPT_ICON,
+                category = entry.category or "stop",
+            }
+        end
+    end
+
+    return detected
+end
+
+local function SyncKnownPlayerStops()
+    local seen = {}
+    for _, entry in ipairs(GetDetectedPlayerStops()) do
+        seen[entry.spellID] = true
+        EnsureStopEntry(myStops, entry, myClass, true)
+    end
+
+    local now = GetTime()
+    for spellID, stopInfo in pairs(myStops) do
+        if not seen[spellID] and (stopInfo.cdEnd or 0) <= now then
+            myStops[spellID] = nil
+        end
+    end
+end
+
 -- ============================================================================
 -- Find own interrupt spell
 -- ============================================================================
@@ -403,9 +790,11 @@ local function FindMyInterrupt()
     mySpellID = nil
     myBaseCd = nil
     myIsPetSpell = false
+    wipe(myStops)
 
     if not InterruptResolver then
         LogWarn("InterruptResolver unavailable; player interrupt cannot be resolved")
+        SyncKnownPlayerStops()
         return
     end
 
@@ -415,6 +804,7 @@ local function FindMyInterrupt()
         if specData and specData.hasInterrupt == false then
             LogDebug(format("  specID %d has no interrupt", specID))
         end
+        SyncKnownPlayerStops()
         return
     end
 
@@ -433,6 +823,8 @@ local function FindMyInterrupt()
     Log(format("FindMyInterrupt result: %s (ID %s, CD %ss, pet=%s)",
         mySpellID and ALL_INTERRUPTS[mySpellID] and ALL_INTERRUPTS[mySpellID].name or "NONE",
         tostring(mySpellID), tostring(myBaseCd), tostring(myIsPetSpell)))
+
+    SyncKnownPlayerStops()
 end
 
 -- ============================================================================
@@ -460,6 +852,7 @@ AutoRegisterParty = function()
                 tostring(name and partyMembers[name] ~= nil),
                 tostring(name and noInterruptPlayers[name] ~= nil)))
             if name and cls then
+                SyncPartyStopsForMember(u, name, cls, specID)
                 if source == "spec_no_interrupt" or source == "role_no_interrupt" then
                     partyMembers[name] = nil
                     noInterruptPlayers[name] = true
@@ -501,6 +894,11 @@ CleanPartyList = function()
             LogDebug(format("CleanPartyList: removed %s (left group)", name))
         end
     end
+    for name in pairs(partyStopMembers) do
+        if not current[name] then
+            partyStopMembers[name] = nil
+        end
+    end
     for name in pairs(noInterruptPlayers) do
         if not current[name] then noInterruptPlayers[name] = nil end
     end
@@ -517,6 +915,8 @@ end
 local function ApplyTalentModifiersForMember(unit, name, class, specID)
     LogDebug(format("ApplyTalentModifiersForMember: unit=%s name=%s class=%s specID=%s",
         tostring(unit), tostring(name), tostring(class), tostring(specID)))
+
+    SyncPartyStopsForMember(unit, name, class, specID)
 
     if not InterruptResolver then
         LogWarn("InterruptResolver unavailable during talent scan")
@@ -624,6 +1024,66 @@ local function OnPartyInterruptDetected(name, spellID, unit)
     UpdateDisplay()
 end
 
+local function ResolveStopCandidates(name, unit)
+    if not StopData or not StopData.GetClassStops then
+        return nil
+    end
+
+    local classToken = name and partyStopMembers[name] and partyStopMembers[name].class or nil
+    if not classToken and unit and UnitExists(unit) then
+        classToken = select(2, UnitClass(unit))
+    end
+    if not classToken then
+        return nil
+    end
+
+    local lookupTable, knownIDs = StopData:GetClassStops(classToken)
+    return {
+        lookupTable = lookupTable,
+        knownIDs = knownIDs,
+        label = format("%s:stops", tostring(classToken)),
+    }
+end
+
+local function OnPartyStopDetected(name, spellID, stopData, unit, debugInfo)
+    if not stopData then
+        return
+    end
+
+    local now = GetTime()
+    local classToken = name and partyStopMembers[name] and partyStopMembers[name].class or nil
+    if not classToken and unit and UnitExists(unit) then
+        classToken = select(2, UnitClass(unit))
+    end
+    if not classToken then
+        LogWarn(format("PARTY STOP: unable to resolve class for %s (%s)", tostring(name), tostring(unit)))
+        return
+    end
+
+    local member = EnsurePartyStopMember(name, classToken)
+    member.unit = unit or member.unit
+    local stopInfo = EnsureStopEntry(member.stops, stopData, classToken, false)
+    if not stopInfo then
+        return
+    end
+
+    local baseCd = stopInfo.baseCd or stopData.cd or stopData.baseCD or 0
+    if not ApplyStopCooldownStamp(stopInfo, baseCd, spellID, now) then
+        return
+    end
+
+    Log(format("PARTY STOP: %s cast %s (ID %d, cat=%s, CD=%ds, confidence=%s via=%s)",
+        tostring(name),
+        tostring(stopInfo.spellName or stopData.name or spellID),
+        tonumber(spellID) or 0,
+        tostring(stopInfo.category or stopData.category or "stop"),
+        tonumber(baseCd) or 0,
+        tostring(debugInfo and debugInfo.confidence or "unknown"),
+        tostring(debugInfo and debugInfo.chosenBy or "unknown")))
+
+    UpdateDisplay()
+end
+
 -- ============================================================================
 -- Handle mob interrupt correlation (from PartySpellWatcher)
 -- ============================================================================
@@ -667,18 +1127,34 @@ local function SetupOwnKickTracking()
     playerCastFrame = CreateFrame("Frame")
     playerCastFrame:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "pet")
     playerCastFrame:SetScript("OnEvent", function(_, _, unit, _, spellID)
-        if not mySpellID then return end
         local isInterrupt = ALL_INTERRUPTS[spellID]
-        if not isInterrupt then return end
-        local cd
-        if spellID == mySpellID then
-            cd = myBaseCd or isInterrupt.cd
-        else
-            cd = isInterrupt.cd
+        if isInterrupt and mySpellID then
+            local cd
+            if spellID == mySpellID then
+                cd = myBaseCd or isInterrupt.cd
+            else
+                cd = isInterrupt.cd
+            end
+            myKickCdEnd = GetTime() + cd
+            Log(format("OWN KICK: unit=%s spellID=%d (%s) CD=%ds (mySpellID=%s)",
+                tostring(unit), spellID, isInterrupt.name, cd, tostring(mySpellID)))
         end
-        myKickCdEnd = GetTime() + cd
-        Log(format("OWN KICK: unit=%s spellID=%d (%s) CD=%ds (mySpellID=%s)",
-            tostring(unit), spellID, isInterrupt.name, cd, tostring(mySpellID)))
+
+        local stopData, canonicalStopID = ResolveStopRecord(spellID, myClass)
+        if stopData then
+            local stopInfo = EnsureStopEntry(myStops, stopData, myClass, true)
+            if stopInfo and ApplyStopCooldownStamp(stopInfo, stopInfo.baseCd or stopData.cd or 0, spellID, GetTime()) then
+                if canonicalStopID and canonicalStopID ~= stopInfo.spellID then
+                    stopInfo.spellID = canonicalStopID
+                end
+                Log(format("OWN STOP: unit=%s spellID=%d (%s) cat=%s CD=%ds",
+                    tostring(unit),
+                    tonumber(spellID) or 0,
+                    tostring(stopInfo.spellName or stopData.name),
+                    tostring(stopInfo.category or stopData.category or "stop"),
+                    tonumber(stopInfo.baseCd or stopData.cd or 0) or 0))
+            end
+        end
     end)
     LogDebug("SetupOwnKickTracking: registered UNIT_SPELLCAST_SUCCEEDED for player+pet")
 end
@@ -687,6 +1163,139 @@ local function TeardownOwnKickTracking()
     if playerCastFrame then
         playerCastFrame:UnregisterAllEvents()
         playerCastFrame = nil
+    end
+end
+
+local function ResolvePartySourceOwner(sourceGUID, sourceName)
+    if not sourceGUID then
+        return nil, nil, nil
+    end
+
+    if UnitGUID("player") == sourceGUID or UnitGUID("pet") == sourceGUID then
+        return myName or UnitName("player"), myClass or select(2, UnitClass("player")), "player"
+    end
+
+    for i = 1, 4 do
+        local unit = "party" .. i
+        if UnitExists(unit) and UnitGUID(unit) == sourceGUID then
+            return UnitName(unit), select(2, UnitClass(unit)), unit
+        end
+
+        local petUnit = "partypet" .. i
+        if UnitExists(petUnit) and UnitGUID(petUnit) == sourceGUID then
+            return UnitName(unit), select(2, UnitClass(unit)), unit
+        end
+    end
+
+    if sourceName and partyStopMembers[sourceName] then
+        local member = partyStopMembers[sourceName]
+        return sourceName, member and member.class or nil, member and member.unit or nil
+    end
+
+    return nil, nil, nil
+end
+
+-- Retail 12.0 moved CLEU onto the restricted callback-event path. Registering
+-- it through Frame:RegisterEvent() from the options toggle flow can trip the
+-- protected-action popup, so prefer RegisterEventCallback when available.
+local function HandleStopCombatEvent()
+    local _, subEvent, _, sourceGUID, sourceName, _, _, _, _, _, _, spellID = CombatLogGetCurrentEventInfo()
+    if subEvent ~= "SPELL_CAST_SUCCESS" and subEvent ~= "SPELL_CREATE" and subEvent ~= "SPELL_SUMMON" then
+        return
+    end
+
+    local ownerName, classToken, ownerUnit = ResolvePartySourceOwner(sourceGUID, sourceName)
+    if not ownerName or not classToken then
+        return
+    end
+
+    local stopData, canonicalStopID = ResolveStopRecord(spellID, classToken)
+    if not stopData then
+        return
+    end
+
+    local now = GetTime()
+    if ownerUnit == "player" then
+        local stopInfo = EnsureStopEntry(myStops, stopData, myClass or classToken, true)
+        if stopInfo and ApplyStopCooldownStamp(stopInfo, stopInfo.baseCd or stopData.cd or 0, spellID, now) then
+            if canonicalStopID and canonicalStopID ~= stopInfo.spellID then
+                stopInfo.spellID = canonicalStopID
+            end
+            Log(format("OWN STOP [CLEU]: spellID=%d (%s) cat=%s CD=%ds",
+                tonumber(spellID) or 0,
+                tostring(stopInfo.spellName or stopData.name),
+                tostring(stopInfo.category or stopData.category or "stop"),
+                tonumber(stopInfo.baseCd or stopData.cd or 0) or 0))
+            UpdateDisplay()
+        end
+        return
+    end
+
+    local member = EnsurePartyStopMember(ownerName, classToken)
+    member.unit = ownerUnit or member.unit
+    local stopInfo = EnsureStopEntry(member.stops, stopData, classToken, false)
+    if stopInfo and ApplyStopCooldownStamp(stopInfo, stopInfo.baseCd or stopData.cd or 0, spellID, now) then
+        if canonicalStopID and canonicalStopID ~= stopInfo.spellID then
+            stopInfo.spellID = canonicalStopID
+        end
+        Log(format("PARTY STOP [CLEU]: %s cast %s (ID %d, cat=%s, CD=%ds)",
+            tostring(ownerName),
+            tostring(stopInfo.spellName or stopData.name or spellID),
+            tonumber(spellID) or 0,
+            tostring(stopInfo.category or stopData.category or "stop"),
+            tonumber(stopInfo.baseCd or stopData.cd or 0) or 0))
+        UpdateDisplay()
+    end
+end
+
+local function SetupStopCombatFallback()
+    if stopCombatFrame then
+        return
+    end
+
+    stopCombatFrame = CreateFrame("Frame")
+    stopCombatUsesCallbackEvent = false
+
+    if stopCombatFrame.RegisterEventCallback and stopCombatFrame.UnregisterEventCallback then
+        local ok, registered = pcall(
+            stopCombatFrame.RegisterEventCallback,
+            stopCombatFrame,
+            "COMBAT_LOG_EVENT_UNFILTERED",
+            HandleStopCombatEvent
+        )
+        if ok and registered ~= false then
+            stopCombatUsesCallbackEvent = true
+            LogDebug("SetupStopCombatFallback: registered COMBAT_LOG_EVENT_UNFILTERED via RegisterEventCallback")
+            return
+        end
+
+        LogWarn(format(
+            "SetupStopCombatFallback: callback registration failed, falling back to RegisterEvent (ok=%s registered=%s)",
+            tostring(ok),
+            tostring(registered)
+        ))
+    end
+
+    stopCombatFrame:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
+    stopCombatFrame:SetScript("OnEvent", HandleStopCombatEvent)
+    LogDebug("SetupStopCombatFallback: registered COMBAT_LOG_EVENT_UNFILTERED via RegisterEvent")
+end
+
+local function TeardownStopCombatFallback()
+    if stopCombatFrame then
+        if stopCombatUsesCallbackEvent and stopCombatFrame.UnregisterEventCallback then
+            pcall(
+                stopCombatFrame.UnregisterEventCallback,
+                stopCombatFrame,
+                "COMBAT_LOG_EVENT_UNFILTERED",
+                HandleStopCombatEvent
+            )
+        else
+            stopCombatFrame:UnregisterAllEvents()
+        end
+        stopCombatFrame:SetScript("OnEvent", nil)
+        stopCombatUsesCallbackEvent = false
+        stopCombatFrame = nil
     end
 end
 
@@ -712,92 +1321,171 @@ local function GetBarLayout()
     return barW, barH, iconS, fontSize, cdFontSize, titleH, titleFontSize
 end
 
-local function RebuildBars()
-    for i = 1, 6 do
-        if bars[i] then
-            bars[i]:Hide()
-            bars[i]:SetParent(nil)
-            bars[i] = nil
+local function ClearBarSet(barSet)
+    for i = 1, #barSet do
+        if barSet[i] then
+            barSet[i]:Hide()
+            barSet[i]:SetParent(nil)
+            barSet[i] = nil
         end
     end
+end
+
+local function CreateBarForFrame(parentFrame, index)
+    local barW, barH, iconS, fontSize, cdFontSize, titleH = GetBarLayout()
+    local yOff
+    if db.growUp then
+        yOff = (index - 1) * (barH + 1)
+    else
+        yOff = -(titleH + (index - 1) * (barH + 1))
+    end
+
+    local f = CreateFrame("Frame", nil, parentFrame)
+    f:SetSize(iconS + barW, barH)
+    if db.growUp then
+        f:SetPoint("BOTTOMLEFT", 0, yOff)
+    else
+        f:SetPoint("TOPLEFT", 0, yOff)
+    end
+
+    local ico = f:CreateTexture(nil, "ARTWORK")
+    ico:SetSize(iconS, iconS)
+    ico:SetPoint("LEFT", 0, 0)
+    ico:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    if iconS == 0 then ico:Hide() end
+    f.icon = ico
+
+    local barBg = f:CreateTexture(nil, "BACKGROUND")
+    barBg:SetPoint("TOPLEFT", iconS, 0)
+    barBg:SetPoint("BOTTOMRIGHT", 0, 0)
+    barBg:SetTexture(BAR_TEXTURE)
+    barBg:SetVertexColor(0.15, 0.15, 0.15, 0.9)
+    f.barBg = barBg
+
+    local sb = CreateFrame("StatusBar", nil, f)
+    sb:SetPoint("TOPLEFT", iconS, 0)
+    sb:SetPoint("BOTTOMRIGHT", 0, 0)
+    sb:SetStatusBarTexture(BAR_TEXTURE)
+    sb:SetStatusBarColor(1, 1, 1, 0.85)
+    sb:SetMinMaxValues(0, 1)
+    sb:SetValue(0)
+    sb:SetFrameLevel(f:GetFrameLevel() + 1)
+    f.cdBar = sb
+
+    local content = CreateFrame("Frame", nil, f)
+    content:SetPoint("TOPLEFT", iconS, 0)
+    content:SetPoint("BOTTOMRIGHT", 0, 0)
+    content:SetFrameLevel(sb:GetFrameLevel() + 1)
+
+    local nm = content:CreateFontString(nil, "OVERLAY")
+    nm:SetFontObject(GetFontObj(db.font or "default", fontSize, "outline"))
+    nm:SetPoint("LEFT", 6, 0)
+    nm:SetJustifyH("LEFT")
+    nm:SetWidth(barW - 50)
+    nm:SetWordWrap(false)
+    nm:SetShadowOffset(1, -1)
+    nm:SetShadowColor(0, 0, 0, 1)
+    if db.showNames == false then nm:Hide() end
+    f.nameText = nm
+
+    local cdTxt = content:CreateFontString(nil, "OVERLAY")
+    cdTxt:SetFontObject(GetFontObj(db.font or "default", cdFontSize, "outline"))
+    cdTxt:SetPoint("RIGHT", -6, 0)
+    cdTxt:SetShadowOffset(1, -1)
+    cdTxt:SetShadowColor(0, 0, 0, 1)
+    f.cdText = cdTxt
+
+    f:Hide()
+    return f
+end
+
+local function RebuildBarSet(parentFrame, titleFS, resizeBtn, barSet, requiredCount)
+    if not parentFrame then return end
+
+    ClearBarSet(barSet)
 
     local barW, barH, iconS, fontSize, cdFontSize, titleH, titleFontSize = GetBarLayout()
-    mainFrame:SetWidth(db.frameWidth)
-    mainFrame:SetAlpha(db.alpha)
+    parentFrame:SetWidth(db.frameWidth)
+    parentFrame:SetAlpha(db.alpha)
 
-    if titleText then
-        titleText:SetFontObject(GetFontObj(db.font or "default", titleFontSize, "outline"))
-        if db.showTitle then titleText:Show() else titleText:Hide() end
+    if titleFS then
+        titleFS:SetFontObject(GetFontObj(db.font or "default", titleFontSize, "outline"))
+        if db.showTitle then titleFS:Show() else titleFS:Hide() end
     end
 
-    for i = 1, 6 do
-        local yOff
-        if db.growUp then
-            yOff = (i - 1) * (barH + 1)
-        else
-            yOff = -(titleH + (i - 1) * (barH + 1))
-        end
-
-        local f = CreateFrame("Frame", nil, mainFrame)
-        f:SetSize(iconS + barW, barH)
-        if db.growUp then
-            f:SetPoint("BOTTOMLEFT", 0, yOff)
-        else
-            f:SetPoint("TOPLEFT", 0, yOff)
-        end
-
-        local ico = f:CreateTexture(nil, "ARTWORK")
-        ico:SetSize(iconS, iconS)
-        ico:SetPoint("LEFT", 0, 0)
-        ico:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-        if iconS == 0 then ico:Hide() end
-        f.icon = ico
-
-        local barBg = f:CreateTexture(nil, "BACKGROUND")
-        barBg:SetPoint("TOPLEFT", iconS, 0)
-        barBg:SetPoint("BOTTOMRIGHT", 0, 0)
-        barBg:SetTexture(BAR_TEXTURE)
-        barBg:SetVertexColor(0.15, 0.15, 0.15, 0.9)
-        f.barBg = barBg
-
-        local sb = CreateFrame("StatusBar", nil, f)
-        sb:SetPoint("TOPLEFT", iconS, 0)
-        sb:SetPoint("BOTTOMRIGHT", 0, 0)
-        sb:SetStatusBarTexture(BAR_TEXTURE)
-        sb:SetStatusBarColor(1, 1, 1, 0.85)
-        sb:SetMinMaxValues(0, 1)
-        sb:SetValue(0)
-        sb:SetFrameLevel(f:GetFrameLevel() + 1)
-        f.cdBar = sb
-
-        local content = CreateFrame("Frame", nil, f)
-        content:SetPoint("TOPLEFT", iconS, 0)
-        content:SetPoint("BOTTOMRIGHT", 0, 0)
-        content:SetFrameLevel(sb:GetFrameLevel() + 1)
-
-        local nm = content:CreateFontString(nil, "OVERLAY")
-        nm:SetFontObject(GetFontObj(db.font or "default", fontSize, "outline"))
-        nm:SetPoint("LEFT", 6, 0)
-        nm:SetJustifyH("LEFT")
-        nm:SetWidth(barW - 50)
-        nm:SetWordWrap(false)
-        nm:SetShadowOffset(1, -1)
-        nm:SetShadowColor(0, 0, 0, 1)
-        if db.showNames == false then nm:Hide() end
-        f.nameText = nm
-
-        local cdTxt = content:CreateFontString(nil, "OVERLAY")
-        cdTxt:SetFontObject(GetFontObj(db.font or "default", cdFontSize, "outline"))
-        cdTxt:SetPoint("RIGHT", -6, 0)
-        cdTxt:SetShadowOffset(1, -1)
-        cdTxt:SetShadowColor(0, 0, 0, 1)
-        f.cdText = cdTxt
-
-        f:Hide()
-        bars[i] = f
+    local count = math.max(6, requiredCount or 0)
+    for i = 1, count do
+        barSet[i] = CreateBarForFrame(parentFrame, i)
     end
 
-    if resizeHandle then resizeHandle:Raise() end
+    if resizeBtn then
+        resizeBtn:Raise()
+    end
+end
+
+local function RebuildBars(requiredCount)
+    RebuildBarSet(mainFrame, titleText, resizeHandle, bars, requiredCount)
+end
+
+local function RebuildStunBars(requiredCount)
+    RebuildBarSet(stunFrame, stunTitleText, stunResizeHandle, stunBars, requiredCount)
+end
+
+local function CountVisibleBars(barSet)
+    local numVisible = 0
+    for i = 1, #barSet do
+        if barSet[i] and barSet[i]:IsShown() then
+            numVisible = numVisible + 1
+        end
+    end
+    if numVisible < 1 then
+        numVisible = 1
+    end
+    return numVisible
+end
+
+local function ApplyFrameEntries(frame, barSet, entries)
+    if not frame then return 0 end
+
+    local _, barH, _, fontSize, cdFontSize, titleH = GetBarLayout()
+    local numVisible = #entries
+    if numVisible > #barSet then
+        if barSet == bars then
+            RebuildBars(numVisible)
+        else
+            RebuildStunBars(numVisible)
+        end
+    end
+
+    for index, entry in ipairs(entries) do
+        local bar = barSet[index]
+        if not bar then break end
+        bar:Show()
+        ApplyBarVisuals(
+            bar,
+            entry.label or entry.name,
+            entry.info.class,
+            entry.data.icon or FALLBACK_INTERRUPT_ICON,
+            entry.info.baseCd or entry.data.cd or 15,
+            entry.remaining,
+            entry.isPlayer,
+            fontSize,
+            cdFontSize
+        )
+    end
+
+    for i = numVisible + 1, #barSet do
+        if barSet[i] then
+            barSet[i]:Hide()
+        end
+    end
+
+    if not isResizing then
+        local visibleCount = numVisible > 0 and numVisible or 1
+        frame:SetHeight(titleH + visibleCount * (barH + 1))
+    end
+
+    return numVisible
 end
 
 -- ============================================================================
@@ -825,14 +1513,21 @@ end
 local lastStateDump = 0
 
 UpdateDisplay = function()
-    if not mainFrame or not shouldShowByZone then return end
+    if not mainFrame then return end
 
-    local _, barH, _, fontSize, cdFontSize, titleH = GetBarLayout()
+    if not shouldShowByZone then
+        hasVisibleEntries = false
+        hasVisibleStunEntries = false
+        UpdateMainFrameVisibility()
+        return
+    end
+
     local now = GetTime()
-    local barIdx = 1
     local displayEntries = GetDisplayEntries(now)
-    local numVisible = math.min(#displayEntries, 6)
+    local stunEntries = GetStunDisplayEntries(now)
+    local numVisible = #displayEntries
     hasVisibleEntries = numVisible > 0
+    hasVisibleStunEntries = #stunEntries > 0
 
     if now - lastStateDump > 10 then
         lastStateDump = now
@@ -843,45 +1538,106 @@ UpdateDisplay = function()
             LogDebug(format("  STATE: %s class=%s spell=%s cd=%.1fs",
                 n, info.class, tostring(info.spellID), rem))
         end
-        LogDebug(format("UpdateDisplay tick: mySpell=%s myCD=%.1f members=%d display=%d visible=%s",
+        LogDebug(format("UpdateDisplay tick: mySpell=%s myCD=%.1f members=%d display=%d stuns=%d visible=%s",
             tostring(mySpellID), GetPlayerCooldownRemaining(now),
-            memberCount, #displayEntries, tostring(shouldShowByZone)))
+            memberCount, #displayEntries, #stunEntries, tostring(shouldShowByZone)))
     end
 
-    for _, entry in ipairs(displayEntries) do
-        if barIdx > 6 then break end
-        local bar = bars[barIdx]
-        bar:Show()
-        ApplyBarVisuals(
-            bar,
-            entry.name,
-            entry.info.class,
-            entry.data.icon or FALLBACK_INTERRUPT_ICON,
-            entry.info.baseCd or entry.data.cd or 15,
-            entry.remaining,
-            entry.isPlayer,
-            fontSize,
-            cdFontSize
-        )
-        barIdx = barIdx + 1
+    ApplyFrameEntries(mainFrame, bars, displayEntries)
+    if stunFrame then
+        ApplyFrameEntries(stunFrame, stunBars, stunEntries)
     end
-
-    for i = barIdx, 6 do
-        if bars[i] then bars[i]:Hide() end
-    end
-
     UpdateMainFrameVisibility()
-
-    if not isResizing then
-        if numVisible > 0 then
-            mainFrame:SetHeight(titleH + numVisible * (barH + 1))
-        end
-    end
 end
 
 -- ============================================================================
 -- UI: Create main frame
 -- ============================================================================
+
+local function FinishSharedResize(frame, barSet)
+    frame:StopMovingOrSizing()
+    isResizing = false
+    db.frameWidth = math.floor(frame:GetWidth())
+    local titleH = db.showTitle and 20 or 0
+    local dragH = frame:GetHeight() - titleH
+    local numVisible = CountVisibleBars(barSet)
+    db.barHeight = math.max(12, math.floor(dragH / numVisible) - 1)
+    RebuildBars(#GetDisplayEntries(GetTime()))
+    RebuildStunBars(#GetStunDisplayEntries(GetTime()))
+end
+
+local function CreateTrackerFrame(frameName, titleMarkup, positionKey, existingFrame, existingTitle, existingResize, barSet)
+    if existingFrame then
+        return existingFrame, existingTitle, existingResize
+    end
+
+    local frame = CreateFrame("Frame", frameName, UIParent)
+    frame:SetSize(db.frameWidth, 200)
+    frame:SetFrameStrata("MEDIUM")
+    frame:SetClampedToScreen(true)
+    frame:SetMovable(true)
+    frame:EnableMouse(true)
+    frame:RegisterForDrag("LeftButton")
+    frame:SetScript("OnDragStart", function(self)
+        if not db.locked then self:StartMoving() end
+    end)
+    frame:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        local point, _, _, x, y = self:GetPoint()
+        local pos = db[positionKey]
+        pos.point = point
+        pos.x = x
+        pos.y = y
+    end)
+    frame:SetAlpha(db.alpha)
+    frame:SetResizable(true)
+    frame:SetResizeBounds(80, 40, 600, 1200)
+
+    local bg = frame:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    bg:SetTexture(BAR_TEXTURE)
+    bg:SetVertexColor(0.05, 0.05, 0.05, 0.85)
+
+    local titleFS = frame:CreateFontString(nil, "OVERLAY")
+    titleFS:SetFontObject(GetFontObj(db.font or "default", (db.titleFontSize and db.titleFontSize > 0) and db.titleFontSize or 12, "outline"))
+    titleFS:SetPoint("TOP", 0, -3)
+    titleFS:SetText(titleMarkup)
+    if not db.showTitle then titleFS:Hide() end
+
+    local resizeBtn = CreateFrame("Button", nil, frame)
+    resizeBtn:SetSize(16, 16)
+    resizeBtn:SetPoint("BOTTOMRIGHT", 0, 0)
+    resizeBtn:SetFrameLevel(frame:GetFrameLevel() + 10)
+    resizeBtn:EnableMouse(true)
+
+    for j = 0, 2 do
+        local line = resizeBtn:CreateTexture(nil, "OVERLAY", nil, 1)
+        line:SetTexture(BAR_TEXTURE)
+        line:SetVertexColor(0.6, 0.8, 0.9, 0.7)
+        line:SetSize(1, (3 - j) * 4)
+        line:SetPoint("BOTTOMRIGHT", -(j * 4 + 2), 2)
+    end
+
+    resizeBtn:SetScript("OnMouseDown", function(_, button)
+        if button == "LeftButton" and not db.locked then
+            isResizing = true
+            frame:StartSizing("BOTTOMRIGHT")
+        end
+    end)
+    resizeBtn:SetScript("OnMouseUp", function()
+        FinishSharedResize(frame, barSet)
+    end)
+
+    local pos = db[positionKey]
+    if not pos then
+        pos = { point = "CENTER", x = positionKey == "stunPosition" and 250 or 0, y = -150 }
+        db[positionKey] = pos
+    end
+    frame:ClearAllPoints()
+    frame:SetPoint(pos.point, UIParent, pos.point, pos.x, pos.y)
+
+    return frame, titleFS, resizeBtn
+end
 
 local function CreateUI()
     if mainFrame then
@@ -890,87 +1646,39 @@ local function CreateUI()
     end
     LogDebug("CreateUI: building main frame...")
 
-    mainFrame = CreateFrame("Frame", "MedaAurasInterruptedFrame", UIParent)
-    mainFrame:SetSize(db.frameWidth, 200)
-    mainFrame:SetFrameStrata("MEDIUM")
-    mainFrame:SetClampedToScreen(true)
-    mainFrame:SetMovable(true)
-    mainFrame:EnableMouse(true)
-    mainFrame:RegisterForDrag("LeftButton")
-    mainFrame:SetScript("OnDragStart", function(self)
-        if not db.locked then self:StartMoving() end
-    end)
-    mainFrame:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        local point, _, _, x, y = self:GetPoint()
-        db.position.point = point
-        db.position.x = x
-        db.position.y = y
-    end)
-    mainFrame:SetAlpha(db.alpha)
-    mainFrame:SetResizable(true)
-    mainFrame:SetResizeBounds(80, 40, 600, 600)
-
-    local bg = mainFrame:CreateTexture(nil, "BACKGROUND")
-    bg:SetAllPoints()
-    bg:SetTexture(BAR_TEXTURE)
-    bg:SetVertexColor(0.05, 0.05, 0.05, 0.85)
-
-    titleText = mainFrame:CreateFontString(nil, "OVERLAY")
-    titleText:SetFontObject(GetFontObj(db.font or "default", (db.titleFontSize and db.titleFontSize > 0) and db.titleFontSize or 12, "outline"))
-    titleText:SetPoint("TOP", 0, -3)
-    titleText:SetText("|cFF00DDDDInterrupts|r")
-    if not db.showTitle then titleText:Hide() end
-
-    resizeHandle = CreateFrame("Button", nil, mainFrame)
-    resizeHandle:SetSize(16, 16)
-    resizeHandle:SetPoint("BOTTOMRIGHT", 0, 0)
-    resizeHandle:SetFrameLevel(mainFrame:GetFrameLevel() + 10)
-    resizeHandle:EnableMouse(true)
-
-    for j = 0, 2 do
-        local line = resizeHandle:CreateTexture(nil, "OVERLAY", nil, 1)
-        line:SetTexture(BAR_TEXTURE)
-        line:SetVertexColor(0.6, 0.8, 0.9, 0.7)
-        line:SetSize(1, (3 - j) * 4)
-        line:SetPoint("BOTTOMRIGHT", -(j * 4 + 2), 2)
-    end
-
-    resizeHandle:SetScript("OnMouseDown", function(_, button)
-        if button == "LeftButton" and not db.locked then
-            isResizing = true
-            mainFrame:StartSizing("BOTTOMRIGHT")
-        end
-    end)
-    resizeHandle:SetScript("OnMouseUp", function()
-        mainFrame:StopMovingOrSizing()
-        isResizing = false
-        db.frameWidth = math.floor(mainFrame:GetWidth())
-        local numVisible = 0
-        for i = 1, 6 do
-            if bars[i] and bars[i]:IsShown() then numVisible = numVisible + 1 end
-        end
-        if numVisible < 1 then numVisible = 1 end
-        local titleH = db.showTitle and 20 or 0
-        local dragH = mainFrame:GetHeight() - titleH
-        db.barHeight = math.max(12, math.floor(dragH / numVisible) - 1)
-        RebuildBars()
-    end)
-
-    mainFrame:ClearAllPoints()
-    mainFrame:SetPoint(db.position.point, UIParent, db.position.point, db.position.x, db.position.y)
+    mainFrame, titleText, resizeHandle = CreateTrackerFrame(
+        "MedaAurasInterruptedFrame",
+        "|cFF00DDDDStops|r",
+        "position",
+        mainFrame,
+        titleText,
+        resizeHandle,
+        bars
+    )
+    stunFrame, stunTitleText, stunResizeHandle = CreateTrackerFrame(
+        "MedaAurasInterruptedStunFrame",
+        "|cFF74F2FFStuns|r",
+        "stunPosition",
+        stunFrame,
+        stunTitleText,
+        stunResizeHandle,
+        stunBars
+    )
     UpdateMainFrameVisibility()
 
     LogDebug(format("CreateUI: frame positioned at %s (%.0f, %.0f), now building bars",
         db.position.point, db.position.x, db.position.y))
-    RebuildBars()
+    RebuildBars(#GetDisplayEntries(GetTime()))
+    RebuildStunBars(#GetStunDisplayEntries(GetTime()))
     LogDebug("CreateUI: complete")
 end
 
 local function DestroyUI()
     if updateTicker then updateTicker:Cancel(); updateTicker = nil end
     hasVisibleEntries = false
+    hasVisibleStunEntries = false
     if mainFrame then mainFrame:Hide() end
+    if stunFrame then stunFrame:Hide() end
 end
 
 -- ============================================================================
@@ -1044,6 +1752,7 @@ local function OnInitialize(moduleDB)
 
     LogDebug("  Step 4: SetupOwnKickTracking")
     SetupOwnKickTracking()
+    SetupStopCombatFallback()
 
     LogDebug("  Step 5: SetupRosterEvents")
     SetupRosterEvents()
@@ -1052,9 +1761,19 @@ local function OnInitialize(moduleDB)
     AutoRegisterParty()
 
     LogDebug("  Step 7: Register PartySpellWatcher callbacks")
+    ns.Services.PartySpellWatcher:Initialize()
     watcherHandle = ns.Services.PartySpellWatcher:OnPartyInterrupt(OnPartyInterruptDetected)
     mobKickHandle = ns.Services.PartySpellWatcher:OnMobKick(OnMobKickConfirmed)
-    LogDebug(format("  watcherHandle=%s mobKickHandle=%s", tostring(watcherHandle), tostring(mobKickHandle)))
+    if StopData and StopData.GetAllStopsLookup then
+        stopWatcherHandle = ns.Services.PartySpellWatcher:OnPartySpellMatch({
+            label = "InterruptedStops",
+            lookupTable = StopData:GetAllStopsLookup(),
+            candidateResolver = ResolveStopCandidates,
+            callback = OnPartyStopDetected,
+        })
+    end
+    LogDebug(format("  watcherHandle=%s mobKickHandle=%s stopWatcherHandle=%s",
+        tostring(watcherHandle), tostring(mobKickHandle), tostring(stopWatcherHandle)))
 
     LogDebug("  Step 8: Register GroupInspector inspect-complete callback")
     ns.Services.GroupInspector:RegisterInspectComplete("Interrupted", ApplyTalentModifiersForMember)
@@ -1076,6 +1795,7 @@ local function OnDisable()
     Log("OnDisable called")
     DestroyUI()
     TeardownOwnKickTracking()
+    TeardownStopCombatFallback()
     TeardownRosterEvents()
 
     if watcherHandle then
@@ -1086,12 +1806,19 @@ local function OnDisable()
         ns.Services.PartySpellWatcher:Unregister(mobKickHandle)
         mobKickHandle = nil
     end
+    if stopWatcherHandle then
+        ns.Services.PartySpellWatcher:Unregister(stopWatcherHandle)
+        stopWatcherHandle = nil
+    end
 
     ns.Services.GroupInspector:UnregisterInspectComplete("Interrupted")
 
     wipe(partyMembers)
+    wipe(partyStopMembers)
     wipe(noInterruptPlayers)
+    wipe(myStops)
     mySpellID = nil
+    myKickCdEnd = 0
 end
 
 -- ============================================================================
@@ -1126,7 +1853,10 @@ local MODULE_DEFAULTS = {
     showInOpenWorld = false,
     showInArena = true,
     showInBG = false,
+    splitStunsToSeparateWindow = false,
+    hideHardCC = false,
     position = { point = "CENTER", x = 0, y = -150 },
+    stunPosition = { point = "CENTER", x = 250, y = -150 },
 }
 
 -- ============================================================================
@@ -1202,7 +1932,7 @@ local function CreatePreviewBars()
         pvTitleText = pvInner:CreateFontString(nil, "OVERLAY")
         pvTitleText:SetFontObject(GetFontObj(db.font or "default", titleFontSize, "outline"))
         pvTitleText:SetPoint("TOP", 0, -3)
-        pvTitleText:SetText("|cFF00DDDDInterrupts|r")
+        pvTitleText:SetText("|cFF00DDDDStops|r")
     else
         pvTitleText = nil
     end
@@ -1391,6 +2121,7 @@ local function BuildSettingsPage(parent, moduleDB)
         wipe(fontCache)
         if mainFrame then
             RebuildBars()
+            RebuildStunBars()
             UpdateDisplay()
         end
         RebuildPreview()
@@ -1511,8 +2242,37 @@ local function BuildSettingsPage(parent, moduleDB)
         alphaSlider.OnValueChanged = function(_, value)
             moduleDB.alpha = value
             if mainFrame then mainFrame:SetAlpha(value) end
+            if stunFrame then stunFrame:SetAlpha(value) end
             UpdatePreview()
         end
+        generalY = generalY - 55
+
+        local splitStunsCB = MedaUI:CreateCheckbox(p, "Split Stuns To Separate Window")
+        splitStunsCB:SetPoint("TOPLEFT", LEFT_X, generalY)
+        splitStunsCB:SetChecked(moduleDB.splitStunsToSeparateWindow == true)
+        splitStunsCB.OnValueChanged = function(_, checked)
+            moduleDB.splitStunsToSeparateWindow = checked
+            RefreshVisualLayout()
+        end
+
+        local splitHint = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        splitHint:SetPoint("TOPLEFT", LEFT_X + 20, generalY - 18)
+        splitHint:SetTextColor(unpack(MedaUI.Theme.textDim))
+        splitHint:SetText("Moves stun entries into a second draggable frame that uses its own saved position.")
+        generalY = generalY - 55
+
+        local hideHardCCCB = MedaUI:CreateCheckbox(p, "Hide Stuns / Hard CC")
+        hideHardCCCB:SetPoint("TOPLEFT", LEFT_X, generalY)
+        hideHardCCCB:SetChecked(moduleDB.hideHardCC == true)
+        hideHardCCCB.OnValueChanged = function(_, checked)
+            moduleDB.hideHardCC = checked
+            RefreshVisualLayout()
+        end
+
+        local hideHardCCHint = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        hideHardCCHint:SetPoint("TOPLEFT", LEFT_X + 20, generalY - 18)
+        hideHardCCHint:SetTextColor(unpack(MedaUI.Theme.textDim))
+        hideHardCCHint:SetText("Suppresses stun, fear, disorient, incap, horror, and sleep tools from the HUD.")
         generalY = generalY - 55
 
         local colorHeader = MedaUI:CreateSectionHeader(p, "Colors")
@@ -1641,21 +2401,77 @@ local function BuildSettingsPage(parent, moduleDB)
             generalY = generalY - (30 + (#detectedInterrupts * 22))
         end
 
-        local renderableEntries = GetRenderablePartyEntries(GetTime())
-        if #renderableEntries > 0 then
+        local detectedStops = GetDetectedPlayerStops()
+        if #detectedStops > 0 then
+            local detectedHeader = MedaUI:CreateSectionHeader(p, "Detected Stop Tools")
+            detectedHeader:SetPoint("TOPLEFT", LEFT_X, generalY)
+            generalY = generalY - 45
+
+            local detectedFrame = CreateFrame("Frame", nil, p)
+            detectedFrame:SetPoint("TOPLEFT", LEFT_X, generalY)
+            detectedFrame:SetSize(440, 28 + (#detectedStops * 22))
+
+            local detectedBg = detectedFrame:CreateTexture(nil, "BACKGROUND")
+            detectedBg:SetAllPoints()
+            detectedBg:SetTexture(BAR_TEXTURE)
+            detectedBg:SetVertexColor(0.08, 0.08, 0.08, 0.85)
+
+            local detectedLabel = detectedFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            detectedLabel:SetPoint("TOPLEFT", 10, -10)
+            detectedLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
+            detectedLabel:SetText(format("%d detected", #detectedStops))
+
+            local rowY = -30
+            for _, entry in ipairs(detectedStops) do
+                local icon = detectedFrame:CreateTexture(nil, "ARTWORK")
+                icon:SetSize(16, 16)
+                icon:SetPoint("TOPLEFT", 10, rowY)
+                icon:SetTexture(entry.icon)
+                icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+                local spellLabel = detectedFrame:CreateFontString(nil, "OVERLAY")
+                spellLabel:SetFontObject(GetFontObj(moduleDB.font or "default", 11, "outline"))
+                spellLabel:SetPoint("LEFT", icon, "RIGHT", 8, 0)
+                spellLabel:SetTextColor(unpack(MedaUI.Theme.text))
+                spellLabel:SetText(entry.name)
+
+                local cdLabel = detectedFrame:CreateFontString(nil, "OVERLAY")
+                cdLabel:SetFontObject(GetFontObj(moduleDB.font or "default", 11, "outline"))
+                cdLabel:SetPoint("RIGHT", detectedFrame, "TOPRIGHT", -10, rowY - 1)
+                cdLabel:SetJustifyH("RIGHT")
+                cdLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
+                cdLabel:SetText(format("%s  %ds",
+                    IsStunCategory(entry.category) and "Stun" or (entry.category or "Stop"),
+                    entry.cd or 0))
+
+                rowY = rowY - 22
+            end
+
+            generalY = generalY - (30 + (#detectedStops * 22))
+        end
+
+        local trackedEntries = GetDisplayEntries(GetTime())
+        local stunEntries = GetStunDisplayEntries(GetTime())
+        if moduleDB.splitStunsToSeparateWindow == true then
+            for _, entry in ipairs(stunEntries) do
+                trackedEntries[#trackedEntries + 1] = entry
+            end
+        end
+
+        if #trackedEntries > 0 then
             local partyLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
             partyLabel:SetPoint("TOPLEFT", LEFT_X, generalY)
             partyLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
-            partyLabel:SetText(format("Tracking %d party member(s)", #renderableEntries))
+            partyLabel:SetText(format("Tracking %d stop entries", #trackedEntries))
             generalY = generalY - 20
 
-            for _, entry in ipairs(renderableEntries) do
+            for _, entry in ipairs(trackedEntries) do
                 local trackedLabel = p:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
                 trackedLabel:SetPoint("TOPLEFT", LEFT_X + 12, generalY)
                 trackedLabel:SetTextColor(unpack(MedaUI.Theme.textDim))
                 trackedLabel:SetText(format("- %s: %s (%ds)",
                     entry.name,
-                    entry.data.name or "Interrupt",
+                    entry.data.name or "Stop",
                     entry.info.baseCd or entry.data.cd or 15))
                 generalY = generalY - 18
             end
@@ -1729,7 +2545,7 @@ local function BuildSettingsPage(parent, moduleDB)
         sizingHeight = math.abs(sizingY - 70)
     end
 
-    MedaAuras:SetContentHeight(math.max(generalHeight, sizingHeight, 700))
+    MedaAuras:SetContentHeight(math.max(generalHeight, sizingHeight, 900) + 120)
 end
 
 -- ============================================================================
@@ -1742,10 +2558,10 @@ MedaAuras:RegisterModule({
     version     = MODULE_VERSION,
     stability   = MODULE_STABILITY,
     author      = "Medalink",
-    description = "Tracks party interrupt cooldowns in M+ and dungeons. "
-               .. "Detects when party members use their kick and displays "
+    description = "Tracks party interrupt cooldowns plus major stop tools in M+ and dungeons. "
+               .. "Detects kicks, stuns, and other tracked stops and displays "
                .. "cooldown bars for each player, colored by class.",
-    sidebarDesc = "Party interrupt cooldown tracker for M+ dungeons.",
+    sidebarDesc = "Party stop tracker for M+ dungeons.",
     defaults    = MODULE_DEFAULTS,
     OnInitialize = OnInitialize,
     OnEnable    = OnEnable,
@@ -1755,6 +2571,6 @@ MedaAuras:RegisterModule({
     },
     buildPage   = function(_, parent)
         BuildSettingsPage(parent, MedaAuras:GetModuleDB(MODULE_NAME))
-        return 760
+        return 1020
     end,
 })
