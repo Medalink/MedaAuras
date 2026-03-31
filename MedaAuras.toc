@@ -5,7 +5,7 @@
 ## Version: @project-version@
 ## SavedVariables: MedaAurasDB
 ## SavedVariablesPerCharacter: MedaAurasCharDB
-## OptionalDeps: MedaDebug
+## OptionalDeps: MedaDebug, Plater
 ## X-Curse-Project-ID: 1472556
 ## X-Wago-ID: mKODAEGx
 
@@ -37,6 +37,7 @@ Data\Stops.lua
 Data\Defensives.lua
 Data\ProphecyData.lua
 Data\ProphecyTemplates.lua
+Data\PlaterPayloads.lua
 
 # Shared Services (load before modules)
 Services\SpellCastTracker.lua
@@ -52,6 +53,7 @@ Services\PartySpellWatcher.lua
 Services\ProphecyEngine.lua
 
 # Modules
+Modules\PlaterIntegration.lua
 Modules\FocusInterruptHelper.lua
 Modules\GroupManaTracker.lua
 Modules\ManaTracker.lua

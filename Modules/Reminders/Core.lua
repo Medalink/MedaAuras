@@ -60,6 +60,7 @@ local ResolveRaidByName
 local ResolveInstanceContext
 local IsCurrentPartyFull
 local GetFullGroupWorkaround
+local FormatSourceBadge
 
 local function ResolveSpellID(...)
     return R.ResolveSpellID(...)
@@ -1063,7 +1064,7 @@ local function GetDetectedLabel(ctx)
 end
 
 
-local function FormatSourceBadge(source)
+FormatSourceBadge = function(source)
     local data = GetData()
     if data and data.sources and data.sources[source] then
         return data.sources[source].badge
@@ -2478,7 +2479,10 @@ local function RenderTalentsTab(content)
 
         yOff = RenderRecommendationCardGrid(content, yOff, title, rec, nil, {
             sectionKey = sectionKey,
-            maxVisible = rec.buildType == "trinkets" and 8 or 2,
+            maxVisible = (rec.buildType == "trinkets" and 8)
+                or (rec.buildType == "gear" and 16)
+                or (rec.buildType == "enchants" and 8)
+                or 2,
             countLabel = "picks",
             expandState = S.talentSectionExpanded,
             onToggle = function()
@@ -2901,7 +2905,7 @@ local function RenderPrepTab(content)
 
                 yOff = RenderRecommendationCardGrid(content, yOff, title, rec, nil, {
                     sectionKey = sectionKey,
-                    maxVisible = 2,
+                    maxVisible = rec.buildType == "enchants" and 8 or 2,
                     countLabel = "picks",
                     expandState = S.prepSectionExpanded,
                     onToggle = function()

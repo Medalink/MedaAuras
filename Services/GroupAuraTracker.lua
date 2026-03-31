@@ -60,10 +60,21 @@ local function IsAuraTimingReadable(auraInfo)
     return IsValueNonSecret(auraInfo.duration) and IsValueNonSecret(auraInfo.expirationTime)
 end
 
+local function IsReadableString(value)
+    return type(value) == "string" and IsValueNonSecret(value) and value ~= ""
+end
+
+local function ReadableNumber(value)
+    if value == nil or not IsValueNonSecret(value) then
+        return nil
+    end
+    return tonumber(value)
+end
+
 local function ResolveSpellName(spellID, fallbackName)
     if C_Spell and C_Spell.GetSpellName and spellID then
         local ok, result = pcall(C_Spell.GetSpellName, spellID)
-        if ok and type(result) == "string" and result ~= "" then
+        if ok and IsReadableString(result) then
             return result
         end
     end
@@ -289,6 +300,121 @@ local function BuildSpellState(unit, spell, auraInfo, previousState)
     return state
 end
 
+local function CopyAuraTypes(auraTypes)
+    local copy = {}
+    if type(auraTypes) ~= "table" then
+        return copy
+    end
+
+    for key, value in pairs(auraTypes) do
+        if value then
+            copy[key] = true
+        end
+    end
+
+    return copy
+end
+
+local function AuraTypesEqual(left, right)
+    if left == right then
+        return true
+    end
+
+    for key, value in pairs(left or {}) do
+        if value and not (right and right[key]) then
+            return false
+        end
+    end
+
+    for key, value in pairs(right or {}) do
+        if value and not (left and left[key]) then
+            return false
+        end
+    end
+
+    return true
+end
+
+local function AuraTypeSignature(auraTypes)
+    local signature = ""
+    if auraTypes and auraTypes.BIG_DEFENSIVE then
+        signature = signature .. "B"
+    end
+    if auraTypes and auraTypes.EXTERNAL_DEFENSIVE then
+        signature = signature .. "E"
+    end
+    if auraTypes and auraTypes.IMPORTANT then
+        signature = signature .. "I"
+    end
+    return signature
+end
+
+local function BuildAuraInstanceState(unit, auraInfo, previousState, auraTypes)
+    local auraSpellID = auraInfo and tonumber(auraInfo.spellId or auraInfo.spellID) or nil
+    if auraSpellID and not IsValueNonSecret(auraSpellID) then
+        auraSpellID = nil
+    end
+
+    local auraIcon = auraInfo and (auraInfo.icon or auraInfo.iconID) or nil
+    if auraIcon ~= nil and not IsValueNonSecret(auraIcon) then
+        auraIcon = nil
+    end
+
+    local state = {
+        auraInstanceID = auraInfo and IsValueNonSecret(auraInfo.auraInstanceID) and auraInfo.auraInstanceID or nil,
+        spellID = auraSpellID or (previousState and previousState.spellID or nil),
+        spellName = auraInfo and IsReadableString(auraInfo.name) and auraInfo.name or (previousState and previousState.spellName or nil),
+        icon = auraIcon ~= nil and auraIcon or (previousState and previousState.icon or nil),
+        unit = unit,
+        active = auraInfo ~= nil,
+        exactTiming = false,
+        usedCachedTiming = false,
+        isNonSecret = false,
+        sourceUnit = nil,
+        duration = nil,
+        expirationTime = nil,
+        applications = 0,
+        auraTypes = CopyAuraTypes(auraTypes),
+        lastSeen = GetTime(),
+    }
+
+    if auraInfo then
+        state.isNonSecret = IsAuraNonSecret(auraInfo)
+        state.exactTiming = IsAuraTimingReadable(auraInfo)
+
+        if state.exactTiming then
+            state.duration = auraInfo.duration
+            state.expirationTime = auraInfo.expirationTime
+        elseif previousState and previousState.active and previousState.exactTiming
+            and previousState.expirationTime and previousState.expirationTime > GetTime() then
+            state.exactTiming = true
+            state.usedCachedTiming = true
+            state.duration = previousState.duration
+            state.expirationTime = previousState.expirationTime
+        end
+
+        if IsValueNonSecret(auraInfo.sourceUnit) then
+            state.sourceUnit = auraInfo.sourceUnit
+        elseif previousState and previousState.sourceUnit then
+            state.sourceUnit = previousState.sourceUnit
+        end
+
+        if IsValueNonSecret(auraInfo.applications) then
+            state.applications = tonumber(auraInfo.applications) or 0
+        elseif IsValueNonSecret(auraInfo.stackCount) then
+            state.applications = tonumber(auraInfo.stackCount) or 0
+        elseif IsValueNonSecret(auraInfo.count) then
+            state.applications = tonumber(auraInfo.count) or 0
+        elseif previousState and previousState.active then
+            state.applications = tonumber(previousState.applications) or 0
+        end
+    elseif previousState and previousState.active then
+        state.applications = tonumber(previousState.applications) or 0
+    end
+
+    return state
+end
+
 local function SpellStateChanged(previousState, nextState)
     if previousState == nil or nextState == nil then
         return previousState ~= nextState
@@ -301,6 +427,42 @@ local function SpellStateChanged(previousState, nextState)
         or previousState.duration ~= nextState.duration
         or previousState.expirationTime ~= nextState.expirationTime
         or previousState.applications ~= nextState.applications
+end
+
+local function AuraInstanceStateChanged(previousState, nextState)
+    if previousState == nil or nextState == nil then
+        return previousState ~= nextState
+    end
+
+    return previousState.auraInstanceID ~= nextState.auraInstanceID
+        or previousState.active ~= nextState.active
+        or previousState.spellID ~= nextState.spellID
+        or previousState.icon ~= nextState.icon
+        or previousState.exactTiming ~= nextState.exactTiming
+        or previousState.usedCachedTiming ~= nextState.usedCachedTiming
+        or previousState.sourceUnit ~= nextState.sourceUnit
+        or previousState.duration ~= nextState.duration
+        or previousState.expirationTime ~= nextState.expirationTime
+        or previousState.applications ~= nextState.applications
+        or not AuraTypesEqual(previousState.auraTypes, nextState.auraTypes)
+end
+
+local function GetAuraTypeForFilter(filter)
+    if type(filter) ~= "string" then
+        return nil
+    end
+
+    if filter:find("BIG_DEFENSIVE", 1, true) then
+        return "BIG_DEFENSIVE"
+    end
+    if filter:find("EXTERNAL_DEFENSIVE", 1, true) then
+        return "EXTERNAL_DEFENSIVE"
+    end
+    if filter:find("IMPORTANT", 1, true) then
+        return "IMPORTANT"
+    end
+
+    return nil
 end
 
 local function MatchAuraToSpell(watch, auraInfo)
@@ -318,7 +480,7 @@ local function MatchAuraToSpell(watch, auraInfo)
     end
 
     local auraName = auraInfo.name
-    if type(auraName) == "string" and auraName ~= "" and IsValueNonSecret(auraName) then
+    if watch.allowNameMatch ~= false and IsReadableString(auraName) then
         local spell = ChooseSpellFromBucket(watch.byName[auraName], auraIcon)
         if spell then
             return spell, 2
@@ -350,9 +512,17 @@ local function IsBetterAuraMatch(existingAura, existingPriority, newAura, newPri
         return newExact
     end
 
-    local existingExpiration = tonumber(existingAura.expirationTime) or 0
-    local newExpiration = tonumber(newAura.expirationTime) or 0
-    return newExpiration > existingExpiration
+    if newExact and existingExact then
+        local existingExpiration = ReadableNumber(existingAura.expirationTime) or 0
+        local newExpiration = ReadableNumber(newAura.expirationTime) or 0
+        if newExpiration ~= existingExpiration then
+            return newExpiration > existingExpiration
+        end
+    end
+
+    local existingInstanceID = ReadableNumber(existingAura.auraInstanceID) or 0
+    local newInstanceID = ReadableNumber(newAura.auraInstanceID) or 0
+    return newInstanceID > existingInstanceID
 end
 
 local function CollectMatchedAuras(watch, unit)
@@ -387,6 +557,42 @@ local function CollectMatchedAuras(watch, unit)
     return matchedBySpellID
 end
 
+local function CollectBucketedAuras(watch, unit)
+    local matchedByInstanceID = {}
+
+    if not GetUnitAuras or not watch or not unit or not UnitExists(unit) then
+        return matchedByInstanceID
+    end
+
+    for _, filter in ipairs(watch.filters) do
+        local ok, auras = pcall(GetUnitAuras, unit, filter)
+        if ok and type(auras) == "table" then
+            local auraType = watch.filterBuckets and watch.filterBuckets[filter] or nil
+            for _, auraInfo in ipairs(auras) do
+                local auraInstanceID = auraInfo and auraInfo.auraInstanceID or nil
+                if auraInstanceID and IsValueNonSecret(auraInstanceID) then
+                    local entry = matchedByInstanceID[auraInstanceID]
+                    if not entry then
+                        entry = {
+                            auraInfo = auraInfo,
+                            auraTypes = {},
+                        }
+                        matchedByInstanceID[auraInstanceID] = entry
+                    elseif IsBetterAuraMatch(entry.auraInfo, 0, auraInfo, 0) then
+                        entry.auraInfo = auraInfo
+                    end
+
+                    if auraType then
+                        entry.auraTypes[auraType] = true
+                    end
+                end
+            end
+        end
+    end
+
+    return matchedByInstanceID
+end
+
 local function GetDirectAuraForSpell(unit, spell)
     if not GetAuraDataBySpellName or not spell or not spell.queryName then
         return nil
@@ -400,7 +606,7 @@ local function GetDirectAuraForSpell(unit, spell)
     return nil
 end
 
-local function ScanUnitForWatch(key, watch, unit)
+local function ScanUnitForSpellWatch(key, watch, unit)
     if not watch or not unit or not UnitExists(unit) then
         return false
     end
@@ -414,6 +620,8 @@ local function ScanUnitForWatch(key, watch, unit)
     local spellStates = unitState.spells
     local auraInstances = {}
     local changed = false
+
+    unitState.instances = {}
 
     for _, spell in ipairs(watch.spells) do
         local previousState = spellStates[spell.spellID]
@@ -433,6 +641,71 @@ local function ScanUnitForWatch(key, watch, unit)
         spellStates[spell.spellID] = nextState
     end
 
+    unitState.auraInstances = auraInstances
+    return changed
+end
+
+local function ScanUnitForBucketedWatch(key, watch, unit)
+    if not watch or not unit or not UnitExists(unit) then
+        return false
+    end
+
+    local unitState = EnsureUnitState(key, unit)
+    if not unitState then
+        return false
+    end
+
+    local previousInstances = unitState.instances or {}
+    local currentInstances = CollectBucketedAuras(watch, unit)
+    local nextInstances = {}
+    local auraInstances = {}
+    local changed = false
+    local newIdsBySignature = {}
+
+    unitState.spells = {}
+
+    for auraInstanceID, info in pairs(currentInstances) do
+        if not previousInstances[auraInstanceID] then
+            local signature = AuraTypeSignature(info.auraTypes)
+            newIdsBySignature[signature] = newIdsBySignature[signature] or {}
+            newIdsBySignature[signature][#newIdsBySignature[signature] + 1] = auraInstanceID
+        end
+    end
+
+    for auraInstanceID, previousState in pairs(previousInstances) do
+        local currentInfo = currentInstances[auraInstanceID]
+        local nextAuraInstanceID = auraInstanceID
+
+        if not currentInfo then
+            local signature = AuraTypeSignature(previousState.auraTypes)
+            local candidates = newIdsBySignature[signature]
+            if candidates and #candidates > 0 then
+                nextAuraInstanceID = table.remove(candidates, 1)
+                currentInfo = currentInstances[nextAuraInstanceID]
+            else
+                changed = true
+            end
+        end
+
+        if currentInfo then
+            auraInstances[nextAuraInstanceID] = true
+            local nextState = BuildAuraInstanceState(unit, currentInfo.auraInfo, previousState, currentInfo.auraTypes)
+            if auraInstanceID ~= nextAuraInstanceID or AuraInstanceStateChanged(previousState, nextState) then
+                changed = true
+            end
+            nextInstances[nextAuraInstanceID] = nextState
+        end
+    end
+
+    for auraInstanceID, currentInfo in pairs(currentInstances) do
+        if not nextInstances[auraInstanceID] then
+            auraInstances[auraInstanceID] = true
+            nextInstances[auraInstanceID] = BuildAuraInstanceState(unit, currentInfo.auraInfo, nil, currentInfo.auraTypes)
+            changed = true
+        end
+    end
+
+    unitState.instances = nextInstances
     unitState.auraInstances = auraInstances
     return changed
 end
@@ -526,7 +799,12 @@ local function RescanWatchUnit(key, unit, suppressNotify)
         return false
     end
 
-    local changed = ScanUnitForWatch(key, watch, unit)
+    local changed
+    if watch.mode == "bucketed" then
+        changed = ScanUnitForBucketedWatch(key, watch, unit)
+    else
+        changed = ScanUnitForSpellWatch(key, watch, unit)
+    end
     if changed and not suppressNotify then
         FireCallbacks(key, unit)
     end
@@ -613,12 +891,21 @@ function GroupAuraTracker:RegisterWatch(key, config)
     end
 
     local defaultFilter = config.filter or "HELPFUL"
+    local mode = config.mode == "bucketed" and "bucketed" or "spell"
+    local allowNameMatch = config.allowNameMatch ~= false
     local watchFilters = {}
     local watchFilterSet = {}
+    local filterBuckets = {}
     local spells = {}
     local bySpellID = {}
     local byName = {}
     local byIcon = {}
+
+    if mode == "bucketed" then
+        for _, filter in ipairs(config.scanFilters or {}) do
+            AddUnique(watchFilters, watchFilterSet, filter)
+        end
+    end
 
     for _, spell in ipairs(config.spells or {}) do
         if spell and spell.spellID then
@@ -632,18 +919,23 @@ function GroupAuraTracker:RegisterWatch(key, config)
                 icon = spell.icon or ResolveSpellIcon(spell.spellID, nil),
             }
 
+            spells[#spells + 1] = entry
+
             for _, filter in ipairs(entry.filters) do
                 AddUnique(watchFilters, watchFilterSet, filter)
             end
 
-            spells[#spells + 1] = entry
-            bySpellID[entry.spellID] = entry
+            if mode == "spell" then
+                bySpellID[entry.spellID] = entry
 
-            RegisterLookupBucket(byName, entry.queryName, entry)
-            if entry.queryName ~= entry.name then
-                RegisterLookupBucket(byName, entry.name, entry)
+                if allowNameMatch then
+                    RegisterLookupBucket(byName, entry.queryName, entry)
+                    if entry.queryName ~= entry.name then
+                        RegisterLookupBucket(byName, entry.name, entry)
+                    end
+                end
+                RegisterIconBucket(byIcon, entry.icon, entry)
             end
-            RegisterIconBucket(byIcon, entry.icon, entry)
         end
     end
 
@@ -651,19 +943,31 @@ function GroupAuraTracker:RegisterWatch(key, config)
         AddUnique(watchFilters, watchFilterSet, defaultFilter)
     end
 
+    if mode == "bucketed" then
+        for _, filter in ipairs(watchFilters) do
+            local auraType = GetAuraTypeForFilter(filter)
+            if auraType then
+                filterBuckets[filter] = auraType
+            end
+        end
+    end
+
     watches[key] = {
+        mode = mode,
         spells = spells,
         bySpellID = bySpellID,
         byName = byName,
         byIcon = byIcon,
         filters = watchFilters,
+        filterBuckets = filterBuckets,
+        allowNameMatch = allowNameMatch,
         allowDirectLookup = config.allowDirectLookup ~= false,
         rescanMode = config.rescanMode == "full" and "full" or "unit",
     }
     states[key] = states[key] or {}
 
-    LogDebug(format("Registered watch '%s' with %d spell(s), %d scan filter(s), rescanMode=%s",
-        key, #spells, #watchFilters, watches[key].rescanMode))
+    LogDebug(format("Registered watch '%s' mode=%s with %d spell(s), %d scan filter(s), rescanMode=%s",
+        key, mode, #spells, #watchFilters, watches[key].rescanMode))
     RescanWatchAll(key)
     return true
 end
@@ -696,6 +1000,15 @@ function GroupAuraTracker:GetUnitSpellState(key, unit, spellID)
 
     local unitState = states[key] and states[key][unit]
     return unitState and unitState.spells and unitState.spells[spellID] or nil
+end
+
+function GroupAuraTracker:GetUnitAuraInstances(key, unit)
+    if not key or not unit then
+        return nil
+    end
+
+    local unitState = states[key] and states[key][unit]
+    return unitState and unitState.instances or nil
 end
 
 function GroupAuraTracker:GetWatchState(key)

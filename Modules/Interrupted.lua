@@ -50,6 +50,7 @@ local InterruptResolver   = ns.Services and ns.Services.InterruptResolver
 local FALLBACK_WHITE = { 1, 1, 1 }
 local FALLBACK_INTERRUPT_ICON = 134400
 local OUTLINE_MAP = { none = "", outline = "OUTLINE", thick = "THICKOUTLINE" }
+local GLOBAL_COOLDOWN_MAX = 2
 
 -- ============================================================================
 -- State
@@ -154,7 +155,7 @@ end
 
 local function GetSpellCooldownRemaining(spellID)
     local cdInfo = C_Spell.GetSpellCooldown(spellID)
-    if cdInfo and cdInfo.startTime and cdInfo.duration and cdInfo.duration > 0 then
+    if cdInfo and cdInfo.startTime and cdInfo.duration and cdInfo.duration > GLOBAL_COOLDOWN_MAX then
         return (cdInfo.startTime + cdInfo.duration) - GetTime()
     end
     return nil
@@ -803,11 +804,11 @@ local function FindMyInterrupt()
     myClass = cls
     myName = UnitName("player")
 
-    LogDebug(format("FindMyInterrupt: class=%s name=%s", tostring(cls), tostring(myName)))
+    LogDebug("FindMyInterrupt: class=%s name=%s", tostring(cls), tostring(myName))
 
     local specIndex = GetSpecialization()
     local specID = specIndex and GetSpecializationInfo(specIndex)
-    LogDebug(format("  specIndex=%s specID=%s", tostring(specIndex), tostring(specID)))
+    LogDebug("  specIndex=%s specID=%s", tostring(specIndex), tostring(specID))
 
     mySpellID = nil
     myBaseCd = nil
@@ -824,7 +825,7 @@ local function FindMyInterrupt()
     if not entry then
         local specData = specID and ID:GetSpecData(specID) or nil
         if specData and specData.hasInterrupt == false then
-            LogDebug(format("  specID %d has no interrupt", specID))
+            LogDebug("  specID %d has no interrupt", specID)
         end
         SyncKnownPlayerStops()
         return
@@ -836,15 +837,15 @@ local function FindMyInterrupt()
 
     if mySpellID then
         local ok, ms = pcall(GetSpellBaseCooldown, mySpellID)
-        LogDebug(format("  GetSpellBaseCooldown(%d): ok=%s ms=%s", mySpellID, tostring(ok), tostring(ms)))
+        LogDebug("  GetSpellBaseCooldown(%d): ok=%s ms=%s", mySpellID, tostring(ok), tostring(ms))
         if ok and ms and ms > 1500 then
             myBaseCd = ms / 1000
         end
     end
 
-    Log(format("FindMyInterrupt result: %s (ID %s, CD %ss, pet=%s)",
+    Log("FindMyInterrupt result: %s (ID %s, CD %ss, pet=%s)",
         mySpellID and ALL_INTERRUPTS[mySpellID] and ALL_INTERRUPTS[mySpellID].name or "NONE",
-        tostring(mySpellID), tostring(myBaseCd), tostring(myIsPetSpell)))
+        tostring(mySpellID), tostring(myBaseCd), tostring(myIsPetSpell))
 
     SyncKnownPlayerStops()
 end
@@ -854,7 +855,7 @@ end
 -- ============================================================================
 
 AutoRegisterParty = function()
-    LogDebug(format("AutoRegisterParty: inGroup=%s", tostring(IsInGroup())))
+    LogDebug("AutoRegisterParty: inGroup=%s", tostring(IsInGroup()))
     for i = 1, 4 do
         local u = "party" .. i
         local exists = UnitExists(u)
@@ -868,37 +869,37 @@ AutoRegisterParty = function()
                 entry, source = InterruptResolver:ResolvePartyPrimaryInterrupt(cls, specID, role)
             end
             local hasDefault = entry ~= nil or source == "spec_no_interrupt" or source == "role_no_interrupt"
-            LogDebug(format("  %s: name=%s class=%s role=%s hasDefault=%s already=%s noKick=%s",
+            LogDebug("  %s: name=%s class=%s role=%s hasDefault=%s already=%s noKick=%s",
                 u, tostring(name), tostring(cls), tostring(role),
                 tostring(hasDefault),
                 tostring(name and partyMembers[name] ~= nil),
-                tostring(name and noInterruptPlayers[name] ~= nil)))
+                tostring(name and noInterruptPlayers[name] ~= nil))
             if name and cls then
                 SyncPartyStopsForMember(u, name, cls, specID)
                 if source == "spec_no_interrupt" or source == "role_no_interrupt" then
                     partyMembers[name] = nil
                     noInterruptPlayers[name] = true
-                    LogDebug(format("    -> %s has no interrupt (%s)", name, source))
+                    LogDebug("    -> %s has no interrupt (%s)", name, source)
                 elseif entry then
                     local _, changed = TrackPartyMember(name, cls, entry)
                     if changed then
-                        Log(format("Auto-registered %s (%s) %s CD=%d [%s]",
-                            name, cls, entry.name, entry.baseCD or entry.cd or 15, source))
+                        Log("Auto-registered %s (%s) %s CD=%d [%s]",
+                            name, cls, entry.name, entry.baseCD or entry.cd or 15, source)
                     end
                 else
                     noInterruptPlayers[name] = nil
-                    LogDebug(format("    -> waiting for exact interrupt data for %s (%s)", name, cls))
+                    LogDebug("    -> waiting for exact interrupt data for %s (%s)", name, cls)
                 end
             end
         else
-            LogDebug(format("  %s: does not exist", u))
+            LogDebug("  %s: does not exist", u)
         end
     end
 
     local count = 0
     for _ in pairs(partyMembers) do count = count + 1 end
-    LogDebug(format("  Total tracked: %d party members, %d no-kick",
-        count, (function() local n=0 for _ in pairs(noInterruptPlayers) do n=n+1 end return n end)()))
+    LogDebug("  Total tracked: %d party members, %d no-kick",
+        count, (function() local n = 0 for _ in pairs(noInterruptPlayers) do n = n + 1 end return n end)())
     UpdateDisplay()
 end
 
@@ -913,7 +914,7 @@ CleanPartyList = function()
         if not current[name] then
             partyMembers[name] = nil
             removed = removed + 1
-            LogDebug(format("CleanPartyList: removed %s (left group)", name))
+            LogDebug("CleanPartyList: removed %s (left group)", name)
         end
     end
     for name in pairs(partyStopMembers) do
@@ -925,7 +926,7 @@ CleanPartyList = function()
         if not current[name] then noInterruptPlayers[name] = nil end
     end
     if removed > 0 then
-        LogDebug(format("CleanPartyList: removed %d member(s)", removed))
+        LogDebug("CleanPartyList: removed %d member(s)", removed)
     end
     UpdateDisplay()
 end
@@ -935,8 +936,8 @@ end
 -- ============================================================================
 
 local function ApplyTalentModifiersForMember(unit, name, class, specID)
-    LogDebug(format("ApplyTalentModifiersForMember: unit=%s name=%s class=%s specID=%s",
-        tostring(unit), tostring(name), tostring(class), tostring(specID)))
+    LogDebug("ApplyTalentModifiersForMember: unit=%s name=%s class=%s specID=%s",
+        tostring(unit), tostring(name), tostring(class), tostring(specID))
 
     SyncPartyStopsForMember(unit, name, class, specID)
 
@@ -949,7 +950,7 @@ local function ApplyTalentModifiersForMember(unit, name, class, specID)
     if source == "spec_no_interrupt" or not primary then
         partyMembers[name] = nil
         noInterruptPlayers[name] = true
-        LogDebug(format("%s has no interrupt (specID=%d), removed", name, specID or -1))
+        LogDebug("%s has no interrupt (specID=%d), removed", name, specID or -1)
         UpdateDisplay()
         return
     end
@@ -975,14 +976,14 @@ local function ApplyTalentModifiersForMember(unit, name, class, specID)
             end
             if newCd < 1 then newCd = 1 end
             info.baseCd = newCd
-            LogDebug(format("%s has %s, CD -> %ds", name, talent.name, newCd))
+            LogDebug("%s has %s, CD -> %ds", name, talent.name, newCd)
         end
     end
 
     for spellID, onKick in pairs(CD_ON_KICK_TALENTS) do
         if inspector:UnitHasTalentSpell(unit, spellID) then
             info.onKickReduction = onKick.reduction
-            LogDebug(format("%s has %s, -%ds on kick", name, onKick.name, onKick.reduction))
+            LogDebug("%s has %s, -%ds on kick", name, onKick.name, onKick.reduction)
         end
     end
 
@@ -1554,8 +1555,8 @@ local function CreateUI()
     )
     UpdateMainFrameVisibility()
 
-    LogDebug(format("CreateUI: frame positioned at %s (%.0f, %.0f), now building bars",
-        db.position.point, db.position.x, db.position.y))
+    LogDebug("CreateUI: frame positioned at %s (%.0f, %.0f), now building bars",
+        db.position.point, db.position.x, db.position.y)
     RebuildBars(#GetDisplayEntries(GetTime()))
     RebuildStunBars(#GetStunDisplayEntries(GetTime()))
     LogDebug("CreateUI: complete")
@@ -1619,11 +1620,11 @@ local function OnInitialize(moduleDB)
     db = moduleDB
     Log("OnInitialize starting...")
 
-    LogDebug(format("  db.enabled=%s", tostring(moduleDB.enabled)))
-    LogDebug(format("  ns.InterruptData=%s", tostring(ns.InterruptData ~= nil)))
-    LogDebug(format("  ns.Services.PartySpellWatcher=%s", tostring(ns.Services.PartySpellWatcher ~= nil)))
-    LogDebug(format("  ns.Services.GroupInspector=%s", tostring(ns.Services.GroupInspector ~= nil)))
-    LogDebug(format("  ns.Services.InterruptResolver=%s", tostring(ns.Services.InterruptResolver ~= nil)))
+    LogDebug("  db.enabled=%s", tostring(moduleDB.enabled))
+    LogDebug("  ns.InterruptData=%s", tostring(ns.InterruptData ~= nil))
+    LogDebug("  ns.Services.PartySpellWatcher=%s", tostring(ns.Services.PartySpellWatcher ~= nil))
+    LogDebug("  ns.Services.GroupInspector=%s", tostring(ns.Services.GroupInspector ~= nil))
+    LogDebug("  ns.Services.InterruptResolver=%s", tostring(ns.Services.InterruptResolver ~= nil))
     if ns.Services.GroupInspector and ns.Services.GroupInspector.Initialize then
         ns.Services.GroupInspector:Initialize()
     end
@@ -1633,7 +1634,7 @@ local function OnInitialize(moduleDB)
 
     LogDebug("  Step 2: CreateUI")
     CreateUI()
-    LogDebug(format("  mainFrame created: %s", tostring(mainFrame ~= nil)))
+    LogDebug("  mainFrame created: %s", tostring(mainFrame ~= nil))
 
     LogDebug("  Step 3: CheckZoneVisibility")
     CheckZoneVisibility()
@@ -1659,8 +1660,8 @@ local function OnInitialize(moduleDB)
             callback = OnPartyStopDetected,
         })
     end
-    LogDebug(format("  watcherHandle=%s mobKickHandle=%s stopWatcherHandle=%s",
-        tostring(watcherHandle), tostring(mobKickHandle), tostring(stopWatcherHandle)))
+    LogDebug("  watcherHandle=%s mobKickHandle=%s stopWatcherHandle=%s",
+        tostring(watcherHandle), tostring(mobKickHandle), tostring(stopWatcherHandle))
 
     LogDebug("  Step 8: Register GroupInspector inspect-complete callback")
     ns.Services.GroupInspector:RegisterInspectComplete("Interrupted", ApplyTalentModifiersForMember)

@@ -141,47 +141,126 @@ MedaAuras.SafeBoolean = SafeBoolean
 -- Logging (routes to MedaDebug when available)
 -- ============================================================================
 
-local debugAPI
+local logger
 local debugEnabled = false
 
-local function InitDebug()
-    debugAPI = _G.MedaDebugAPI or _G.MedaDebug
-    if debugAPI and debugAPI.RegisterAddon then
-        debugAPI:RegisterAddon("MedaAuras", {
+local function GetOptionsDB()
+    return MedaAurasDB and MedaAurasDB.options or nil
+end
+
+local function GetLoggingPolicy()
+    local options = GetOptionsDB()
+    local policy = options and options.logging or nil
+    return MedaUI:NormalizeLogPolicy(policy)
+end
+
+local function UpdateDebugModeFlag()
+    local policy = GetLoggingPolicy()
+    debugEnabled = policy.enabled ~= false and policy.minLevel == "DEBUG"
+
+    local options = GetOptionsDB()
+    if options then
+        options.debugMode = debugEnabled
+    end
+
+    return debugEnabled
+end
+
+local function SetLoggingPolicy(policy)
+    local normalized = MedaUI:NormalizeLogPolicy(policy)
+    local options = GetOptionsDB()
+    if options then
+        options.logging = normalized
+        options.debugMode = normalized.enabled ~= false and normalized.minLevel == "DEBUG"
+    end
+
+    debugEnabled = normalized.enabled ~= false and normalized.minLevel == "DEBUG"
+    return normalized
+end
+
+local function EnsureLogger()
+    if not logger then
+        logger = MedaUI:CreateAddonLogger({
+            addonName = "MedaAuras",
             color = { 0.4, 0.8, 1.0 },
             prefix = "[MedaAuras]",
+            getPolicy = GetLoggingPolicy,
+            setPolicy = SetLoggingPolicy,
         })
     end
+
+    return logger
+end
+
+local function InitDebug()
+    EnsureLogger():RefreshSink()
 end
 
 local function Log(msg, sourceInfo)
-    if debugAPI then
-        debugAPI:Print("MedaAuras", tostring(msg), sourceInfo)
-    end
+    return EnsureLogger():Emit("INFO", msg, sourceInfo)
 end
 
 local function LogDebug(msg, sourceInfo)
-    if debugEnabled and debugAPI then
-        debugAPI:DebugMsg("MedaAuras", tostring(msg), sourceInfo)
-    end
+    return EnsureLogger():Emit("DEBUG", msg, sourceInfo)
 end
 
 local function LogWarn(msg, sourceInfo)
-    if debugAPI then
-        debugAPI:Warn("MedaAuras", tostring(msg), sourceInfo)
-    end
+    return EnsureLogger():Emit("WARN", msg, sourceInfo)
 end
 
 local function LogError(msg, sourceInfo)
-    if debugAPI then
-        debugAPI:Error("MedaAuras", tostring(msg), sourceInfo)
-    end
+    return EnsureLogger():Emit("ERROR", msg, sourceInfo)
+end
+
+local function LogLazy(level, producer, sourceInfo)
+    return EnsureLogger():EmitLazy(level, producer, sourceInfo)
+end
+
+local function LogDebugLazy(producer, sourceInfo)
+    return EnsureLogger():EmitLazy("DEBUG", producer, sourceInfo)
+end
+
+local function LogWarnLazy(producer, sourceInfo)
+    return EnsureLogger():EmitLazy("WARN", producer, sourceInfo)
+end
+
+local function LogErrorLazy(producer, sourceInfo)
+    return EnsureLogger():EmitLazy("ERROR", producer, sourceInfo)
 end
 
 local function LogTable(tbl, name, maxDepth, sourceInfo)
-    if debugAPI then
-        debugAPI:Table("MedaAuras", tbl, name, maxDepth or 3, sourceInfo)
-    end
+    return EnsureLogger():EmitLazy("DEBUG", function()
+        maxDepth = maxDepth or 3
+        name = name or "table"
+
+        local function serialize(value, depth, visited)
+            if depth > maxDepth then return "..." end
+            if visited[value] then return "<circular>" end
+            visited[value] = true
+
+            local result = "{\n"
+            local indent = string.rep("  ", depth)
+
+            for key, child in pairs(value) do
+                local keyStr = type(key) == "string" and key or ("[" .. tostring(key) .. "]")
+                local childStr
+
+                if type(child) == "table" then
+                    childStr = serialize(child, depth + 1, visited)
+                elseif type(child) == "string" then
+                    childStr = '"' .. child:sub(1, 100) .. '"'
+                else
+                    childStr = tostring(child)
+                end
+
+                result = result .. indent .. "  " .. keyStr .. " = " .. childStr .. ",\n"
+            end
+
+            return result .. indent .. "}"
+        end
+
+        return name .. " = " .. serialize(tbl, 0, {})
+    end, sourceInfo)
 end
 
 MedaAuras.Log = Log
@@ -189,9 +268,27 @@ MedaAuras.LogDebug = LogDebug
 MedaAuras.LogWarn = LogWarn
 MedaAuras.LogError = LogError
 MedaAuras.LogTable = LogTable
+MedaAuras.LogLazy = LogLazy
+MedaAuras.LogDebugLazy = LogDebugLazy
+MedaAuras.LogWarnLazy = LogWarnLazy
+MedaAuras.LogErrorLazy = LogErrorLazy
+
+function MedaAuras:GetLogPolicy()
+    return GetLoggingPolicy()
+end
+
+function MedaAuras:SetLogPolicy(policy)
+    return SetLoggingPolicy(policy)
+end
+
+function MedaAuras:CanLog(level)
+    return EnsureLogger():CanEmit(level or "INFO")
+end
 
 function MedaAuras:SetDebugMode(enabled)
-    debugEnabled = not not enabled
+    local policy = GetLoggingPolicy()
+    policy.minLevel = enabled and "DEBUG" or "WARN"
+    SetLoggingPolicy(policy)
 end
 
 function MedaAuras:IsDebugModeEnabled()
@@ -356,6 +453,12 @@ local DEFAULT_DB = {
         theme = nil,
         debugMode = false,
         muteSounds = false,
+        logging = {
+            enabled = true,
+            minLevel = "WARN",
+            combatMode = "always",
+            chatFallback = false,
+        },
     },
     modules = {},
     customModules = {},
@@ -382,10 +485,7 @@ local function SlashHandler(msg)
     end
 
     if msg == "debug" then
-        debugEnabled = not debugEnabled
-        if MedaAurasDB then
-            MedaAurasDB.options.debugMode = debugEnabled
-        end
+        MedaAuras:SetDebugMode(not debugEnabled)
         print(format("|cff00ccffMedaAuras:|r Debug mode %s.", debugEnabled and "|cff00ff00ON|r" or "|cffff0000OFF|r"))
         Log(format("Debug mode toggled %s", debugEnabled and "ON" or "OFF"))
         return
@@ -486,6 +586,13 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
 
         MedaAurasDB = MergeDefaults(MedaAurasDB or {}, DEFAULT_DB)
 
+        if MedaAurasDB.options._loggingPolicyInitialized ~= true then
+            if MedaAurasDB.options.debugMode then
+                MedaAurasDB.options.logging.minLevel = "DEBUG"
+            end
+            MedaAurasDB.options._loggingPolicyInitialized = true
+        end
+
         MedaAurasCharDB = MedaAurasCharDB or {}
         MedaAurasCharDB.prophecy = MedaAurasCharDB.prophecy or {
             recordings = {},
@@ -498,7 +605,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
             MedaAurasDB.modules.TalentReminder = nil
         end
 
-        debugEnabled = MedaAurasDB.options.debugMode or false
+        UpdateDebugModeFlag()
 
         Log("ADDON_LOADED: DB initialized")
 
@@ -528,9 +635,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
 
     elseif event == "PLAYER_LOGIN" then
         -- Retry debug API discovery in case MedaDebug loaded after us
-        if not debugAPI then
-            InitDebug()
-        end
+        InitDebug()
 
         Log("PLAYER_LOGIN: Initializing services and modules")
 
@@ -569,10 +674,10 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
 
         Log(format("Startup complete. %d module(s) registered.", #moduleOrder))
 
-        if debugAPI then
+        if EnsureLogger():HasSink() then
             Log("MedaDebug integration active")
         else
-            print("|cff00ccffMedaAuras:|r MedaDebug not detected. Use /mwa debug for chat fallback.")
+            print("|cff00ccffMedaAuras:|r MedaDebug not detected. Enable chat fallback in settings if you want logs in chat.")
         end
     end
 end)

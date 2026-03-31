@@ -8,6 +8,7 @@ local pairs = pairs
 local pcall = pcall
 local tostring = tostring
 local type = type
+local unpack = unpack
 local UnitName = UnitName
 local UnitExists = UnitExists
 local CreateFrame = CreateFrame
@@ -31,12 +32,54 @@ end
 -- Logging helpers (must be first -- laundering callbacks can fire at load time)
 -- ============================================================================
 
-local function Log(msg)
-    MedaAuras.Log(format("[PartySpellWatcher] %s", msg))
+local function Emit(method, msgOrFormat, ...)
+    local args = { ... }
+    local prefix = "[PartySpellWatcher] "
+
+    if type(msgOrFormat) == "function" then
+        if method == "warn" and MedaAuras.LogWarnLazy then
+            return MedaAuras.LogWarnLazy(function()
+                return prefix .. tostring(msgOrFormat())
+            end)
+        end
+        if MedaAuras.LogDebugLazy then
+            return MedaAuras.LogDebugLazy(function()
+                return prefix .. tostring(msgOrFormat())
+            end)
+        end
+        msgOrFormat = msgOrFormat()
+    elseif #args > 0 then
+        local fmt = tostring(msgOrFormat)
+        if method == "warn" and MedaAuras.LogWarnLazy then
+            return MedaAuras.LogWarnLazy(function()
+                return prefix .. format(fmt, unpack(args))
+            end)
+        end
+        if MedaAuras.LogDebugLazy then
+            return MedaAuras.LogDebugLazy(function()
+                return prefix .. format(fmt, unpack(args))
+            end)
+        end
+        msgOrFormat = format(fmt, unpack(args))
+    end
+
+    local text = prefix .. tostring(msgOrFormat)
+    if method == "warn" then
+        return MedaAuras.LogWarn(text)
+    end
+    return MedaAuras.LogDebug(text)
 end
 
-local function LogDebug(msg)
-    MedaAuras.LogDebug(format("[PartySpellWatcher] %s", msg))
+local function Log(msgOrFormat, ...)
+    return Emit("debug", msgOrFormat, ...)
+end
+
+local function LogDebug(msgOrFormat, ...)
+    return Emit("debug", msgOrFormat, ...)
+end
+
+local function LogWarn(msgOrFormat, ...)
+    return Emit("warn", msgOrFormat, ...)
 end
 
 -- ============================================================================
@@ -79,8 +122,8 @@ local function LaunderSpellID(taintedID)
 
     local cleanID = barResult or sliderResult
     if not cleanID then
-        LogDebug(format("LaunderSpellID FAILED: barOk=%s barErr=%s sliderOk=%s sliderErr=%s",
-            tostring(barOk), SafeStr(barErr), tostring(sliderOk), SafeStr(sliderErr)))
+        LogDebug("LaunderSpellID FAILED: barOk=%s barErr=%s sliderOk=%s sliderErr=%s",
+            tostring(barOk), SafeStr(barErr), tostring(sliderOk), SafeStr(sliderErr))
     end
     return cleanID, {
         barOk = barOk,
@@ -295,7 +338,7 @@ local function FireInterrupt(name, spellID, unit)
     for handle, func in pairs(interruptCallbacks) do
         local ok, err = pcall(func, name, spellID, unit)
         if not ok then
-            MedaAuras.LogWarn(format("[PartySpellWatcher] callback[%d] error: %s", handle, SafeStr(err)))
+            LogWarn("callback[%d] error: %s", handle, SafeStr(err))
         end
     end
 end
@@ -304,7 +347,7 @@ local function FireMobKick(name)
     for handle, func in pairs(mobKickCallbacks) do
         local ok, err = pcall(func, name)
         if not ok then
-            MedaAuras.LogWarn(format("[PartySpellWatcher] mob-kick callback[%d] error: %s", handle, SafeStr(err)))
+            LogWarn("mob-kick callback[%d] error: %s", handle, SafeStr(err))
         end
     end
 end
@@ -315,14 +358,14 @@ local function FireAnySpell(name, spellID, unit)
         count = count + 1
         local ok, err = pcall(func, name, spellID, unit)
         if not ok then
-            MedaAuras.LogWarn(format("[PartySpellWatcher] any-spell callback[%d] error: %s", handle, SafeStr(err)))
+            LogWarn("any-spell callback[%d] error: %s", handle, SafeStr(err))
         end
     end
     if count > 0 then
         -- spellID is tainted; format(%d) produces a tainted string that
         -- crashes MedaDebug.  Log without the raw ID.
-        LogDebug(format("FireAnySpell: name=%s unit=%s subscribers=%d",
-            tostring(name), tostring(unit), count))
+        LogDebug("FireAnySpell: name=%s unit=%s subscribers=%d",
+            tostring(name), tostring(unit), count)
     end
 end
 
@@ -392,7 +435,7 @@ local function FireSpellMatches(name, taintedID, unit, cleanID, launderInfo, cas
             end
         end
 
-        LogDebug(format(
+        LogDebug(
             "Cast[%d] SpellMatch[%d:%s]: name=%s unit=%s cleanID=%s launder(bar=%s slider=%s) candidates=%s | candidateList=%s | directCand=%s | directFull=%s | %s | %s | confidence=%s via=%s",
             castID,
             handle,
@@ -410,11 +453,11 @@ local function FireSpellMatches(name, taintedID, unit, cleanID, launderInfo, cas
             FormatMatchSummary("fullEq", fullEquality),
             confidence,
             chosenBy
-        ))
+        )
 
         if chosenID and chosenData and confidence == "exact" then
-            LogDebug(format("SpellMatch[%d:%s]: %s matched %s (%d) confidence=%s via=%s",
-                handle, label, name, chosenData.name or "spell", chosenID, confidence, chosenBy))
+            LogDebug("SpellMatch[%d:%s]: %s matched %s (%d) confidence=%s via=%s",
+                handle, label, name, chosenData.name or "spell", chosenID, confidence, chosenBy)
             local debugInfo = {
                 castID = castID,
                 confidence = confidence,
@@ -433,11 +476,11 @@ local function FireSpellMatches(name, taintedID, unit, cleanID, launderInfo, cas
             }
             local ok, err = pcall(entry.callback, name, chosenID, chosenData, unit, debugInfo)
             if not ok then
-                MedaAuras.LogWarn(format("[PartySpellWatcher] spell-match callback[%d] error: %s", handle, SafeStr(err)))
+                LogWarn("spell-match callback[%d] error: %s", handle, SafeStr(err))
             end
         else
-            LogDebug(format("Cast[%d] SpellMatch[%d:%s] suppressed: confidence=%s via=%s",
-                castID, handle, label, confidence, chosenBy))
+            LogDebug("Cast[%d] SpellMatch[%d:%s] suppressed: confidence=%s via=%s",
+                castID, handle, label, confidence, chosenBy)
         end
     end
 end
@@ -460,8 +503,8 @@ local function OnPartyCast(partyIndex, isOwnerOfPet)
         castSequence = castSequence + 1
         recentPartyCasts[cleanName] = GetTime()
         local cleanID, launderInfo = LaunderSpellID(eSpellID)
-        LogDebug(format("Cast[%d] PARTY SPELL: name=%s unit=%s pet=%s cleanID=%s",
-            castSequence, cleanName, ownerUnit, tostring(isOwnerOfPet), SafeStr(cleanID)))
+        LogDebug("Cast[%d] PARTY SPELL: name=%s unit=%s pet=%s cleanID=%s",
+            castSequence, cleanName, ownerUnit, tostring(isOwnerOfPet), SafeStr(cleanID))
 
         if hasAny and cleanID then
             FireAnySpell(cleanName, cleanID, ownerUnit)
@@ -472,7 +515,7 @@ local function OnPartyCast(partyIndex, isOwnerOfPet)
         end
 
         if not cleanID then
-            LogDebug(format("Cast[%d] Laundering failed for %s cast", castSequence, cleanName))
+            LogDebug("Cast[%d] Laundering failed for %s cast", castSequence, cleanName)
             return
         end
 
@@ -481,17 +524,17 @@ local function OnPartyCast(partyIndex, isOwnerOfPet)
             if data then
                 local directOk, kickData = pcall(function() return data[cleanID] end)
                 if directOk and kickData then
-                    Log(format("PARTY KICK: %s cast %s (ID %d) via %s",
+                    Log("PARTY KICK: %s cast %s (ID %d) via %s",
                         cleanName, kickData.name, cleanID,
-                        isOwnerOfPet and "pet" or "self"))
+                        isOwnerOfPet and "pet" or "self")
                     FireInterrupt(cleanName, cleanID, ownerUnit)
                 else
                     local interruptIDs = GetInterruptKnownIDs(data)
                     local result = MatchTaintedAgainstTable(eSpellID, interruptIDs, data)
                     if result.matchID and result.matchData then
-                        Log(format("PARTY KICK: %s cast %s (ID %d) via %s [equality]",
+                        Log("PARTY KICK: %s cast %s (ID %d) via %s [equality]",
                             cleanName, result.matchData.name, result.matchID,
-                            isOwnerOfPet and "pet" or "self"))
+                            isOwnerOfPet and "pet" or "self")
                         FireInterrupt(cleanName, result.matchID, ownerUnit)
                     end
                 end
@@ -524,7 +567,7 @@ local function RegisterPartyWatchers()
             petRegistered = petRegistered + 1
         end
     end
-    LogDebug(format("RegisterPartyWatchers: %d party, %d pet", registered, petRegistered))
+    LogDebug("RegisterPartyWatchers: %d party, %d pet", registered, petRegistered)
 end
 
 -- ============================================================================
@@ -553,7 +596,7 @@ local function OnMobInterrupted(unit)
     end
 
     if bestName and bestDelta < CORRELATION_WINDOW then
-        Log(format("Mob kick attributed to %s (delta=%.3fs)", bestName, bestDelta))
+        Log("Mob kick attributed to %s (delta=%.3fs)", bestName, bestDelta)
         FireMobKick(bestName)
     end
 end
@@ -636,7 +679,7 @@ function PartySpellWatcher:OnAnyPartySpell(callback)
     handleCounter = handleCounter + 1
     local handle = handleCounter
     anySpellCallbacks[handle] = callback
-    LogDebug(format("OnAnyPartySpell registered: handle=%d", handle))
+    LogDebug("OnAnyPartySpell registered: handle=%d", handle)
     return handle
 end
 
@@ -662,8 +705,8 @@ function PartySpellWatcher:OnPartySpellMatch(lookupTable, callback)
         label = config.label,
         entryToID = config.entryToID,
     }
-    LogDebug(format("OnPartySpellMatch registered: handle=%d spells=%d label=%s",
-        handle, #knownIDs, tostring(config.label)))
+    LogDebug("OnPartySpellMatch registered: handle=%d spells=%d label=%s",
+        handle, #knownIDs, tostring(config.label))
     return handle
 end
 

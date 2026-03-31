@@ -1300,6 +1300,10 @@ local function AddItemLevelMetadata(tip, item)
     AddTooltipKeyValue(tip, "Instance", item.tooltipInstance, 0.85, 0.85, 0.85)
 end
 
+local function ShouldShowItemLevelMetadata(rec)
+    return rec and rec.buildType == "gear"
+end
+
 AddTooltipSpacer = function(tip)
     if tip and tip.NumLines and tip:NumLines() > 0 then
         tip:AddLine(" ")
@@ -1375,7 +1379,9 @@ AddRecommendationTooltip = function(tip, item, rec)
 
     BeginItemTooltip(tip, GetRecommendationTooltipItemRef(item), item.name)
     AddTooltipSpacer(tip)
-    AddItemLevelMetadata(tip, item)
+    if ShouldShowItemLevelMetadata(rec) then
+        AddItemLevelMetadata(tip, item)
+    end
 
     if item.slot and item.slot ~= "" then
         tip:AddLine("Slot: " .. item.slot, 0.75, 0.75, 0.75)
@@ -3141,12 +3147,13 @@ local function GetRecommendationCardLabel(item, fallback)
 end
 
 local function BuildRecommendationCardDetailText(item)
-    local detail = BuildGearDetailText(item)
-    if detail then
-        return detail
-    end
-
     local details = {}
+    if item and item.enchant and item.enchant ~= "" then
+        details[#details + 1] = "Enchant: " .. item.enchant
+    end
+    if item and item.gem and item.gem ~= "" then
+        details[#details + 1] = "Gem: " .. item.gem
+    end
     if item and item.effect and item.effect ~= "" then
         details[#details + 1] = tostring(item.effect)
     end
@@ -3500,13 +3507,13 @@ local function RenderPersonalPage(ctx)
     if S.uiState.selectedPersonalTab == "overview" then
         yOff = RenderPersonalOverview(content, yOff, ctx, buckets, usedSet)
     elseif S.uiState.selectedPersonalTab == "gear" then
-        yOff = RenderGearRecommendationGrid(content, yOff, "Popular Gear", buckets.gear[1], usedSet, 8)
+        yOff = RenderGearRecommendationGrid(content, yOff, "Popular Gear", buckets.gear[1], usedSet, 16)
     elseif S.uiState.selectedPersonalTab == "trinkets" then
         yOff = RenderRecommendationList(content, yOff, "Top Trinkets", buckets.trinkets[1], usedSet, 8)
     elseif S.uiState.selectedPersonalTab == "consumes" then
         yOff = RenderConsumableRecommendationSections(content, yOff, "Recommended Consumables", buckets.consumables[1], usedSet, 2)
     elseif S.uiState.selectedPersonalTab == "enchants" then
-        yOff = RenderRecommendationList(content, yOff, "Enchants & Gems", buckets.enchants[1], usedSet, 6)
+        yOff = RenderRecommendationList(content, yOff, "Enchants & Gems", buckets.enchants[1], usedSet, 8)
     elseif S.uiState.selectedPersonalTab == "talents" then
         yOff = RenderTalentBuilds(content, yOff, buckets.talent, usedSet)
         yOff = RenderStatsCard(content, yOff, buckets.stats, usedSet)

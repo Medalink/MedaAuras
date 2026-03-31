@@ -78,22 +78,6 @@ local function BuildGeneralPage(parent)
     end
     yOff = yOff - 40
 
-    local debugCheck = MedaUI:CreateCheckbox(parent, "Enable Debug Mode")
-    debugCheck:SetPoint("TOPLEFT", 0, yOff)
-    debugCheck:SetChecked(MedaAuras.IsDebugModeEnabled and MedaAuras:IsDebugModeEnabled() or false)
-    debugCheck.OnValueChanged = function(_, checked)
-        if MedaAuras.SetDebugMode then
-            MedaAuras:SetDebugMode(checked)
-        end
-        if MedaAurasDB then
-            MedaAurasDB.options.debugMode = checked
-        end
-        if MedaAuras.Log then
-            MedaAuras.Log(format("Debug mode toggled %s", checked and "ON" or "OFF"))
-        end
-    end
-    yOff = yOff - 40
-
     local muteSoundsCheck = MedaUI:CreateCheckbox(parent, "Mute All Sounds")
     muteSoundsCheck:SetPoint("TOPLEFT", 0, yOff)
     muteSoundsCheck:SetChecked(MedaAurasDB and MedaAurasDB.options and MedaAurasDB.options.muteSounds)
@@ -104,6 +88,24 @@ local function BuildGeneralPage(parent)
         MedaUI:SetSoundsEnabled(not checked)
     end
     yOff = yOff - 40
+
+    local loggingHeader = MedaUI:CreateSectionHeader(parent, "Logging", 470)
+    loggingHeader:SetPoint("TOPLEFT", 0, yOff)
+    yOff = yOff - 38
+
+    local loggingControls = MedaUI:BuildLogPolicyControls(parent, function()
+        return MedaAuras.GetLogPolicy and MedaAuras:GetLogPolicy() or nil
+    end, function(policy)
+        if MedaAuras.SetLogPolicy then
+            MedaAuras:SetLogPolicy(policy)
+        end
+    end, {
+        width = 260,
+        includeChatFallback = true,
+        description = "Sender-owned logging policy used whether or not MedaDebug is installed.",
+    })
+    loggingControls:SetPoint("TOPLEFT", 0, yOff)
+    yOff = yOff - loggingControls:GetHeight() - 12
 
     local LDBIcon = LibStub("LibDBIcon-1.0", true)
     local moduleNames = MedaAuras:GetRegisteredModuleNames()
@@ -285,7 +287,7 @@ local function RegisterOptionsModules()
         sidebarOrder = 10,
         entryType = "nav",
         pages = { { id = "settings", label = "Settings", title = "General Settings" } },
-        defaultPageHeight = 320,
+        defaultPageHeight = 520,
         buildPage = function(_, parent)
             return BuildGeneralPage(parent)
         end,

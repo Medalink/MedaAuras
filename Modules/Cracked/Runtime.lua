@@ -7,11 +7,13 @@ local MedaUI = LibStub("MedaUI-2.0")
 
 local format = format
 local GetTime = GetTime
+local abs = math.abs
 local pairs = pairs
 local ipairs = ipairs
 local wipe = wipe
 local pcall = pcall
 local sort = table.sort
+local unpack = unpack
 local CreateFrame = CreateFrame
 local CreateFont = _G and _G.CreateFont
 local UnitName = UnitName
@@ -29,8 +31,10 @@ local IsPlayerSpell = IsPlayerSpell
 local GetSpellCooldown = _G and _G.GetSpellCooldown or nil
 local GetSpellCharges = _G and _G.GetSpellCharges or nil
 local C_Spell = _G and _G.C_Spell or nil
+local C_UnitAuras = _G and _G.C_UnitAuras or nil
 local GetSpecialization = GetSpecialization
 local GetSpecializationInfo = GetSpecializationInfo
+local UnitIsFeignDeath = _G and _G.UnitIsFeignDeath or nil
 
 -- ============================================================================
 -- Module Info
@@ -40,11 +44,11 @@ local GetSpecializationInfo = GetSpecializationInfo
 -- Shared Data
 -- ============================================================================
 
-local DD = ns.DefensiveData
-local ALL_DEFENSIVES     = DD.ALL_DEFENSIVES
-local CLASS_COLORS       = DD.CLASS_COLORS
-local CATEGORY_INFO      = DD.CATEGORY_INFO
-local ENTRY_TO_ID        = DD.ENTRY_TO_ID
+local DD = ns.DefensiveData or {}
+local ALL_DEFENSIVES     = DD.ALL_DEFENSIVES or {}
+local CLASS_COLORS       = DD.CLASS_COLORS or {}
+local CATEGORY_INFO      = DD.CATEGORY_INFO or {}
+local ENTRY_TO_ID        = DD.ENTRY_TO_ID or {}
 local CONFIRMED_DEFENSIVE_IDS = DD.CONFIRMED_DEFENSIVE_IDS or {}
 local EXPERIMENTAL_DEFENSIVE_IDS = DD.EXPERIMENTAL_DEFENSIVE_IDS or {}
 local EXPERIMENTAL_IMPORTANT_BUFF_IDS = DD.EXPERIMENTAL_IMPORTANT_BUFF_IDS or {}
@@ -89,8 +93,16 @@ local activeSettingsPaneId = "all"
 local IsCategoryEnabled
 local UpdateDisplay
 local RebuildPaneBars
+local GetDefensiveTalentOverride
+local NormalizeChargeState
+local SyncPlayerDefensiveCooldown
+local GetCachedSpecID
+local UpdateMemberDefensives
+local ApplyDefensiveMetadata
 local catalogPreviewEnabled = false
 local initialized = false
+local filteredAura = C.FilteredAura or {}
+C.FilteredAura = filteredAura
 
 local MAX_BARS = 15
 
@@ -166,26 +178,30 @@ local LEGACY_STYLE_KEYS = {
     "iconSize",
 }
 
-local function BuildDefensiveAuraFilters(defData)
-    if not defData then
-        return { "HELPFUL" }
-    end
-
-    if defData.category == "external" then
-        return {
-            "HELPFUL|EXTERNAL_DEFENSIVE",
-        }
-    end
-
-    return {
-        "HELPFUL|BIG_DEFENSIVE",
-        "HELPFUL|IMPORTANT",
-    }
-end
-
 local TRACKED_DEFENSIVES = {}
 local TRACKED_CLASS_DEFENSIVE_IDS = {}
-local TRACKED_WATCH_SPELLS = {}
+local TRACKED_ACTIVE_AURA_STATES = {}
+local TRACKED_EXTERNAL_AURA_STATES = {}
+local AURA_SCAN_FILTERS = {
+    "HELPFUL|BIG_DEFENSIVE",
+    "HELPFUL|EXTERNAL_DEFENSIVE",
+    "HELPFUL|IMPORTANT",
+}
+local FILTERED_AURA_TOLERANCE = 0.5
+local FILTERED_AURA_CAST_WINDOW = 0.15
+local FILTERED_AURA_EVIDENCE_TOLERANCE = 0.15
+local FILTERED_AURA_SPELL_ALIASES = {
+    [86659] = 212641,
+    [365350] = 365362,
+    [403876] = 498,
+}
+local filteredTrackedAuras = {}
+local lastDebuffTime = {}
+local lastShieldTime = {}
+local lastCastTime = {}
+local lastUnitFlagsTime = {}
+local lastFeignDeathTime = {}
+local lastFeignDeathState = {}
 
 local function ShouldTrackExperimentalDefensives()
     return db and db.trackExperimentalDefensives == true
@@ -202,7 +218,6 @@ end
 local function RebuildTrackedDefensiveCatalog()
     TRACKED_DEFENSIVES = {}
     TRACKED_CLASS_DEFENSIVE_IDS = {}
-    TRACKED_WATCH_SPELLS = {}
 
     for spellID, defData in pairs(ALL_DEFENSIVES) do
         local include = CONFIRMED_DEFENSIVE_IDS[spellID]
@@ -214,23 +229,12 @@ local function RebuildTrackedDefensiveCatalog()
             TRACKED_DEFENSIVES[spellID] = defData
             TRACKED_CLASS_DEFENSIVE_IDS[defData.class] = TRACKED_CLASS_DEFENSIVE_IDS[defData.class] or {}
             TRACKED_CLASS_DEFENSIVE_IDS[defData.class][#TRACKED_CLASS_DEFENSIVE_IDS[defData.class] + 1] = spellID
-            TRACKED_WATCH_SPELLS[#TRACKED_WATCH_SPELLS + 1] = {
-                spellID = spellID,
-                name = defData.name,
-                filter = "HELPFUL",
-                filters = BuildDefensiveAuraFilters(defData),
-                icon = defData.icon,
-            }
         end
     end
 
     for _, ids in pairs(TRACKED_CLASS_DEFENSIVE_IDS) do
         sort(ids)
     end
-
-    sort(TRACKED_WATCH_SPELLS, function(a, b)
-        return a.spellID < b.spellID
-    end)
 end
 
 local GROUP_BUFF_WATCH_SPELLS = {}
@@ -261,13 +265,168 @@ end
 
 RebuildTrackedDefensiveCatalog()
 
+local FILTERED_AURA_RULES = {
+    bySpec = {
+        [65] = {
+            { BuffDuration = 12, Cooldown = 120, Important = true, BigDefensive = false, ExternalDefensive = false, RequiresEvidence = "Cast", MinDuration = true, SpellId = 31884, ExcludeIfTalent = 216331 },
+            { BuffDuration = 10, Cooldown = 60, Important = true, BigDefensive = false, ExternalDefensive = false, RequiresEvidence = "Cast", MinDuration = true, SpellId = 216331, RequiresTalent = 216331 },
+            { BuffDuration = 8, Cooldown = 300, BigDefensive = true, Important = true, ExternalDefensive = false, RequiresEvidence = { "Cast", "Debuff", "UnitFlags" }, CanCancelEarly = true, SpellId = 642 },
+            { BuffDuration = 8, Cooldown = 60, BigDefensive = true, Important = true, ExternalDefensive = false, RequiresEvidence = "Cast", SpellId = 498 },
+            { BuffDuration = 10, Cooldown = 300, ExternalDefensive = true, BigDefensive = false, Important = false, CanCancelEarly = true, RequiresEvidence = "Cast", SpellId = 204018, RequiresTalent = 5692 },
+            { BuffDuration = 10, Cooldown = 300, ExternalDefensive = true, BigDefensive = false, Important = false, CanCancelEarly = true, RequiresEvidence = "Cast", SpellId = 1022, ExcludeIfTalent = 5692 },
+            { BuffDuration = 12, Cooldown = 120, ExternalDefensive = true, BigDefensive = false, Important = false, RequiresEvidence = "Cast", SpellId = 6940 },
+        },
+        [66] = {
+            { BuffDuration = 25, Cooldown = 120, Important = true, ExternalDefensive = false, BigDefensive = false, RequiresEvidence = "Cast", SpellId = 31884, ExcludeIfTalent = 389539 },
+            { BuffDuration = 20, Cooldown = 120, Important = true, ExternalDefensive = false, BigDefensive = false, RequiresEvidence = "Cast", SpellId = 389539, RequiresTalent = 389539, ExcludeIfTalent = 31884 },
+            { BuffDuration = 8, Cooldown = 300, BigDefensive = true, Important = true, ExternalDefensive = false, RequiresEvidence = { "Cast", "Debuff", "UnitFlags" }, CanCancelEarly = true, SpellId = 642 },
+            { BuffDuration = 8, Cooldown = 90, BigDefensive = true, Important = true, ExternalDefensive = false, RequiresEvidence = "Cast", SpellId = 31850 },
+            { BuffDuration = 8, Cooldown = 180, BigDefensive = true, Important = false, ExternalDefensive = false, RequiresEvidence = "Cast", SpellId = 212641 },
+            { BuffDuration = 10, Cooldown = 300, ExternalDefensive = true, BigDefensive = false, Important = false, CanCancelEarly = true, RequiresEvidence = "Cast", SpellId = 204018, RequiresTalent = 5692 },
+            { BuffDuration = 10, Cooldown = 300, ExternalDefensive = true, BigDefensive = false, Important = false, CanCancelEarly = true, RequiresEvidence = "Cast", SpellId = 1022, ExcludeIfTalent = 5692 },
+            { BuffDuration = 12, Cooldown = 120, ExternalDefensive = true, BigDefensive = false, Important = false, RequiresEvidence = "Cast", SpellId = 6940 },
+        },
+        [70] = {
+            { BuffDuration = 24, Cooldown = 60, Important = true, ExternalDefensive = false, BigDefensive = false, RequiresEvidence = "Cast", SpellId = 31884, ExcludeIfTalent = 458359 },
+            { BuffDuration = 8, Cooldown = 300, BigDefensive = true, Important = true, ExternalDefensive = false, RequiresEvidence = { "Cast", "Debuff", "UnitFlags" }, CanCancelEarly = true, SpellId = 642 },
+            { BuffDuration = 8, Cooldown = 90, Important = true, ExternalDefensive = false, BigDefensive = false, RequiresEvidence = { "Cast", "Shield" }, SpellId = 498 },
+            { BuffDuration = 10, Cooldown = 300, ExternalDefensive = true, BigDefensive = false, Important = false, CanCancelEarly = true, RequiresEvidence = "Cast", SpellId = 204018, RequiresTalent = 5692 },
+            { BuffDuration = 10, Cooldown = 300, ExternalDefensive = true, BigDefensive = false, Important = false, CanCancelEarly = true, RequiresEvidence = "Cast", SpellId = 1022, ExcludeIfTalent = 5692 },
+            { BuffDuration = 12, Cooldown = 120, ExternalDefensive = true, BigDefensive = false, Important = false, RequiresEvidence = "Cast", SpellId = 6940 },
+        },
+        [62] = { { BuffDuration = 15, Cooldown = 90, Important = true, ExternalDefensive = false, BigDefensive = false, RequiresEvidence = "Cast", MinDuration = true, SpellId = 365362 } },
+        [63] = { { BuffDuration = 10, Cooldown = 120, Important = true, ExternalDefensive = false, BigDefensive = false, RequiresEvidence = "Cast", MinDuration = true, SpellId = 190319 } },
+        [71] = {
+            { BuffDuration = 8, Cooldown = 120, BigDefensive = true, ExternalDefensive = false, Important = true, RequiresEvidence = "Cast", SpellId = 118038 },
+            { BuffDuration = 20, Cooldown = 90, Important = true, ExternalDefensive = false, BigDefensive = false, RequiresEvidence = "Cast", MinDuration = true, SpellId = 107574, RequiresTalent = 107574 },
+        },
+        [72] = {
+            { BuffDuration = 8, Cooldown = 120, BigDefensive = true, ExternalDefensive = false, Important = true, RequiresEvidence = "Cast", SpellId = 184364 },
+            { BuffDuration = 11, Cooldown = 120, BigDefensive = true, ExternalDefensive = false, Important = true, RequiresEvidence = "Cast", SpellId = 184364 },
+            { BuffDuration = 20, Cooldown = 90, Important = true, ExternalDefensive = false, BigDefensive = false, RequiresEvidence = "Cast", MinDuration = true, SpellId = 107574, RequiresTalent = 107574 },
+        },
+        [73] = {
+            { BuffDuration = 8, Cooldown = 180, BigDefensive = true, ExternalDefensive = false, Important = true, RequiresEvidence = "Cast", SpellId = 871 },
+            { BuffDuration = 20, Cooldown = 90, Important = true, ExternalDefensive = false, BigDefensive = false, RequiresEvidence = "Cast", MinDuration = true, SpellId = 107574, RequiresTalent = 107574 },
+        },
+        [251] = { { BuffDuration = 12, Cooldown = 45, Important = true, BigDefensive = false, ExternalDefensive = false, RequiresEvidence = "Cast", MinDuration = true, SpellId = 51271 } },
+        [250] = {
+            { BuffDuration = 10, Cooldown = 90, BigDefensive = true, ExternalDefensive = false, Important = true, RequiresEvidence = "Cast", SpellId = 55233 },
+            { BuffDuration = 12, Cooldown = 90, BigDefensive = true, ExternalDefensive = false, Important = true, RequiresEvidence = "Cast", SpellId = 55233 },
+            { BuffDuration = 14, Cooldown = 90, BigDefensive = true, ExternalDefensive = false, Important = true, RequiresEvidence = "Cast", SpellId = 55233 },
+        },
+        [256] = { { BuffDuration = 8, Cooldown = 180, ExternalDefensive = true, BigDefensive = false, Important = false, RequiresEvidence = "Cast", SpellId = 33206 } },
+        [257] = {
+            { BuffDuration = 10, Cooldown = 180, ExternalDefensive = true, BigDefensive = false, Important = false, CanCancelEarly = true, RequiresEvidence = "Cast", SpellId = 47788 },
+            { BuffDuration = 5, Cooldown = 180, Important = true, BigDefensive = false, ExternalDefensive = false, CanCancelEarly = true, RequiresEvidence = "Cast", SpellId = 64843 },
+        },
+        [258] = {
+            { BuffDuration = 6, Cooldown = 120, BigDefensive = true, ExternalDefensive = false, Important = true, CanCancelEarly = true, RequiresEvidence = "Cast", SpellId = 47585 },
+            { BuffDuration = 20, Cooldown = 120, Important = true, ExternalDefensive = false, BigDefensive = false, RequiresEvidence = "Cast", SpellId = 228260 },
+        },
+        [102] = { { BuffDuration = 20, Cooldown = 180, Important = true, BigDefensive = false, ExternalDefensive = false, RequiresEvidence = "Cast", MinDuration = true, SpellId = 102560 } },
+        [103] = {
+            { BuffDuration = 15, Cooldown = 180, Important = true, BigDefensive = false, ExternalDefensive = false, RequiresEvidence = "Cast", MinDuration = true, SpellId = 106951, RequiresTalent = 106951, ExcludeIfTalent = 102543 },
+            { BuffDuration = 20, Cooldown = 180, Important = true, BigDefensive = false, ExternalDefensive = false, RequiresEvidence = "Cast", SpellId = 102543, RequiresTalent = 102543 },
+        },
+        [104] = { { BuffDuration = 30, Cooldown = 180, Important = true, BigDefensive = false, ExternalDefensive = false, RequiresEvidence = "Cast", SpellId = 102558 } },
+        [105] = { { BuffDuration = 12, Cooldown = 90, ExternalDefensive = true, BigDefensive = false, Important = false, RequiresEvidence = "Cast", SpellId = 102342 } },
+        [268] = {
+            { BuffDuration = 25, Cooldown = 120, Important = true, BigDefensive = false, ExternalDefensive = false, RequiresEvidence = "Cast", SpellId = 132578 },
+            { BuffDuration = 15, Cooldown = 360, BigDefensive = true, Important = true, ExternalDefensive = false, RequiresEvidence = "Cast", SpellId = 115203 },
+        },
+        [270] = { { BuffDuration = 12, Cooldown = 120, ExternalDefensive = true, BigDefensive = false, Important = false, CanCancelEarly = true, RequiresEvidence = "Cast", SpellId = 116849 } },
+        [577] = { { BuffDuration = 10, Cooldown = 60, BigDefensive = true, ExternalDefensive = false, Important = true, RequiresEvidence = "Cast", SpellId = 198589 } },
+        [254] = {
+            { BuffDuration = 15, Cooldown = 120, Important = true, BigDefensive = false, ExternalDefensive = false, RequiresEvidence = "Cast", SpellId = 288613 },
+            { BuffDuration = 17, Cooldown = 120, Important = true, BigDefensive = false, ExternalDefensive = false, RequiresEvidence = "Cast", SpellId = 288613 },
+        },
+        [1467] = { { BuffDuration = 18, Cooldown = 120, Important = true, BigDefensive = false, ExternalDefensive = false, RequiresEvidence = "Cast", MinDuration = true, SpellId = 375087 } },
+        [1468] = { { BuffDuration = 8, Cooldown = 60, ExternalDefensive = true, BigDefensive = false, Important = false, RequiresEvidence = "Cast", SpellId = 357170 } },
+        [1473] = { { BuffDuration = 13.4, Cooldown = 90, BigDefensive = true, ExternalDefensive = false, Important = true, RequiresEvidence = "Cast", MinDuration = true, SpellId = 363916 } },
+    },
+    byClass = {
+        PALADIN = {
+            { BuffDuration = 8, Cooldown = 300, BigDefensive = true, Important = true, ExternalDefensive = false, RequiresEvidence = { "Cast", "Debuff", "UnitFlags" }, CanCancelEarly = true, SpellId = 642 },
+            { BuffDuration = 8, Cooldown = 25, Important = true, ExternalDefensive = false, BigDefensive = false, CanCancelEarly = true, RequiresEvidence = "Cast", SpellId = 1044 },
+            { BuffDuration = 10, Cooldown = 45, ExternalDefensive = true, Important = false, BigDefensive = false, CanCancelEarly = true, RequiresEvidence = "Cast", SpellId = 204018, RequiresTalent = 5692 },
+            { BuffDuration = 10, Cooldown = 300, ExternalDefensive = true, Important = false, BigDefensive = false, CanCancelEarly = true, RequiresEvidence = "Cast", SpellId = 1022, ExcludeIfTalent = 5692 },
+        },
+        MAGE = {
+            { BuffDuration = 10, Cooldown = 240, BigDefensive = true, ExternalDefensive = false, Important = true, CanCancelEarly = true, SpellId = 45438, RequiresEvidence = { "Cast", "Debuff", "UnitFlags" } },
+            { BuffDuration = 10, Cooldown = 50, BigDefensive = true, ExternalDefensive = false, Important = true, CanCancelEarly = true, SpellId = 342246, RequiresEvidence = "Cast" },
+        },
+        HUNTER = {
+            { BuffDuration = 8, Cooldown = 180, BigDefensive = true, ExternalDefensive = false, Important = true, CanCancelEarly = true, SpellId = 186265, RequiresEvidence = { "Cast", "UnitFlags" } },
+            { BuffDuration = 6, Cooldown = 90, BigDefensive = true, ExternalDefensive = false, Important = true, MinDuration = true, SpellId = 264735, RequiresEvidence = "Cast" },
+            { BuffDuration = 8, Cooldown = 90, BigDefensive = true, ExternalDefensive = false, Important = true, MinDuration = true, SpellId = 264735, RequiresEvidence = "Cast" },
+        },
+        DRUID = {
+            { BuffDuration = 8, Cooldown = 60, BigDefensive = true, ExternalDefensive = false, Important = true, RequiresEvidence = "Cast", SpellId = 22812 },
+            { BuffDuration = 12, Cooldown = 60, BigDefensive = true, ExternalDefensive = false, Important = true, RequiresEvidence = "Cast", SpellId = 22812 },
+        },
+        ROGUE = {
+            { BuffDuration = 10, Cooldown = 120, Important = true, ExternalDefensive = false, BigDefensive = false, RequiresEvidence = "Cast", SpellId = 5277 },
+            { BuffDuration = 5, Cooldown = 120, BigDefensive = true, ExternalDefensive = false, Important = false, RequiresEvidence = "Cast", SpellId = 31224 },
+        },
+        DEATHKNIGHT = {
+            { BuffDuration = 5, Cooldown = 60, BigDefensive = true, Important = true, ExternalDefensive = false, CanCancelEarly = true, SpellId = 48707, RequiresEvidence = { "Cast", "Shield" } },
+            { BuffDuration = 7, Cooldown = 60, BigDefensive = true, Important = true, ExternalDefensive = false, CanCancelEarly = true, SpellId = 48707, RequiresEvidence = { "Cast", "Shield" } },
+            { BuffDuration = 8, Cooldown = 120, BigDefensive = true, ExternalDefensive = false, Important = true, RequiresEvidence = "Cast", SpellId = 48792 },
+            { BuffDuration = 5, Cooldown = 60, BigDefensive = false, Important = true, ExternalDefensive = false, CanCancelEarly = true, SpellId = 48707, RequiresEvidence = { "Cast", "Shield" } },
+            { BuffDuration = 7, Cooldown = 60, BigDefensive = false, Important = true, ExternalDefensive = false, CanCancelEarly = true, SpellId = 48707, RequiresEvidence = { "Cast", "Shield" } },
+        },
+        MONK = {
+            { BuffDuration = 15, Cooldown = 120, BigDefensive = true, ExternalDefensive = false, Important = false, RequiresEvidence = "Cast", SpellId = 115203 },
+        },
+        SHAMAN = {
+            { BuffDuration = 12, Cooldown = 120, BigDefensive = true, ExternalDefensive = false, Important = true, RequiresEvidence = "Cast", SpellId = 108271 },
+        },
+        WARLOCK = {
+            { BuffDuration = 8, Cooldown = 180, BigDefensive = true, ExternalDefensive = false, Important = true, RequiresEvidence = "Cast", SpellId = 104773 },
+        },
+        PRIEST = {
+            { BuffDuration = 10, Cooldown = 90, BigDefensive = true, ExternalDefensive = false, Important = true, RequiresEvidence = "Cast", SpellId = 19236 },
+        },
+        EVOKER = {
+            { BuffDuration = 12, Cooldown = 90, BigDefensive = true, ExternalDefensive = false, Important = true, RequiresEvidence = "Cast", MinDuration = true, SpellId = 363916 },
+        },
+    },
+}
+
 -- ============================================================================
 -- Logging
 -- ============================================================================
 
-local function Log(msg)      MedaAuras.Log(format("[Cracked] %s", msg)) end
-local function LogDebug(msg) MedaAuras.LogDebug(format("[Cracked] %s", msg)) end
-local function LogWarn(msg)  MedaAuras.LogWarn(format("[Cracked] %s", msg)) end
+local function Emit(immediate, lazy, msgOrFormat, ...)
+    local argCount = select("#", ...)
+    if argCount > 0 then
+        local args = { ... }
+        return lazy(function()
+            return format("[Cracked] " .. tostring(msgOrFormat), unpack(args, 1, argCount))
+        end)
+    end
+
+    if type(msgOrFormat) == "function" then
+        return lazy(function()
+            return format("[Cracked] %s", tostring(msgOrFormat()))
+        end)
+    end
+
+    return immediate(format("[Cracked] %s", tostring(msgOrFormat)))
+end
+
+local function Log(msgOrFormat, ...)
+    return Emit(MedaAuras.LogDebug, MedaAuras.LogDebugLazy, msgOrFormat, ...)
+end
+
+local function LogDebug(msgOrFormat, ...)
+    return Emit(MedaAuras.LogDebug, MedaAuras.LogDebugLazy, msgOrFormat, ...)
+end
+
+local function LogWarn(msgOrFormat, ...)
+    return Emit(MedaAuras.LogWarn, MedaAuras.LogWarnLazy, msgOrFormat, ...)
+end
 
 local function IsDebugModeEnabled()
     return MedaAuras.IsDebugModeEnabled and MedaAuras:IsDebugModeEnabled() or false
@@ -636,13 +795,808 @@ local function ShortName(name)
     return name:match("^[^-]+") or name
 end
 
+function filteredAura.ResetTrackedAuraStateCaches()
+    wipe(TRACKED_ACTIVE_AURA_STATES)
+    wipe(TRACKED_EXTERNAL_AURA_STATES)
+end
+
+function filteredAura.IsBetterResolvedAuraState(existingState, nextState)
+    if not existingState then
+        return true
+    end
+
+    if nextState.exactTiming ~= existingState.exactTiming then
+        return nextState.exactTiming
+    end
+
+    local existingExpiration = type(existingState.expirationTime) == "number" and existingState.expirationTime or 0
+    local nextExpiration = type(nextState.expirationTime) == "number" and nextState.expirationTime or 0
+    if nextExpiration ~= existingExpiration then
+        return nextExpiration > existingExpiration
+    end
+
+    local existingApplications = type(existingState.applications) == "number" and existingState.applications or 0
+    local nextApplications = type(nextState.applications) == "number" and nextState.applications or 0
+    if nextApplications ~= existingApplications then
+        return nextApplications > existingApplications
+    end
+
+    return (type(nextState.auraInstanceID) == "number" and nextState.auraInstanceID or 0)
+        > (type(existingState.auraInstanceID) == "number" and existingState.auraInstanceID or 0)
+end
+
+function filteredAura.ResolveTrackedSpellIDForAuraSpell(spellID)
+    if not spellID then
+        return nil
+    end
+    return FILTERED_AURA_SPELL_ALIASES[spellID] or spellID
+end
+
+function filteredAura.AuraStateMatchesTrackedSpell(instanceState, trackedSpellID, defData)
+    if not instanceState or not instanceState.active or not trackedSpellID or not defData then
+        return false
+    end
+
+    local resolvedSpellID = filteredAura.ResolveTrackedSpellIDForAuraSpell(instanceState.spellID)
+    if resolvedSpellID ~= trackedSpellID then
+        return false
+    end
+
+    local auraTypes = instanceState.auraTypes or {}
+    if defData.category == "external" then
+        return auraTypes.EXTERNAL_DEFENSIVE == true
+    end
+
+    return auraTypes.BIG_DEFENSIVE == true
+        or auraTypes.IMPORTANT == true
+        or auraTypes.EXTERNAL_DEFENSIVE == true
+end
+
+function filteredAura.BuildResolvedAuraState(unit, spellID, defData, instanceState)
+    return {
+        spellID = spellID,
+        spellName = instanceState.spellName or defData.name,
+        unit = unit,
+        active = instanceState.active == true,
+        exactTiming = instanceState.exactTiming == true,
+        usedCachedTiming = instanceState.usedCachedTiming == true,
+        isNonSecret = instanceState.isNonSecret == true,
+        sourceUnit = instanceState.sourceUnit,
+        duration = instanceState.duration,
+        expirationTime = instanceState.expirationTime,
+        applications = instanceState.applications or 0,
+        auraInstanceID = instanceState.auraInstanceID,
+        auraTypes = instanceState.auraTypes,
+    }
+end
+
+function filteredAura.RebuildTrackedAuraStateCaches()
+    filteredAura.ResetTrackedAuraStateCaches()
+
+    local tracker = ns.Services and ns.Services.GroupAuraTracker
+    if not tracker or not tracker.GetWatchState then
+        return
+    end
+
+    local watchState = tracker:GetWatchState(AURA_WATCH_KEY)
+    if type(watchState) ~= "table" then
+        return
+    end
+
+    for unit, unitState in pairs(watchState) do
+        local instances = unitState and unitState.instances or nil
+        if type(instances) == "table" then
+            for _, instanceState in pairs(instances) do
+                local spellID = filteredAura.ResolveTrackedSpellIDForAuraSpell(instanceState and instanceState.spellID or nil)
+                local defData = spellID and TRACKED_DEFENSIVES[spellID] or nil
+                if filteredAura.AuraStateMatchesTrackedSpell(instanceState, spellID, defData) then
+                    local resolvedState = filteredAura.BuildResolvedAuraState(unit, spellID, defData, instanceState)
+
+                    TRACKED_ACTIVE_AURA_STATES[unit] = TRACKED_ACTIVE_AURA_STATES[unit] or {}
+                    if filteredAura.IsBetterResolvedAuraState(TRACKED_ACTIVE_AURA_STATES[unit][spellID], resolvedState) then
+                        TRACKED_ACTIVE_AURA_STATES[unit][spellID] = resolvedState
+                    end
+
+                    if defData.category == "external" and resolvedState.sourceUnit then
+                        TRACKED_EXTERNAL_AURA_STATES[resolvedState.sourceUnit] = TRACKED_EXTERNAL_AURA_STATES[resolvedState.sourceUnit] or {}
+                        if filteredAura.IsBetterResolvedAuraState(TRACKED_EXTERNAL_AURA_STATES[resolvedState.sourceUnit][spellID], resolvedState) then
+                            TRACKED_EXTERNAL_AURA_STATES[resolvedState.sourceUnit][spellID] = resolvedState
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+function filteredAura.GetTrackedAuraState(unit, spellID)
+    if not unit or not spellID then
+        return nil
+    end
+
+    local unitState = TRACKED_ACTIVE_AURA_STATES[unit]
+    return unitState and unitState[spellID] or nil
+end
+
+function filteredAura.GetTrackedExternalAuraState(casterUnit, spellID)
+    if not casterUnit or not spellID then
+        return nil
+    end
+
+    local unitState = TRACKED_EXTERNAL_AURA_STATES[casterUnit]
+    return unitState and unitState[spellID] or nil
+end
+
+filteredAura.eventFrame = filteredAura.eventFrame or nil
+
+function filteredAura.ResetFilteredAuraTrackingState()
+    wipe(filteredTrackedAuras)
+    wipe(lastDebuffTime)
+    wipe(lastShieldTime)
+    wipe(lastCastTime)
+    wipe(lastUnitFlagsTime)
+    wipe(lastFeignDeathTime)
+    wipe(lastFeignDeathState)
+end
+
+function filteredAura.BuildAuraTypeSignature(auraTypes)
+    local signature = ""
+    if auraTypes and auraTypes.BIG_DEFENSIVE then
+        signature = signature .. "B"
+    end
+    if auraTypes and auraTypes.EXTERNAL_DEFENSIVE then
+        signature = signature .. "E"
+    end
+    if auraTypes and auraTypes.IMPORTANT then
+        signature = signature .. "I"
+    end
+    return signature
+end
+
+function filteredAura.IsRelevantFilteredAuraUnit(unit)
+    if not unit or not UnitExists(unit) then
+        return false
+    end
+
+    if UnitIsUnit(unit, "player") then
+        return true
+    end
+
+    return type(unit) == "string"
+        and (unit:match("^party%d+$") ~= nil or unit:match("^raid%d+$") ~= nil)
+end
+
+function filteredAura.GetTrackedAuraInstancesForUnit(unit)
+    local tracker = ns.Services and ns.Services.GroupAuraTracker
+    if not tracker or not tracker.GetUnitAuraInstances or not unit then
+        return nil
+    end
+    return tracker:GetUnitAuraInstances(AURA_WATCH_KEY, unit)
+end
+
+function filteredAura.GetTrackedAuraWatchState()
+    local tracker = ns.Services and ns.Services.GroupAuraTracker
+    if not tracker or not tracker.GetWatchState then
+        return nil
+    end
+    return tracker:GetWatchState(AURA_WATCH_KEY)
+end
+
+function filteredAura.ClearUnit(unit)
+    filteredTrackedAuras[unit] = nil
+    lastDebuffTime[unit] = nil
+    lastShieldTime[unit] = nil
+    lastCastTime[unit] = nil
+    lastUnitFlagsTime[unit] = nil
+    lastFeignDeathTime[unit] = nil
+    lastFeignDeathState[unit] = nil
+end
+
+function filteredAura.BuildEvidenceSet(unit, detectionTime)
+    local evidence = nil
+    if lastDebuffTime[unit] and abs(lastDebuffTime[unit] - detectionTime) <= FILTERED_AURA_EVIDENCE_TOLERANCE then
+        evidence = evidence or {}
+        evidence.Debuff = true
+    end
+    if lastShieldTime[unit] and abs(lastShieldTime[unit] - detectionTime) <= FILTERED_AURA_EVIDENCE_TOLERANCE then
+        evidence = evidence or {}
+        evidence.Shield = true
+    end
+    if lastFeignDeathTime[unit] and abs(lastFeignDeathTime[unit] - detectionTime) <= FILTERED_AURA_CAST_WINDOW then
+        evidence = evidence or {}
+        evidence.FeignDeath = true
+    elseif lastUnitFlagsTime[unit] and abs(lastUnitFlagsTime[unit] - detectionTime) <= FILTERED_AURA_CAST_WINDOW then
+        evidence = evidence or {}
+        evidence.UnitFlags = true
+    end
+    if lastCastTime[unit] and abs(lastCastTime[unit] - detectionTime) <= FILTERED_AURA_CAST_WINDOW then
+        evidence = evidence or {}
+        evidence.Cast = true
+    end
+    return evidence
+end
+
+function filteredAura.GetRuleUnitSpecID(unit)
+    if unit and UnitIsUnit(unit, "player") then
+        local specIndex = GetSpecialization and GetSpecialization()
+        if specIndex and GetSpecializationInfo then
+            return GetSpecializationInfo(specIndex)
+        end
+    end
+    return GetCachedSpecID(unit)
+end
+
+function filteredAura.GetUnitTalentState(unit, talentSpellID)
+    if not unit or not talentSpellID then
+        return nil, false
+    end
+
+    if UnitIsUnit(unit, "player") then
+        return IsPlayerSpell and IsPlayerSpell(talentSpellID) or false, true
+    end
+
+    local inspector = ns.Services and ns.Services.GroupInspector
+    if not inspector or not inspector.UnitHasTalentSpell or not inspector.GetUnitInfo then
+        return nil, false
+    end
+
+    local info = inspector:GetUnitInfo(unit)
+    if not info or not info.talentsKnown then
+        return nil, false
+    end
+
+    return inspector:UnitHasTalentSpell(unit, talentSpellID), true
+end
+
+function filteredAura.RuleTalentGateSatisfied(unit, rule)
+    if rule.ExcludeIfTalent then
+        local hasTalent = select(1, filteredAura.GetUnitTalentState(unit, rule.ExcludeIfTalent))
+        if hasTalent == true then
+            return false
+        end
+    end
+
+    if rule.RequiresTalent then
+        local hasTalent, known = filteredAura.GetUnitTalentState(unit, rule.RequiresTalent)
+        if known and not hasTalent then
+            return false
+        end
+    end
+
+    return true
+end
+
+function filteredAura.GetRuleExpectedDuration(unit, rule)
+    local expectedDuration = rule.BuffDuration
+    if rule and rule.SpellId then
+        local override = GetDefensiveTalentOverride(unit, rule.SpellId, UnitIsUnit(unit, "player"))
+        if override and override.duration then
+            expectedDuration = override.duration
+        end
+    end
+    return expectedDuration
+end
+
+function filteredAura.AuraTypeMatchesRule(auraTypes, rule)
+    auraTypes = auraTypes or {}
+
+    if rule.BigDefensive == true and not auraTypes.BIG_DEFENSIVE then
+        return false
+    end
+    if rule.BigDefensive == false and auraTypes.BIG_DEFENSIVE then
+        return false
+    end
+    if rule.ExternalDefensive == true and not auraTypes.EXTERNAL_DEFENSIVE then
+        return false
+    end
+    if rule.ExternalDefensive == false and auraTypes.EXTERNAL_DEFENSIVE then
+        return false
+    end
+    if rule.Important == true and not auraTypes.IMPORTANT then
+        return false
+    end
+
+    return true
+end
+
+function filteredAura.EvidenceMatchesReq(req, evidence)
+    if req == nil then
+        return true
+    end
+    if req == false then
+        return not evidence or not next(evidence)
+    end
+    if type(req) == "string" then
+        return evidence ~= nil and evidence[req] == true
+    end
+    if type(req) == "table" then
+        if not evidence then
+            return false
+        end
+        for _, key in ipairs(req) do
+            if not evidence[key] then
+                return false
+            end
+        end
+        return true
+    end
+    return false
+end
+
+function filteredAura.IsCooldownStateRunning(state, now)
+    if not state then
+        return false
+    end
+
+    NormalizeChargeState(state, now)
+    if state.maxCharges and state.maxCharges > 1 then
+        return state.currentCharges ~= nil and state.currentCharges <= 0 and state.cdEnd > now
+    end
+
+    return type(state.cdEnd) == "number" and state.cdEnd > now
+end
+
+function filteredAura.MatchRule(unit, auraTypes, measuredDuration, context)
+    local _, classToken = UnitClass(unit)
+    if not classToken then
+        return nil
+    end
+
+    local specID = filteredAura.GetRuleUnitSpecID(unit)
+    local evidence = context and context.Evidence or nil
+    local activeCooldowns = context and context.ActiveCooldowns or nil
+    local now = GetTime()
+
+    local function tryRuleList(ruleList)
+        local fallback = nil
+        if not ruleList then
+            return nil
+        end
+
+        for _, rule in ipairs(ruleList) do
+            if filteredAura.RuleTalentGateSatisfied(unit, rule)
+                and filteredAura.AuraTypeMatchesRule(auraTypes, rule)
+                and filteredAura.EvidenceMatchesReq(rule.RequiresEvidence, evidence)
+            then
+                local expectedDuration = filteredAura.GetRuleExpectedDuration(unit, rule)
+                local durationOk
+                if rule.MinDuration then
+                    durationOk = measuredDuration >= expectedDuration - FILTERED_AURA_TOLERANCE
+                elseif rule.CanCancelEarly == true or rule.ExternalDefensive == true then
+                    durationOk = measuredDuration <= expectedDuration + FILTERED_AURA_TOLERANCE
+                else
+                    durationOk = abs(measuredDuration - expectedDuration) <= FILTERED_AURA_TOLERANCE
+                end
+
+                if durationOk then
+                    local cooldownState = activeCooldowns and rule.SpellId and activeCooldowns[rule.SpellId] or nil
+                    if not cooldownState or not filteredAura.IsCooldownStateRunning(cooldownState, now) then
+                        return rule
+                    elseif not fallback then
+                        fallback = rule
+                    end
+                end
+            end
+        end
+
+        return fallback
+    end
+
+    return tryRuleList(specID and FILTERED_AURA_RULES.bySpec[specID])
+        or tryRuleList(FILTERED_AURA_RULES.byClass[classToken])
+end
+
+function filteredAura.GetCooldownStatesForUnit(unit)
+    if not unit then
+        return nil
+    end
+
+    if UnitIsUnit(unit, "player") then
+        return myCds
+    end
+
+    local name = UnitName(unit)
+    local info = name and partyMembers[name] or nil
+    return info and info.cds or nil
+end
+
+function filteredAura.EnsurePartyMemberInfoForUnit(unit, reason)
+    if not unit or UnitIsUnit(unit, "player") or not UnitExists(unit) then
+        return nil, nil
+    end
+
+    local name = UnitName(unit)
+    local info = name and partyMembers[name] or nil
+    if info then
+        return name, info
+    end
+
+    local _, classToken = UnitClass(unit)
+    if not name or not classToken then
+        return nil, nil
+    end
+
+    UpdateMemberDefensives(name, classToken, GetCachedSpecID(unit), reason or "filtered-aura", unit)
+    return name, partyMembers[name]
+end
+
+function filteredAura.EnsureCooldownStateForUnit(unit, spellID, defData)
+    if not unit or not spellID or not defData then
+        return nil, nil, nil, false
+    end
+
+    if UnitIsUnit(unit, "player") then
+        if not myCds[spellID] then
+            local known = IsSpellKnown and IsSpellKnown(spellID) or false
+            if not known then
+                local ok, result = pcall(IsPlayerSpell, spellID)
+                known = ok and result or false
+            end
+            if not known then
+                return myName, myClass, nil, true
+            end
+
+            myCds[spellID] = {
+                baseCd = defData.cd,
+                cdEnd = 0,
+                activeEnd = 0,
+                lastUse = 0,
+            }
+            ApplyDefensiveMetadata(myCds[spellID], defData, GetDefensiveTalentOverride(unit, spellID, true))
+            SyncPlayerDefensiveCooldown(spellID, myCds[spellID], defData)
+        end
+
+        return myName or UnitName(unit), myClass or select(2, UnitClass(unit)), myCds[spellID], true
+    end
+
+    local name, info = filteredAura.EnsurePartyMemberInfoForUnit(unit, "filtered-aura")
+    if not info then
+        return name, nil, nil, false
+    end
+
+    if not info.cds[spellID] then
+        info.cds[spellID] = {
+            baseCd = defData.cd,
+            cdEnd = 0,
+            activeEnd = 0,
+            lastUse = 0,
+        }
+        ApplyDefensiveMetadata(info.cds[spellID], defData, GetDefensiveTalentOverride(info.unit or unit, spellID, false))
+    end
+
+    return name, info.class, info.cds[spellID], false
+end
+
+function filteredAura.ConsumeDefensiveUseAtTime(state, useTime, now)
+    if not state then
+        return
+    end
+
+    now = now or GetTime()
+    NormalizeChargeState(state, now)
+
+    if state.maxCharges and state.maxCharges > 1 then
+        state.currentCharges = math.max(0, (state.currentCharges or state.maxCharges) - 1)
+        state.rechargeEnds = state.rechargeEnds or {}
+        state.rechargeEnds[#state.rechargeEnds + 1] = useTime + (state.baseCd or 0)
+        table.sort(state.rechargeEnds)
+        NormalizeChargeState(state, now)
+    else
+        state.cdEnd = useTime + (state.baseCd or 0)
+    end
+end
+
+function filteredAura.BuildCurrentIds(unit)
+    local currentIds = {}
+    local instances = filteredAura.GetTrackedAuraInstancesForUnit(unit)
+    if type(instances) ~= "table" then
+        return currentIds
+    end
+
+    for auraInstanceID, auraState in pairs(instances) do
+        currentIds[auraInstanceID] = {
+            AuraTypes = auraState.auraTypes or {},
+            SpellId = filteredAura.ResolveTrackedSpellIDForAuraSpell(auraState.spellID),
+        }
+    end
+
+    return currentIds
+end
+
+function filteredAura.TrackNew(unit, trackedAuras, auraInstanceID, info, now)
+    local evidence = filteredAura.BuildEvidenceSet(unit, now)
+    local castSnapshot = {}
+    for snapshotUnit, snapshotTime in pairs(lastCastTime) do
+        castSnapshot[snapshotUnit] = snapshotTime
+    end
+
+    trackedAuras[auraInstanceID] = {
+        StartTime = now,
+        AuraTypes = info.AuraTypes,
+        SpellId = info.SpellId,
+        Evidence = evidence,
+        CastSnapshot = castSnapshot,
+    }
+
+    C_Timer.After(FILTERED_AURA_EVIDENCE_TOLERANCE, function()
+        local unitAuras = filteredTrackedAuras[unit]
+        local tracked = unitAuras and unitAuras[auraInstanceID] or nil
+        if not tracked then
+            return
+        end
+
+        local lateEvidence = filteredAura.BuildEvidenceSet(unit, now)
+        if lateEvidence then
+            tracked.Evidence = tracked.Evidence or {}
+            for key in pairs(lateEvidence) do
+                tracked.Evidence[key] = true
+            end
+        end
+
+        for snapshotUnit, snapshotTime in pairs(lastCastTime) do
+            if abs(snapshotTime - now) <= FILTERED_AURA_CAST_WINDOW and not tracked.CastSnapshot[snapshotUnit] then
+                tracked.CastSnapshot[snapshotUnit] = snapshotTime
+            end
+        end
+    end)
+end
+
+function filteredAura.FindBestCandidate(recipientUnit, tracked, measuredDuration)
+    local rule = nil
+    local ruleUnit = recipientUnit
+    local bestTime = nil
+    local isExternal = tracked.AuraTypes.EXTERNAL_DEFENSIVE == true
+    local watchState = filteredAura.GetTrackedAuraWatchState() or {}
+
+    local function consider(candidateUnit, isTarget)
+        if not candidateUnit or not UnitExists(candidateUnit) then
+            return
+        end
+
+        local candidateEvidence = nil
+        if tracked.Evidence then
+            for key in pairs(tracked.Evidence) do
+                if key ~= "Cast" then
+                    candidateEvidence = candidateEvidence or {}
+                    candidateEvidence[key] = true
+                end
+            end
+        end
+
+        local castTime = tracked.CastSnapshot and tracked.CastSnapshot[candidateUnit] or nil
+        if castTime and abs(castTime - tracked.StartTime) <= FILTERED_AURA_CAST_WINDOW then
+            candidateEvidence = candidateEvidence or {}
+            candidateEvidence.Cast = true
+        end
+
+        local candidateRule = filteredAura.MatchRule(candidateUnit, tracked.AuraTypes, measuredDuration, {
+            Evidence = candidateEvidence,
+            ActiveCooldowns = filteredAura.GetCooldownStatesForUnit(candidateUnit),
+        })
+        if not candidateRule then
+            return
+        end
+
+        local isBetter = not rule
+            or (castTime and (not bestTime or castTime > bestTime))
+            or (not castTime and not bestTime and isExternal and not isTarget)
+        if isBetter then
+            rule = candidateRule
+            ruleUnit = candidateUnit
+            bestTime = castTime
+        end
+    end
+
+    consider(recipientUnit, true)
+    for candidateUnit in pairs(watchState) do
+        if candidateUnit ~= recipientUnit then
+            consider(candidateUnit, false)
+        end
+    end
+
+    return rule, ruleUnit
+end
+
+function filteredAura.CommitCooldown(recipientUnit, tracked, rule, ruleUnit, measuredDuration)
+    local spellID = rule and rule.SpellId or nil
+    local defData = spellID and TRACKED_DEFENSIVES[spellID] or nil
+    if not defData or not IsCategoryEnabled(defData.category) then
+        return false
+    end
+
+    local now = GetTime()
+    local name, classToken, state, isPlayer = filteredAura.EnsureCooldownStateForUnit(ruleUnit, spellID, defData)
+    if not state then
+        return false
+    end
+
+    if filteredAura.IsCooldownStateRunning(state, now) then
+        return false
+    end
+
+    filteredAura.ConsumeDefensiveUseAtTime(state, tracked.StartTime, now)
+    state.lastUse = tracked.StartTime
+    state.activeEnd = 0
+
+    if isPlayer then
+        SyncPlayerDefensiveCooldown(spellID, state, defData)
+    end
+
+    Log("FILTERED DEFENSIVE: %s inferred %s (ID %d, unit=%s, elapsed=%.1f)",
+        SafeStr(name or UnitName(ruleUnit) or ruleUnit),
+        defData.name,
+        spellID,
+        SafeStr(recipientUnit),
+        measuredDuration)
+    return true
+end
+
+function filteredAura.OnRemoved(recipientUnit, tracked, now)
+    local measuredDuration = now - tracked.StartTime
+    local rule, ruleUnit = filteredAura.FindBestCandidate(recipientUnit, tracked, measuredDuration)
+    if not rule then
+        return
+    end
+
+    filteredAura.CommitCooldown(recipientUnit, tracked, rule, ruleUnit, measuredDuration)
+end
+
+function filteredAura.ProcessUnit(unit)
+    if not unit then
+        return
+    end
+
+    if not UnitExists(unit) then
+        filteredAura.ClearUnit(unit)
+        return
+    end
+
+    local trackedAuras = filteredTrackedAuras[unit] or {}
+    filteredTrackedAuras[unit] = trackedAuras
+
+    local now = GetTime()
+    local currentIds = filteredAura.BuildCurrentIds(unit)
+    local newIdsBySignature = {}
+
+    for auraInstanceID, info in pairs(currentIds) do
+        if not trackedAuras[auraInstanceID] then
+            local signature = filteredAura.BuildAuraTypeSignature(info.AuraTypes)
+            newIdsBySignature[signature] = newIdsBySignature[signature] or {}
+            newIdsBySignature[signature][#newIdsBySignature[signature] + 1] = auraInstanceID
+        end
+    end
+
+    for auraInstanceID, tracked in pairs(trackedAuras) do
+        if not currentIds[auraInstanceID] then
+            local signature = filteredAura.BuildAuraTypeSignature(tracked.AuraTypes)
+            local candidates = newIdsBySignature[signature]
+            if candidates and #candidates > 0 then
+                local reassignedId = table.remove(candidates, 1)
+                tracked.AuraTypes = currentIds[reassignedId].AuraTypes
+                tracked.SpellId = currentIds[reassignedId].SpellId or tracked.SpellId
+                trackedAuras[reassignedId] = tracked
+            else
+                filteredAura.OnRemoved(unit, tracked, now)
+            end
+            trackedAuras[auraInstanceID] = nil
+        end
+    end
+
+    for auraInstanceID, info in pairs(currentIds) do
+        if not trackedAuras[auraInstanceID] then
+            filteredAura.TrackNew(unit, trackedAuras, auraInstanceID, info, now)
+        else
+            trackedAuras[auraInstanceID].AuraTypes = info.AuraTypes
+            trackedAuras[auraInstanceID].SpellId = info.SpellId or trackedAuras[auraInstanceID].SpellId
+        end
+    end
+
+    if not next(trackedAuras) then
+        filteredTrackedAuras[unit] = nil
+    end
+end
+
+function filteredAura.ProcessAllUnits()
+    local watchState = filteredAura.GetTrackedAuraWatchState() or {}
+    local seen = {}
+
+    for unit in pairs(watchState) do
+        seen[unit] = true
+        filteredAura.ProcessUnit(unit)
+    end
+
+    for unit in pairs(filteredTrackedAuras) do
+        if not seen[unit] then
+            filteredAura.ClearUnit(unit)
+        end
+    end
+end
+
+function filteredAura.EnsureEventFrame()
+    if not filteredAura.eventFrame then
+        filteredAura.eventFrame = CreateFrame("Frame")
+        filteredAura.eventFrame:SetScript("OnEvent", function(_, event, ...)
+            if event == "UNIT_SPELLCAST_SUCCEEDED" then
+                local unit = ...
+                if filteredAura.IsRelevantFilteredAuraUnit(unit) then
+                    local now = GetTime()
+                    if lastCastTime[unit] ~= now then
+                        lastCastTime[unit] = now
+                    end
+                end
+            elseif event == "UNIT_FLAGS" then
+                local unit = ...
+                if filteredAura.IsRelevantFilteredAuraUnit(unit) then
+                    local now = GetTime()
+                    local isFeign = UnitIsFeignDeath and UnitIsFeignDeath(unit) or false
+                    if isFeign and not lastFeignDeathState[unit] then
+                        lastFeignDeathTime[unit] = now
+                    end
+                    lastFeignDeathState[unit] = isFeign
+                    if not isFeign then
+                        lastUnitFlagsTime[unit] = now
+                    end
+                end
+            elseif event == "UNIT_AURA" then
+                local unit, updateInfo = ...
+                if filteredAura.IsRelevantFilteredAuraUnit(unit)
+                    and updateInfo
+                    and not updateInfo.isFullUpdate
+                    and type(updateInfo.addedAuras) == "table"
+                    and C_UnitAuras
+                    and C_UnitAuras.IsAuraFilteredOutByInstanceID
+                then
+                    for _, auraInfo in ipairs(updateInfo.addedAuras) do
+                        local auraInstanceID = auraInfo and auraInfo.auraInstanceID or nil
+                        if auraInstanceID and not C_UnitAuras.IsAuraFilteredOutByInstanceID(unit, auraInstanceID, "HARMFUL") then
+                            lastDebuffTime[unit] = GetTime()
+                            break
+                        end
+                    end
+                end
+            elseif event == "UNIT_ABSORB_AMOUNT_CHANGED" then
+                local unit = ...
+                if filteredAura.IsRelevantFilteredAuraUnit(unit) then
+                    lastShieldTime[unit] = GetTime()
+                end
+            elseif event == "GROUP_ROSTER_UPDATE" or event == "PLAYER_ENTERING_WORLD" then
+                filteredAura.ProcessAllUnits()
+            end
+        end)
+    end
+
+    filteredAura.eventFrame:UnregisterAllEvents()
+    filteredAura.eventFrame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
+    filteredAura.eventFrame:RegisterEvent("UNIT_FLAGS")
+    filteredAura.eventFrame:RegisterEvent("UNIT_AURA")
+    filteredAura.eventFrame:RegisterEvent("UNIT_ABSORB_AMOUNT_CHANGED")
+    filteredAura.eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
+    filteredAura.eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+end
+
+function filteredAura.TeardownEventFrame()
+    if filteredAura.eventFrame then
+        filteredAura.eventFrame:UnregisterAllEvents()
+    end
+end
+
 local function GetAuraDebugStateSummary(watchKey, unit, spellID)
     local tracker = ns.Services and ns.Services.GroupAuraTracker
-    if not tracker or not tracker.GetUnitSpellState or not unit then
+    if not tracker or not unit then
         return "aura=tracker-unavailable"
     end
 
-    local state = tracker:GetUnitSpellState(watchKey, unit, spellID)
+    local state
+    if watchKey == AURA_WATCH_KEY then
+        state = filteredAura.GetTrackedAuraState(unit, spellID)
+        local defData = TRACKED_DEFENSIVES[spellID]
+        if (not state or not state.active) and defData and defData.category == "external" then
+            state = filteredAura.GetTrackedExternalAuraState(unit, spellID) or state
+        end
+    elseif tracker.GetUnitSpellState then
+        state = tracker:GetUnitSpellState(watchKey, unit, spellID)
+    end
+
     if not state then
         return "aura=none"
     end
@@ -661,7 +1615,7 @@ local function GetAuraDebugStateSummary(watchKey, unit, spellID)
     return "aura=active:secret"
 end
 
-local function GetDefensiveTalentOverride(unit, spellID, isPlayer)
+GetDefensiveTalentOverride = function(unit, spellID, isPlayer)
     local override = DEFENSIVE_TALENT_OVERRIDES[spellID]
     if not override or not override.talentSpellID then
         return nil
@@ -679,7 +1633,7 @@ local function GetDefensiveTalentOverride(unit, spellID, isPlayer)
     return nil
 end
 
-local function NormalizeChargeState(state, now)
+NormalizeChargeState = function(state, now)
     if not state or not state.maxCharges or state.maxCharges <= 1 then
         state.currentCharges = nil
         state.rechargeEnds = nil
@@ -707,7 +1661,7 @@ local function NormalizeChargeState(state, now)
     state.cdEnd = rechargeEnds[1] or 0
 end
 
-local function ApplyDefensiveMetadata(state, defData, override)
+ApplyDefensiveMetadata = function(state, defData, override)
     if not state or not defData then
         return
     end
@@ -762,7 +1716,7 @@ local function ResolveCooldownEnd(startTime, duration, modRate)
     return startTime + (duration / rate)
 end
 
-local function SyncPlayerDefensiveCooldown(spellID, state, defData)
+SyncPlayerDefensiveCooldown = function(spellID, state, defData)
     if not spellID or not state or not defData then
         return
     end
@@ -859,13 +1813,13 @@ local function LogPlayerTrackingSnapshot(reason)
     end
 
     if #parts == 0 then
-        LogWarn(format("Tracking[%s] player=%s tracked=0 class=%s", tostring(reason), tostring(myName), tostring(myClass)))
+        LogWarn("Tracking[%s] player=%s tracked=0 class=%s", tostring(reason), tostring(myName), tostring(myClass))
         return
     end
 
     table.sort(parts)
-    LogDebug(format("Tracking[%s] player=%s tracked=%d %s",
-        tostring(reason), tostring(myName), #parts, table.concat(parts, " | ")))
+    LogDebug("Tracking[%s] player=%s tracked=%d %s",
+        tostring(reason), tostring(myName), #parts, table.concat(parts, " | "))
 end
 
 local function BuildAuraRescanMode()
@@ -878,15 +1832,18 @@ end
 local function RefreshAuraWatches()
     local tracker = ns.Services.GroupAuraTracker
     if not tracker or not tracker.RegisterWatch then
+        filteredAura.ResetTrackedAuraStateCaches()
+        filteredAura.ResetFilteredAuraTrackingState()
         return
     end
 
+    filteredAura.ResetFilteredAuraTrackingState()
     tracker:RegisterWatch(AURA_WATCH_KEY, {
-        spells = TRACKED_WATCH_SPELLS,
-        filter = "HELPFUL",
-        allowDirectLookup = false,
+        mode = "bucketed",
+        scanFilters = AURA_SCAN_FILTERS,
         rescanMode = BuildAuraRescanMode(),
     })
+    filteredAura.RebuildTrackedAuraStateCaches()
 
     if db and db.showMissingGroupBuffs ~= false then
         tracker:RegisterWatch(GROUP_BUFF_WATCH_KEY, {
@@ -917,7 +1874,7 @@ local function UpdateMainFrameVisibility()
         if lastVisibilityState[paneId] ~= shouldShow then
             lastVisibilityState[paneId] = shouldShow
             local point, _, _, x, y = pane.frame:GetPoint()
-            LogDebug(format("FrameVisibility pane=%s shown=%s zone=%s settings=%s entries=%s point=%s x=%.0f y=%.0f alpha=%.2f",
+            LogDebug("FrameVisibility pane=%s shown=%s zone=%s settings=%s entries=%s point=%s x=%.0f y=%.0f alpha=%.2f",
                 tostring(paneId),
                 tostring(shouldShow),
                 tostring(shouldShowByZone),
@@ -926,7 +1883,7 @@ local function UpdateMainFrameVisibility()
                 tostring(point),
                 x or 0,
                 y or 0,
-                pane.frame:GetAlpha() or 0))
+                pane.frame:GetAlpha() or 0)
         end
     end
 
@@ -1032,7 +1989,7 @@ local function DidCandidateIDsChange(oldInfo, candidateIDs)
     return false
 end
 
-local function GetCachedSpecID(unit)
+GetCachedSpecID = function(unit)
     if not unit or not UnitExists(unit) then return nil end
     local info = ns.Services.GroupInspector and ns.Services.GroupInspector:GetUnitInfo(unit)
     return info and info.specID or nil
@@ -1145,7 +2102,7 @@ local function BuildCandidateDecisionSummary(cls, specID, unit)
     return included, excluded
 end
 
-local function UpdateMemberDefensives(name, cls, specID, reason, unit)
+UpdateMemberDefensives = function(name, cls, specID, reason, unit)
     local oldInfo = partyMembers[name]
     local effectiveSpecID = specID
     if oldInfo and oldInfo.specID and not specID and reason == "roster" then
@@ -1170,13 +2127,13 @@ local function UpdateMemberDefensives(name, cls, specID, reason, unit)
         NormalizeChargeState(state, GetTime())
         cds[spellID] = state
         if override then
-            LogDebug(format("  Talent override for %s: %s -> %s (%d charge%s, %ds)",
+            LogDebug("  Talent override for %s: %s -> %s (%d charge%s, %ds)",
                 tostring(name),
                 data.name,
                 override.name,
                 override.maxCharges or 1,
                 (override.maxCharges or 1) == 1 and "" or "s",
-                override.cd or data.cd))
+                override.cd or data.cd)
         end
     end
 
@@ -1196,16 +2153,15 @@ local function UpdateMemberDefensives(name, cls, specID, reason, unit)
         or oldInfo.specID ~= effectiveSpecID
         or DidCandidateIDsChange(oldInfo, candidateIDs)
     then
-        LogDebug(format("Registered %s (%s spec=%s) with %d/%d defensive candidates via %s",
-            name, cls, tostring(effectiveSpecID), #candidateIDs, classWideCount, tostring(reason)))
-        LogDebug(format("  CandidateIDs for %s: %s",
-            name, FormatCandidateIDs(candidateIDs, candidateLookup)))
+        LogDebug("Registered %s (%s spec=%s) with %d/%d defensive candidates via %s",
+            name, cls, tostring(effectiveSpecID), #candidateIDs, classWideCount, tostring(reason))
+        LogDebug("  CandidateIDs for %s: %s", name, FormatCandidateIDs(candidateIDs, candidateLookup))
         if reason == "inspect" then
             local included, excluded = BuildCandidateDecisionSummary(cls, effectiveSpecID, effectiveUnit)
-            LogDebug(format("  TalentGate %s: include=%s exclude=%s",
+            LogDebug("  TalentGate %s: include=%s exclude=%s",
                 name,
                 FormatDecisionList(included),
-                FormatDecisionList(excluded)))
+                FormatDecisionList(excluded))
         end
     end
 end
@@ -1253,19 +2209,19 @@ local function FindMyDefensives()
                 myCds[spellID] = state
                 count = count + 1
                 if override then
-                    LogDebug(format("    -> talent override applied: %s -> %s (%d charge%s, %ds)",
+                    LogDebug("    -> talent override applied: %s -> %s (%d charge%s, %ds)",
                         data.name,
                         override.name,
                         override.maxCharges or 1,
                         (override.maxCharges or 1) == 1 and "" or "s",
-                        override.cd or data.cd))
+                        override.cd or data.cd)
                 end
             end
         end
     end
 
-    LogDebug(format("FindMyDefensives: tracked=%d player=%s class=%s",
-        count, tostring(myName), tostring(cls)))
+    LogDebug("FindMyDefensives: tracked=%d player=%s class=%s",
+        count, tostring(myName), tostring(cls))
     if IsDeepDebugModeEnabled() then
         LogPlayerTrackingSnapshot("find-my-defensives")
     end
@@ -1335,10 +2291,10 @@ local function ProbeCandidateAuras(name, unit, debugInfo)
                 end
             end
         end
-        LogDebug(format("AuraProbe[%s] %s unit=%s candidates=%s active=%s",
+        LogDebug("AuraProbe[%s] %s unit=%s candidates=%s active=%s",
             tag, SafeStr(name), SafeStr(unit),
             FormatCandidateIDs(debugInfo.candidateIDs, debugInfo.candidateLookup),
-            #active > 0 and table.concat(active, ", ") or "none"))
+            #active > 0 and table.concat(active, ", ") or "none")
     end
 
     RunProbe("0.0")
@@ -1362,16 +2318,16 @@ local function ProbeBlizzardUISurfaces(reason)
     blizzardProbeCount = blizzardProbeCount + 1
     if blizzardProbeCount > 12 then return end
 
-    LogDebug(format("BlizzardUIProbe[%d]: reason=%s C_CooldownViewer=%s",
-        blizzardProbeCount, tostring(reason), tostring(C_CooldownViewer ~= nil)))
+    LogDebug("BlizzardUIProbe[%d]: reason=%s C_CooldownViewer=%s",
+        blizzardProbeCount, tostring(reason), tostring(C_CooldownViewer ~= nil))
 
     for _, viewerName in ipairs(BLIZZ_VIEWERS) do
         local viewer = _G[viewerName]
         if viewer then
             local ok, children = pcall(function() return { viewer:GetChildren() } end)
             local childCount = ok and #children or 0
-            LogDebug(format("  Viewer %s exists shown=%s children=%d",
-                viewerName, tostring(viewer:IsShown()), childCount))
+            LogDebug("  Viewer %s exists shown=%s children=%d",
+                viewerName, tostring(viewer:IsShown()), childCount)
 
             if ok and children then
                 for idx, child in ipairs(children) do
@@ -1384,18 +2340,18 @@ local function ProbeBlizzardUISurfaces(reason)
                         local okInfo, rInfo = pcall(C_CooldownViewer.GetCooldownViewerCooldownInfo, cdID)
                         if okInfo then info = rInfo end
                     end
-                    LogDebug(format("    child[%d] name=%s shown=%s cdID=%s spellID=%s itemID=%s infoSpell=%s",
+                    LogDebug("    child[%d] name=%s shown=%s cdID=%s spellID=%s itemID=%s infoSpell=%s",
                         idx,
                         tostring(child.GetName and child:GetName() or nil),
                         tostring(child.IsShown and child:IsShown() or false),
                         tostring(cdID),
                         tostring(spellID),
                         tostring(itemID),
-                        tostring(info and (info.overrideSpellID or info.spellID) or nil)))
+                        tostring(info and (info.overrideSpellID or info.spellID) or nil))
                 end
             end
         else
-            LogDebug(format("  Viewer %s missing", viewerName))
+            LogDebug("  Viewer %s missing", viewerName)
         end
     end
 
@@ -1404,11 +2360,11 @@ local function ProbeBlizzardUISurfaces(reason)
         if partyFrame then
             local okChildren, children = pcall(function() return { partyFrame:GetChildren() } end)
             local okRegions, regions = pcall(function() return { partyFrame:GetRegions() } end)
-            LogDebug(format("  CompactPartyFrameMember%d shown=%s children=%d regions=%d",
+            LogDebug("  CompactPartyFrameMember%d shown=%s children=%d regions=%d",
                 i,
                 tostring(partyFrame:IsShown()),
                 okChildren and #children or -1,
-                okRegions and #regions or -1))
+                okRegions and #regions or -1)
         end
     end
 end
@@ -1442,8 +2398,8 @@ end
 
 local function OnPartyDefensiveMatch(name, cleanSpellID, defData, unit, debugInfo)
     if not IsCategoryEnabled(defData.category) then
-        LogDebug(format("FILTERED (cat disabled): %s cast %s (ID %d, cat=%s)",
-            SafeStr(name), defData.name, cleanSpellID, defData.category))
+        LogDebug("FILTERED (cat disabled): %s cast %s (ID %d, cat=%s)",
+            SafeStr(name), defData.name, cleanSpellID, defData.category)
         return
     end
 
@@ -1475,20 +2431,20 @@ local function OnPartyDefensiveMatch(name, cleanSpellID, defData, unit, debugInf
                 lastUse = 0,
             }
             ApplyDefensiveMetadata(info.cds[cleanSpellID], defData, GetDefensiveTalentOverride(info.unit or unit, cleanSpellID, false))
-            LogDebug(format("  Late-added spell %d (%s) for %s", cleanSpellID, defData.name, SafeStr(name)))
+            LogDebug("  Late-added spell %d (%s) for %s", cleanSpellID, defData.name, SafeStr(name))
         end
 
         cd = info.cds[cleanSpellID]
-        Log(format("PARTY DEFENSIVE: %s cast %s (ID %d, cat=%s, CD=%ds, dur=%ds, confidence=%s via=%s)",
+        Log("PARTY DEFENSIVE: %s cast %s (ID %d, cat=%s, CD=%ds, dur=%ds, confidence=%s via=%s)",
             SafeStr(name), defData.name, cleanSpellID, defData.category,
             defData.cd, defData.duration,
             tostring(debugInfo and debugInfo.confidence or "unknown"),
-            tostring(debugInfo and debugInfo.chosenBy or "unknown")))
+            tostring(debugInfo and debugInfo.chosenBy or "unknown"))
         if debugInfo and IsDeepDebugModeEnabled() then
-            LogDebug(format("  MatchDebug cast=%s cleanID=%s candidates=%s",
+            LogDebug("  MatchDebug cast=%s cleanID=%s candidates=%s",
                 SafeStr(debugInfo.castID),
                 SafeStr(debugInfo.cleanID),
-                FormatCandidateIDs(debugInfo.candidateIDs, debugInfo.candidateLookup)))
+                FormatCandidateIDs(debugInfo.candidateIDs, debugInfo.candidateLookup))
         end
         ConsumeDefensiveUse(cd, now)
         local activeDuration = type(cd.displayDuration) == "number" and cd.displayDuration or defData.duration
@@ -1496,12 +2452,12 @@ local function OnPartyDefensiveMatch(name, cleanSpellID, defData, unit, debugInf
         cd.lastUse = now
 
     else
-        Log(format("PARTY DEFENSIVE: %s cast %s (ID %d, cat=%s, CD=%ds, dur=%ds, confidence=%s via=%s)",
+        Log("PARTY DEFENSIVE: %s cast %s (ID %d, cat=%s, CD=%ds, dur=%ds, confidence=%s via=%s)",
             SafeStr(name), defData.name, cleanSpellID, defData.category,
             defData.cd, defData.duration,
             tostring(debugInfo and debugInfo.confidence or "unknown"),
-            tostring(debugInfo and debugInfo.chosenBy or "unknown")))
-        LogWarn(format("  Could not register %s from %s", SafeStr(name), SafeStr(unit)))
+            tostring(debugInfo and debugInfo.chosenBy or "unknown"))
+        LogWarn("  Could not register %s from %s", SafeStr(name), SafeStr(unit))
     end
 
     if ns.Services.GroupAuraTracker and ns.Services.GroupAuraTracker.RequestWatchScan and unit then
@@ -1511,13 +2467,13 @@ local function OnPartyDefensiveMatch(name, cleanSpellID, defData, unit, debugInf
     if unit and IsDeepDebugModeEnabled() then
         local cdEnd = type(cd and cd.cdEnd) == "number" and cd.cdEnd or 0
         local activeEnd = type(cd and cd.activeEnd) == "number" and cd.activeEnd or 0
-        LogDebug(format("MatchPostScan name=%s unit=%s spell=%s cd=%.1f active=%.1f %s",
+        LogDebug("MatchPostScan name=%s unit=%s spell=%s cd=%.1f active=%.1f %s",
             SafeStr(name),
             SafeStr(unit),
             cd and cd.displayName or defData.name,
             cdEnd > now and (cdEnd - now) or 0,
             activeEnd > now and (activeEnd - now) or 0,
-            GetAuraDebugStateSummary(AURA_WATCH_KEY, unit, cleanSpellID)))
+            GetAuraDebugStateSummary(AURA_WATCH_KEY, unit, cleanSpellID))
     end
 
     if IsDeepDebugModeEnabled() then
@@ -1562,11 +2518,11 @@ local function SetupOwnTracking()
         cd.lastUse = now
         SyncPlayerDefensiveCooldown(spellID, cd, defData)
 
-        Log(format("OWN DEFENSIVE: %s (ID %d, cat=%s, CD=%ds, dur=%ds) activeEnd=%.1f cdEnd=%.1f",
+        Log("OWN DEFENSIVE: %s (ID %d, cat=%s, CD=%ds, dur=%ds) activeEnd=%.1f cdEnd=%.1f",
             cd.displayName or defData.name, spellID, defData.category,
             cd.baseCd or defData.cd, activeDuration,
             cd.activeEnd > 0 and cd.activeEnd or 0,
-            cd.cdEnd))
+            cd.cdEnd)
 
         if C.RequestDisplayRefresh then
             C.RequestDisplayRefresh()
@@ -1972,41 +2928,6 @@ local function CollectDisplayEntries()
     local missingBuffEntries = {}
     local now = GetTime()
 
-    local function GetTrackedAuraState(unit, spellID)
-        if not unit or not ns.Services.GroupAuraTracker or not ns.Services.GroupAuraTracker.GetUnitSpellState then
-            return nil
-        end
-        return ns.Services.GroupAuraTracker:GetUnitSpellState(AURA_WATCH_KEY, unit, spellID)
-    end
-
-    local function GetTrackedExternalAuraState(casterUnit, spellID)
-        local tracker = ns.Services and ns.Services.GroupAuraTracker
-        if not casterUnit or not spellID or not tracker or not tracker.GetWatchState then
-            return nil
-        end
-
-        local watchState = tracker:GetWatchState(AURA_WATCH_KEY)
-        if not watchState then
-            return nil
-        end
-
-        local bestState = nil
-        for _, recipientState in pairs(watchState) do
-            local spellState = recipientState and recipientState.spells and recipientState.spells[spellID] or nil
-            if spellState and spellState.active and spellState.sourceUnit == casterUnit then
-                if not bestState then
-                    bestState = spellState
-                elseif spellState.exactTiming and not bestState.exactTiming then
-                    bestState = spellState
-                elseif spellState.expirationTime and bestState.expirationTime and spellState.expirationTime > bestState.expirationTime then
-                    bestState = spellState
-                end
-            end
-        end
-
-        return bestState
-    end
-
     local function GetTrackedGroupBuffState(unit, spellID)
         if not unit or not ns.Services.GroupAuraTracker or not ns.Services.GroupAuraTracker.GetUnitSpellState then
             return nil
@@ -2015,9 +2936,9 @@ local function CollectDisplayEntries()
     end
 
     local function ResolveActiveState(unit, spellID, cd, defData, isPlayer)
-        local auraState = GetTrackedAuraState(unit, spellID)
+        local auraState = filteredAura.GetTrackedAuraState(unit, spellID)
         if (not auraState or not auraState.active) and defData.category == "external" then
-            auraState = GetTrackedExternalAuraState(unit, spellID) or auraState
+            auraState = filteredAura.GetTrackedExternalAuraState(unit, spellID) or auraState
         end
         local renderMode = "none"
         local activeStart = nil
@@ -2289,17 +3210,26 @@ local function CheckZoneVisibility()
     else
         shouldShowByZone = db.showInOpenWorld
     end
-    LogDebug(format("CheckZoneVisibility: instanceType=%s showByZone=%s",
-        tostring(instanceType), tostring(shouldShowByZone)))
+    LogDebug("CheckZoneVisibility: instanceType=%s showByZone=%s",
+        tostring(instanceType), tostring(shouldShowByZone))
     UpdateMainFrameVisibility()
     if C.RequestDisplayRefresh then
         C.RequestDisplayRefresh()
     end
 end
 
-local function OnAuraStateChanged(watchKey)
+local function OnAuraStateChanged(watchKey, unit)
     if watchKey ~= nil and watchKey ~= AURA_WATCH_KEY and watchKey ~= GROUP_BUFF_WATCH_KEY then
         return
+    end
+
+    if watchKey == nil or watchKey == AURA_WATCH_KEY then
+        if unit then
+            filteredAura.ProcessUnit(unit)
+        else
+            filteredAura.ProcessAllUnits()
+        end
+        filteredAura.RebuildTrackedAuraStateCaches()
     end
 
     if C.RequestDisplayRefresh then
@@ -2439,19 +3369,19 @@ end
 -- ============================================================================
 
 local function OnInspectComplete(unit, name, class, specID)
-    LogDebug(format("OnInspectComplete: unit=%s name=%s class=%s specID=%s",
-        tostring(unit), tostring(name), tostring(class), tostring(specID)))
+    LogDebug("OnInspectComplete: unit=%s name=%s class=%s specID=%s",
+        tostring(unit), tostring(name), tostring(class), tostring(specID))
 
     local info = partyMembers[name]
     if not info then
-        LogDebug(format("  -> %s not tracked, skipping", tostring(name)))
+        LogDebug("  -> %s not tracked, skipping", tostring(name))
         return
     end
 
     UpdateMemberDefensives(name, class or info.class, specID, "inspect", unit)
     info = partyMembers[name]
-    LogDebug(format("  -> %s tracked with %d defensive entries, specID=%d",
-        name, (function() local n=0 for _ in pairs(info.cds) do n=n+1 end return n end)(), specID))
+    LogDebug("  -> %s tracked with %d defensive entries, specID=%d",
+        name, (function() local n = 0 for _ in pairs(info.cds) do n = n + 1 end return n end)(), specID)
     if C.RequestDisplayRefresh then
         C.RequestDisplayRefresh()
     end
@@ -2483,6 +3413,7 @@ local function RefreshTrackedDefensiveState(moduleDB)
     end
 
     RebuildTrackedDefensiveCatalog()
+    filteredAura.ResetFilteredAuraTrackingState()
 
     if not initialized then
         return
@@ -2520,6 +3451,7 @@ local function OnInitialize(moduleDB)
     if ns.Services.GroupInspector and ns.Services.GroupInspector.Initialize then
         ns.Services.GroupInspector:Initialize()
     end
+    filteredAura.EnsureEventFrame()
     if ns.Services.GroupAuraTracker and ns.Services.GroupAuraTracker.Initialize then
         ns.Services.GroupAuraTracker:Initialize()
         if ns.Services.GroupAuraTracker.RegisterCallback then
@@ -2556,6 +3488,7 @@ end
 local function OnEnable(moduleDB)
     db = moduleDB
     RebuildTrackedDefensiveCatalog()
+    filteredAura.EnsureEventFrame()
     if not initialized then
         OnInitialize(moduleDB)
         return
@@ -2585,6 +3518,7 @@ local function OnDisable()
     DestroyUI()
     TeardownOwnTracking()
     TeardownRosterEvents()
+    filteredAura.TeardownEventFrame()
 
     if spellMatchHandle then
         ns.Services.PartySpellWatcher:Unregister(spellMatchHandle)
@@ -2599,6 +3533,8 @@ local function OnDisable()
         ns.Services.GroupAuraTracker:UnregisterWatch(AURA_WATCH_KEY)
         ns.Services.GroupAuraTracker:UnregisterWatch(GROUP_BUFF_WATCH_KEY)
     end
+    filteredAura.ResetTrackedAuraStateCaches()
+    filteredAura.ResetFilteredAuraTrackingState()
 
     wipe(partyMembers)
     wipe(myCds)
