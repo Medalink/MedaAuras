@@ -1051,15 +1051,139 @@ local MODULE_DEFAULTS = {
 }
 
 -- ============================================================================
+-- Settings Preview
+-- ============================================================================
+
+local settingsPreviewContainer
+local settingsPreviewIcons = {}
+
+local SETTINGS_PREVIEW_STATES = {
+    { key = "ready",  label = "Ready",        cdText = "" },
+    { key = "oor",    label = "Out of Range", cdText = "" },
+    { key = "oncd",   label = "On Cooldown",  cdText = "12.3" },
+    { key = "hidden", label = "No Target",    cdText = "" },
+}
+
+local function DestroySettingsPreview()
+    if settingsPreviewContainer then
+        settingsPreviewContainer:Hide()
+        settingsPreviewContainer:SetParent(nil)
+        settingsPreviewContainer = nil
+    end
+    wipe(settingsPreviewIcons)
+end
+
+local function UpdateSettingsPreview()
+    local db = MedaAuras:GetModuleDB(MODULE_NAME)
+    if not settingsPreviewContainer or not db then
+        return
+    end
+
+    local tex = ResolveIconTexture(db)
+    for _, entry in ipairs(settingsPreviewIcons) do
+        local frame = entry.frame
+        frame.icon:SetTexture(tex)
+
+        if entry.key == "hidden" then
+            frame:SetBackdropBorderColor(unpack(MedaUI.Theme.textDim))
+            frame.colorOverlay:SetColorTexture(0, 0, 0, 0)
+            frame.colorOverlay:Hide()
+            frame.cdText:SetText("")
+        else
+            local color
+            if entry.key == "ready" then
+                color = db.colorReady
+            elseif entry.key == "oor" then
+                color = db.colorOOR
+            elseif entry.key == "oncd" then
+                color = db.colorOnCD
+            end
+
+            frame.cdText:SetText(entry.cdText)
+            if color then
+                frame:SetBackdropBorderColor(color.r, color.g, color.b, 1)
+                frame.colorOverlay:SetColorTexture(color.r, color.g, color.b, ICON_OVERLAY_ALPHA)
+                frame.colorOverlay:Show()
+            end
+        end
+    end
+end
+
+local function ShowSettingsPreview()
+    DestroySettingsPreview()
+
+    local db = MedaAuras:GetModuleDB(MODULE_NAME)
+    local anchor = MedaAurasSettingsPanel or _G["MedaAurasSettingsPanel"]
+    if not anchor or not db then
+        return false
+    end
+
+    local previewSize = 46
+    local previewGap = 12
+    local previewCols = 2
+    local previewRows = 2
+    local pad = 14
+    local width = pad * 2 + previewCols * previewSize + (previewCols - 1) * previewGap
+    local height = pad + previewRows * (previewSize + 20) + (previewRows - 1) * previewGap
+
+    settingsPreviewContainer = CreateFrame("Frame", nil, anchor)
+    settingsPreviewContainer:SetFrameStrata("HIGH")
+    settingsPreviewContainer:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 6, 0)
+    settingsPreviewContainer:SetSize(width, height)
+    MedaAuras:RegisterConfigCleanup(settingsPreviewContainer)
+
+    for i, info in ipairs(SETTINGS_PREVIEW_STATES) do
+        local col = (i - 1) % previewCols
+        local row = math.floor((i - 1) / previewCols)
+        local xOff = pad + col * (previewSize + previewGap)
+        local yOff = -(pad + row * (previewSize + 20 + previewGap))
+
+        local frame = CreateFrame("Frame", nil, settingsPreviewContainer, "BackdropTemplate")
+        frame:SetSize(previewSize, previewSize)
+        frame:SetPoint("TOPLEFT", xOff, yOff)
+        frame:SetBackdrop(MedaUI:CreateBackdrop(true))
+        frame:SetBackdropColor(0, 0, 0, 0.6)
+
+        frame.icon = frame:CreateTexture(nil, "ARTWORK")
+        frame.icon:SetPoint("TOPLEFT", 3, -3)
+        frame.icon:SetPoint("BOTTOMRIGHT", -3, 3)
+        frame.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+        frame.colorOverlay = frame:CreateTexture(nil, "ARTWORK", nil, 1)
+        frame.colorOverlay:SetPoint("TOPLEFT", frame.icon, "TOPLEFT")
+        frame.colorOverlay:SetPoint("BOTTOMRIGHT", frame.icon, "BOTTOMRIGHT")
+        frame.colorOverlay:SetColorTexture(0, 0, 0, 0)
+
+        frame.cdText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        frame.cdText:SetPoint("CENTER", 0, 0)
+        frame.cdText:SetTextColor(1, 1, 1, 1)
+        frame.cdText:SetShadowOffset(1, -1)
+
+        local label = settingsPreviewContainer:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        label:SetPoint("TOP", frame, "BOTTOM", 0, -4)
+        label:SetTextColor(unpack(MedaUI.Theme.textDim))
+        label:SetText(info.label)
+
+        settingsPreviewIcons[i] = { frame = frame, key = info.key, cdText = info.cdText }
+    end
+
+    settingsPreviewContainer:Show()
+    UpdateSettingsPreview()
+    return true
+end
+
+-- ============================================================================
 -- Settings UI
 -- ============================================================================
 
 local function BuildSettingsPage(parent, db)
     local LEFT_X, RIGHT_X = 0, 238
     local yOff = 0
-    local UpdatePreviews
+    local function UpdatePreviews()
+        UpdateSettingsPreview()
+    end
 
-    local headerContainer = MedaUI:CreateSectionHeader(parent, "Focus Interrupt Helper")
+    local headerContainer = MedaUI:CreateSectionHeader(parent, "General")
     headerContainer:SetPoint("TOPLEFT", LEFT_X, yOff)
     yOff = yOff - 45
 
@@ -1236,98 +1360,7 @@ local function BuildSettingsPage(parent, db)
     end
     yOff = yOff - 48
 
-    -- ================================================================
-    -- Floating Side Preview (all 4 states)
-    -- ================================================================
-    local PREVIEW_SIZE = 46
-    local PREVIEW_GAP = 12
-    local previewIcons = {}
-    local spellTex = ResolveIconTexture(db)
-
-    local previewStates = {
-        { key = "ready",  color = function() return db.colorReady end, label = "Ready",        cdText = "" },
-        { key = "oor",    color = function() return db.colorOOR   end, label = "Out of Range", cdText = "" },
-        { key = "oncd",   color = function() return db.colorOnCD  end, label = "On Cooldown",  cdText = "12.3" },
-        { key = "hidden", color = nil,                                 label = "No Target",    cdText = "" },
-    }
-
-    local pvContainer
-    do
-        local anchor = MedaAurasSettingsPanel or _G["MedaAurasSettingsPanel"]
-        if anchor then
-            local PREVIEW_COLS = 2
-            local PREVIEW_ROWS = 2
-            local PV_PAD = 14
-            local pvW = PV_PAD * 2 + PREVIEW_COLS * PREVIEW_SIZE + (PREVIEW_COLS - 1) * PREVIEW_GAP
-            local pvH = PV_PAD + PREVIEW_ROWS * (PREVIEW_SIZE + 20) + (PREVIEW_ROWS - 1) * PREVIEW_GAP
-
-            pvContainer = CreateFrame("Frame", nil, anchor)
-            pvContainer:SetFrameStrata("HIGH")
-            pvContainer:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 6, 0)
-            pvContainer:SetSize(pvW, pvH)
-            MedaAuras:RegisterConfigCleanup(pvContainer)
-
-            for i, info in ipairs(previewStates) do
-                local col = (i - 1) % PREVIEW_COLS
-                local row = math.floor((i - 1) / PREVIEW_COLS)
-                local xOff = PV_PAD + col * (PREVIEW_SIZE + PREVIEW_GAP)
-                local pvYOff = -(PV_PAD + row * (PREVIEW_SIZE + 20 + PREVIEW_GAP))
-
-                local f = CreateFrame("Frame", nil, pvContainer, "BackdropTemplate")
-                f:SetSize(PREVIEW_SIZE, PREVIEW_SIZE)
-                f:SetPoint("TOPLEFT", xOff, pvYOff)
-                f:SetBackdrop(MedaUI:CreateBackdrop(true))
-                f:SetBackdropColor(0, 0, 0, 0.6)
-
-                f.icon = f:CreateTexture(nil, "ARTWORK")
-                f.icon:SetPoint("TOPLEFT", 3, -3)
-                f.icon:SetPoint("BOTTOMRIGHT", -3, 3)
-                f.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-                f.icon:SetTexture(spellTex)
-
-                f.colorOverlay = f:CreateTexture(nil, "ARTWORK", nil, 1)
-                f.colorOverlay:SetPoint("TOPLEFT", f.icon, "TOPLEFT")
-                f.colorOverlay:SetPoint("BOTTOMRIGHT", f.icon, "BOTTOMRIGHT")
-                f.colorOverlay:SetColorTexture(0, 0, 0, 0)
-
-                f.cdText = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-                f.cdText:SetPoint("CENTER", 0, 0)
-                f.cdText:SetTextColor(1, 1, 1, 1)
-                f.cdText:SetShadowOffset(1, -1)
-
-                local label = pvContainer:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-                label:SetPoint("TOP", f, "BOTTOM", 0, -4)
-                label:SetTextColor(unpack(MedaUI.Theme.textDim))
-                label:SetText(info.label)
-
-                previewIcons[i] = { frame = f, info = info }
-            end
-            pvContainer:Show()
-        end
-    end
-
-    UpdatePreviews = function()
-        local tex = ResolveIconTexture(db)
-        for _, entry in ipairs(previewIcons) do
-            local f = entry.frame
-            local info = entry.info
-            f.icon:SetTexture(tex)
-            if info.key == "hidden" then
-                f:SetBackdropBorderColor(unpack(MedaUI.Theme.textDim))
-                f.colorOverlay:SetColorTexture(0, 0, 0, 0)
-                f.colorOverlay:Hide()
-                f.cdText:SetText("")
-            else
-                local c = info.color()
-                f.cdText:SetText(info.cdText)
-                if c then
-                    f:SetBackdropBorderColor(c.r, c.g, c.b, 1)
-                    f.colorOverlay:SetColorTexture(c.r, c.g, c.b, ICON_OVERLAY_ALPHA)
-                    f.colorOverlay:Show()
-                end
-            end
-        end
-    end
+    ShowSettingsPreview()
     UpdatePreviews()
 
     if activeSpellName and activeSpellID then
@@ -1345,11 +1378,7 @@ local function BuildSettingsPage(parent, db)
     sentinel:SetPoint("TOPLEFT")
     sentinel:Show()
     sentinel:SetScript("OnHide", function()
-        if pvContainer then
-            pvContainer:Hide()
-            pvContainer:SetParent(nil)
-            pvContainer = nil
-        end
+        DestroySettingsPreview()
     end)
 end
 
@@ -1375,5 +1404,11 @@ MedaAuras:RegisterModule({
     buildPage = function(_, parent)
         BuildSettingsPage(parent, MedaAuras:GetModuleDB(MODULE_NAME))
         return 700
+    end,
+    onPageCacheRestore = function(pageName)
+        if pageName ~= "settings" then
+            return
+        end
+        ShowSettingsPreview()
     end,
 })

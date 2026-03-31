@@ -91,6 +91,21 @@ local RefreshMapFavoritesList
 local ShowHUD, HideHUD
 local EndSession, CancelSessionTimeout, ShowExportWindow
 
+local settingsPreview = {
+    leftLines = {},
+    checklistRows = {},
+    centerTexts = {},
+}
+local SETTINGS_PREVIEW_FISH = {
+    { name = "Lunker Salmon",       q = 3, count = 7 },
+    { name = "Moonpearl Trout",     q = 2, count = 12 },
+    { name = "Midnight Anglerfish", q = 4, count = 2 },
+    { name = "Duskwater Eel",       q = 1, count = 5 },
+}
+local DestroySettingsPreview
+local UpdateSettingsPreview
+local ShowSettingsPreview
+
 local checklistScroll, checklistContent
 local checklistRows = {}
 local expandRows = {}
@@ -2623,7 +2638,11 @@ local function BuildSettingsPage(parent, moduleDB)
     local LEFT_X, RIGHT_X = 0, 238
     db = moduleDB
 
-    local UpdatePreview
+    local function UpdatePreview()
+        if UpdateSettingsPreview then
+            UpdateSettingsPreview(moduleDB)
+        end
+    end
 
     local function MarkDirty()
         arcDirty = true
@@ -3081,227 +3100,262 @@ local function BuildSettingsPage(parent, moduleDB)
     end
 
     MedaAuras:SetContentHeight(550)
+    if ShowSettingsPreview then
+        ShowSettingsPreview(moduleDB)
+    end
 
-    -- ================================================================
-    -- Floating Side Preview (mock HUD panels)
-    -- ================================================================
-    do
-        local anchor = MedaAurasSettingsPanel or _G["MedaAurasSettingsPanel"]
-        if not anchor then return end
+    local sentinel = CreateFrame("Frame", nil, parent)
+    sentinel:SetSize(1, 1)
+    sentinel:SetPoint("TOPLEFT")
+    sentinel:Show()
+    sentinel:SetScript("OnHide", function()
+        DestroySettingsPreview()
+    end)
+end
 
-        local dim = { 0.55, 0.55, 0.55, 1 }
-        local gold = { 1, 0.82, 0, 1 }
-        local green = { 0.53, 0.80, 0.53, 1 }
-        local blue = { 0.4, 0.78, 1, 1 }
+DestroySettingsPreview = function()
+    if settingsPreview.container then
+        settingsPreview.container:Hide()
+        settingsPreview.container:SetParent(nil)
+        settingsPreview.container = nil
+    end
 
-        local pvContainer = MedaUI:CreateHUDGroup(nil, {
-            point = {
-                point = "TOPLEFT",
-                relativeTo = anchor,
-                relativePoint = "TOPRIGHT",
-                x = 6,
-                y = 0,
-            },
-            strata = "HIGH",
-            opacity = moduleDB.auraOpacity or 0.92,
-            scale = moduleDB.auraScale or 1,
-        })
-        MedaAuras:RegisterConfigCleanup(pvContainer)
-        pvContainer:Show()
+    settingsPreview.right = nil
+    settingsPreview.checklistHeader = nil
+    settingsPreview.junkHeader = nil
+    settingsPreview.missingHeader = nil
+    settingsPreview.faveButton = nil
+    settingsPreview.endSessionButton = nil
+    wipe(settingsPreview.leftLines)
+    wipe(settingsPreview.checklistRows)
+    wipe(settingsPreview.centerTexts)
+end
 
-        local pvLeft = MedaUI:CreateHUDSection(pvContainer, {
-            width = 280,
-            height = 8 * LINE_SPACING,
-            locked = true,
-        })
-        pvLeft:SetPoint("TOPLEFT", pvContainer, "TOPLEFT", 0, 0)
+UpdateSettingsPreview = function(moduleDB)
+    local preview = settingsPreview
+    if not preview.container or not moduleDB then
+        return
+    end
 
-        local pvLeftBlock = MedaUI:CreateHUDTextBlock(pvLeft, {
-            width = 280,
-            lineCount = 8,
-            lineHeight = LINE_SPACING,
-            justifyH = "RIGHT",
-        })
-        pvLeftBlock:SetPoint("TOPLEFT", pvLeft, "TOPLEFT", 0, 0)
-        local pvLeftLines = {}
-        for i = 1, 8 do
-            pvLeftLines[i] = pvLeftBlock:GetLine(i)
+    local dim = { 0.55, 0.55, 0.55, 1 }
+    local gold = { 1, 0.82, 0, 1 }
+    local green = { 0.53, 0.80, 0.53, 1 }
+    local blue = { 0.4, 0.78, 1, 1 }
+
+    local textFont = GetFontObj(moduleDB.auraFont or "default", moduleDB.auraTextSize or 13, moduleDB.auraTextOutline or "outline")
+    local headerFont = GetFontObj(moduleDB.auraFont or "default", (moduleDB.auraTextSize or 13) + 2, "thick")
+    local smallFont = GetFontObj(moduleDB.auraFont or "default", math_max((moduleDB.auraTextSize or 13) - 3, 8), moduleDB.auraTextOutline or "outline")
+
+    preview.container:SetHUDScale(moduleDB.auraScale or 1)
+    preview.container:SetHUDOpacity(moduleDB.auraOpacity or 0.92)
+
+    for i = 1, 8 do
+        preview.leftLines[i]:SetFontObject(i <= 2 and headerFont or textFont)
+    end
+    preview.checklistHeader:SetFontObject(headerFont)
+    for _, row in ipairs(preview.checklistRows) do
+        row.text:SetFontObject(textFont)
+        if row.icon then
+            row.icon:SetSize(moduleDB.auraIconSize or 20, moduleDB.auraIconSize or 20)
         end
+    end
+    preview.junkHeader.header:SetFontObject(smallFont)
+    preview.junkHeader.badge:SetFontObject(smallFont)
+    preview.missingHeader.header:SetFontObject(smallFont)
+    preview.missingHeader.badge:SetFontObject(smallFont)
+    for _, text in ipairs(preview.centerTexts) do
+        text:SetFontObject(textFont)
+    end
+    preview.endSessionButton:SetFontObject(textFont)
 
-        local pvRight = MedaUI:CreateHUDSection(pvContainer, {
+    local showJunk = moduleDB.auraShowSessionJunk ~= false
+    local showChecklist = moduleDB.auraShowChecklist ~= false
+    local showFave = moduleDB.auraShowFaves ~= false
+    local showBest = moduleDB.auraShowBestSpot ~= false
+    local showTips = moduleDB.auraShowTips ~= false
+
+    preview.leftLines[1]:SetText("Silvermoon Harbor")
+    preview.leftLines[1]:SetColorOverride(gold[1], gold[2], gold[3], gold[4])
+    preview.leftLines[2]:SetText("The Moonwell")
+    preview.leftLines[2]:SetColorOverride(dim[1], dim[2], dim[3], dim[4])
+    preview.leftLines[3]:SetText("")
+    preview.leftLines[4]:SetText(showJunk and "Session: 24 fish | 3 junk" or "Session: 24 fish")
+    preview.leftLines[4]:SetColorOverride(1, 1, 1, 1)
+    preview.leftLines[5]:SetText("Casts: 31 | Rate: 77%")
+    preview.leftLines[5]:SetColorOverride(dim[1], dim[2], dim[3], dim[4])
+    preview.leftLines[6]:SetText("Time: 12m 34s")
+    preview.leftLines[6]:SetColorOverride(dim[1], dim[2], dim[3], dim[4])
+    preview.leftLines[7]:SetText("Streak: 8")
+    preview.leftLines[7]:SetColorOverride(green[1], green[2], green[3], green[4])
+    preview.leftLines[8]:SetText("Fishing: 179/225")
+    preview.leftLines[8]:SetColorOverride(dim[1], dim[2], dim[3], dim[4])
+
+    if showChecklist then
+        preview.right:Show()
+    else
+        preview.right:Hide()
+    end
+
+    if showFave then
+        preview.faveButton:Show()
+        preview.centerTexts[1]:Show()
+        preview.centerTexts[1]:SetText("Favorite: The Moonwell")
+        preview.centerTexts[1]:SetColorOverride(blue[1], blue[2], blue[3], blue[4])
+    else
+        preview.faveButton:Hide()
+        preview.centerTexts[1]:Hide()
+    end
+
+    if showBest then
+        preview.centerTexts[2]:Show()
+        preview.centerTexts[2]:SetText("Best Spot: Sunsail Anchorage (41)")
+        preview.centerTexts[2]:SetColorOverride(dim[1], dim[2], dim[3], dim[4])
+    else
+        preview.centerTexts[2]:Hide()
+    end
+
+    if showTips then
+        preview.centerTexts[3]:Show()
+        preview.centerTexts[3]:SetText("Tip: Use Moonpearl Lure for rare fish")
+        preview.centerTexts[3]:SetColorOverride(dim[1], dim[2], dim[3], dim[4])
+    else
+        preview.centerTexts[3]:Hide()
+    end
+end
+
+ShowSettingsPreview = function(moduleDB)
+    DestroySettingsPreview()
+
+    local anchor = MedaAurasSettingsPanel or _G["MedaAurasSettingsPanel"]
+    if not anchor or not moduleDB then
+        return false
+    end
+
+    local preview = settingsPreview
+    preview.container = MedaUI:CreateHUDGroup(nil, {
+        point = {
+            point = "TOPLEFT",
+            relativeTo = anchor,
+            relativePoint = "TOPRIGHT",
+            x = 6,
+            y = 0,
+        },
+        strata = "HIGH",
+        opacity = moduleDB.auraOpacity or 0.92,
+        scale = moduleDB.auraScale or 1,
+    })
+    MedaAuras:RegisterConfigCleanup(preview.container)
+    preview.container:Show()
+
+    local left = MedaUI:CreateHUDSection(preview.container, {
+        width = 280,
+        height = 8 * LINE_SPACING,
+        locked = true,
+    })
+    left:SetPoint("TOPLEFT", preview.container, "TOPLEFT", 0, 0)
+
+    local leftBlock = MedaUI:CreateHUDTextBlock(left, {
+        width = 280,
+        lineCount = 8,
+        lineHeight = LINE_SPACING,
+        justifyH = "RIGHT",
+    })
+    leftBlock:SetPoint("TOPLEFT", left, "TOPLEFT", 0, 0)
+    for i = 1, 8 do
+        preview.leftLines[i] = leftBlock:GetLine(i)
+    end
+
+    preview.right = MedaUI:CreateHUDSection(preview.container, {
+        width = 280,
+        height = 170,
+        locked = true,
+    })
+    preview.right:SetPoint("TOPLEFT", left, "BOTTOMLEFT", 0, -14)
+
+    preview.checklistHeader = MedaUI:CreateLabel(preview.right, "Zone Fish", {
+        fontObject = "GameFontNormal",
+        tone = "gold",
+        shadow = true,
+        wrap = false,
+    })
+    preview.checklistHeader:SetPoint("TOPLEFT", preview.right, "TOPLEFT", 0, 0)
+
+    for index, fish in ipairs(SETTINGS_PREVIEW_FISH) do
+        local row = MedaUI:CreateHUDRow(preview.right, {
             width = 280,
-            height = 170,
-            locked = true,
+            showState = false,
+            showTimer = false,
+            showDelta = false,
+            interactive = false,
+            iconSize = moduleDB.auraIconSize or 20,
         })
-        pvRight:SetPoint("TOPLEFT", pvLeft, "BOTTOMLEFT", 0, -14)
+        row:SetPoint("TOPLEFT", preview.right, "TOPLEFT", 0, -(18 + ((index - 1) * CHECKLIST_ROW_HEIGHT)))
+        local r, g, b = GetQualityColor(fish.q)
+        row:SetIconColor(r, g, b)
+        row:SetText(format("|cff%02x%02x%02x%s|r |cff999999(x%d)|r", r * 255, g * 255, b * 255, fish.name, fish.count))
+        preview.checklistRows[index] = row
+    end
 
-        local pvChecklistHeader = MedaUI:CreateLabel(pvRight, "Zone Fish", {
-            fontObject = "GameFontNormal",
-            tone = "gold",
+    preview.junkHeader = MedaUI:CreateCollapsibleSectionHeader(preview.right, {
+        text = "Junk",
+        count = 3,
+        width = 280,
+        height = CHECKLIST_ROW_HEIGHT,
+        tone = "textDim",
+        showLine = false,
+        expanded = false,
+    })
+    preview.junkHeader:SetPoint("TOPLEFT", preview.right, "TOPLEFT", 0, -(18 + (#SETTINGS_PREVIEW_FISH * CHECKLIST_ROW_HEIGHT)))
+
+    preview.missingHeader = MedaUI:CreateCollapsibleSectionHeader(preview.right, {
+        text = "Missing",
+        count = 2,
+        width = 280,
+        height = CHECKLIST_ROW_HEIGHT,
+        tone = "textDim",
+        showLine = false,
+        expanded = false,
+    })
+    preview.missingHeader:SetPoint("TOPLEFT", preview.junkHeader, "BOTTOMLEFT", 0, 0)
+
+    local bottom = MedaUI:CreateHUDSection(preview.container, {
+        width = 280,
+        height = 70,
+        locked = true,
+    })
+    bottom:SetPoint("TOPLEFT", preview.right, "BOTTOMLEFT", 0, -14)
+
+    for i = 1, 3 do
+        preview.centerTexts[i] = MedaUI:CreateLabel(bottom, "", {
+            justifyH = "CENTER",
+            tone = "text",
             shadow = true,
             wrap = false,
         })
-        pvChecklistHeader:SetPoint("TOPLEFT", pvRight, "TOPLEFT", 0, 0)
-
-        local pvChecklistRows = {}
-        local previewFish = {
-            { name = "Lunker Salmon",       q = 3, count = 7 },
-            { name = "Moonpearl Trout",     q = 2, count = 12 },
-            { name = "Midnight Anglerfish", q = 4, count = 2 },
-            { name = "Duskwater Eel",       q = 1, count = 5 },
-        }
-        for index, fish in ipairs(previewFish) do
-            local row = MedaUI:CreateHUDRow(pvRight, {
-                width = 280,
-                showState = false,
-                showTimer = false,
-                showDelta = false,
-                interactive = false,
-                iconSize = moduleDB.auraIconSize or 20,
-            })
-            row:SetPoint("TOPLEFT", pvRight, "TOPLEFT", 0, -(18 + ((index - 1) * CHECKLIST_ROW_HEIGHT)))
-            local r, g, b = GetQualityColor(fish.q)
-            row:SetIconColor(r, g, b)
-            row:SetText(format("|cff%02x%02x%02x%s|r |cff999999(x%d)|r", r * 255, g * 255, b * 255, fish.name, fish.count))
-            pvChecklistRows[index] = row
-        end
-
-        local pvJunkHeader = MedaUI:CreateCollapsibleSectionHeader(pvRight, {
-            text = "Junk",
-            count = 3,
-            width = 280,
-            height = CHECKLIST_ROW_HEIGHT,
-            tone = "textDim",
-            showLine = false,
-            expanded = false,
-        })
-        pvJunkHeader:SetPoint("TOPLEFT", pvRight, "TOPLEFT", 0, -(18 + (#previewFish * CHECKLIST_ROW_HEIGHT)))
-
-        local pvMissingHeader = MedaUI:CreateCollapsibleSectionHeader(pvRight, {
-            text = "Missing",
-            count = 2,
-            width = 280,
-            height = CHECKLIST_ROW_HEIGHT,
-            tone = "textDim",
-            showLine = false,
-            expanded = false,
-        })
-        pvMissingHeader:SetPoint("TOPLEFT", pvJunkHeader, "BOTTOMLEFT", 0, 0)
-
-        local pvBottom = MedaUI:CreateHUDSection(pvContainer, {
-            width = 280,
-            height = 70,
-            locked = true,
-        })
-        pvBottom:SetPoint("TOPLEFT", pvRight, "BOTTOMLEFT", 0, -14)
-
-        local pvCenterTexts = {}
-        for i = 1, 3 do
-            pvCenterTexts[i] = MedaUI:CreateLabel(pvBottom, "", {
-                justifyH = "CENTER",
-                tone = "text",
-                shadow = true,
-                wrap = false,
-            })
-        end
-        pvCenterTexts[1]:SetPoint("TOP", pvBottom, "TOP", 10, 0)
-        pvCenterTexts[2]:SetPoint("TOP", pvBottom, "TOP", 0, -16)
-        pvCenterTexts[3]:SetPoint("TOP", pvBottom, "TOP", 0, -32)
-
-        local pvFaveButton = MedaUI:CreateIconButton(pvBottom, {
-            size = 16,
-            atlas = "Waypoint-MapPin-Tracked",
-            flat = true,
-        })
-        pvFaveButton:SetPoint("RIGHT", pvCenterTexts[1], "LEFT", -2, 0)
-        pvFaveButton:Disable()
-
-        local pvEndSessionBtn = MedaUI:CreateHUDTextButton(pvBottom, "End Session", {
-            width = 80,
-            height = 16,
-            tone = "dim",
-            hoverTone = "dim",
-        })
-        pvEndSessionBtn:SetPoint("TOP", pvBottom, "TOP", 0, -52)
-        pvEndSessionBtn:Disable()
-
-        UpdatePreview = function()
-            local textFont = GetFontObj(moduleDB.auraFont or "default", moduleDB.auraTextSize or 13, moduleDB.auraTextOutline or "outline")
-            local headerFont = GetFontObj(moduleDB.auraFont or "default", (moduleDB.auraTextSize or 13) + 2, "thick")
-            local smallFont = GetFontObj(moduleDB.auraFont or "default", math_max((moduleDB.auraTextSize or 13) - 3, 8), moduleDB.auraTextOutline or "outline")
-
-            pvContainer:SetHUDScale(moduleDB.auraScale or 1)
-            pvContainer:SetHUDOpacity(moduleDB.auraOpacity or 0.92)
-
-            for i = 1, 8 do
-                pvLeftLines[i]:SetFontObject(i <= 2 and headerFont or textFont)
-            end
-            pvChecklistHeader:SetFontObject(headerFont)
-            for _, row in ipairs(pvChecklistRows) do
-                row.text:SetFontObject(textFont)
-                if row.icon then row.icon:SetSize(moduleDB.auraIconSize or 20, moduleDB.auraIconSize or 20) end
-            end
-            pvJunkHeader.header:SetFontObject(smallFont)
-            pvJunkHeader.badge:SetFontObject(smallFont)
-            pvMissingHeader.header:SetFontObject(smallFont)
-            pvMissingHeader.badge:SetFontObject(smallFont)
-            for _, fs in ipairs(pvCenterTexts) do
-                fs:SetFontObject(textFont)
-            end
-            pvEndSessionBtn:SetFontObject(textFont)
-
-            local showJunk = moduleDB.auraShowSessionJunk ~= false
-            local showChecklist = moduleDB.auraShowChecklist ~= false
-            local showFave = moduleDB.auraShowFaves ~= false
-            local showBest = moduleDB.auraShowBestSpot ~= false
-            local showTips = moduleDB.auraShowTips ~= false
-
-            pvLeftLines[1]:SetText("Silvermoon Harbor")
-            pvLeftLines[1]:SetColorOverride(gold[1], gold[2], gold[3], gold[4])
-            pvLeftLines[2]:SetText("The Moonwell")
-            pvLeftLines[2]:SetColorOverride(dim[1], dim[2], dim[3], dim[4])
-            pvLeftLines[3]:SetText("")
-            pvLeftLines[4]:SetText(showJunk and "Session: 24 fish | 3 junk" or "Session: 24 fish")
-            pvLeftLines[4]:SetColorOverride(1, 1, 1, 1)
-            pvLeftLines[5]:SetText("Casts: 31 | Rate: 77%")
-            pvLeftLines[5]:SetColorOverride(dim[1], dim[2], dim[3], dim[4])
-            pvLeftLines[6]:SetText("Time: 12m 34s")
-            pvLeftLines[6]:SetColorOverride(dim[1], dim[2], dim[3], dim[4])
-            pvLeftLines[7]:SetText("Streak: 8")
-            pvLeftLines[7]:SetColorOverride(green[1], green[2], green[3], green[4])
-            pvLeftLines[8]:SetText("Fishing: 179/225")
-            pvLeftLines[8]:SetColorOverride(dim[1], dim[2], dim[3], dim[4])
-
-            if showChecklist then pvRight:Show() else pvRight:Hide() end
-
-            if showFave then
-                pvFaveButton:Show()
-                pvCenterTexts[1]:Show()
-                pvCenterTexts[1]:SetText("Favorite: The Moonwell")
-                pvCenterTexts[1]:SetColorOverride(blue[1], blue[2], blue[3], blue[4])
-            else
-                pvFaveButton:Hide()
-                pvCenterTexts[1]:Hide()
-            end
-
-            if showBest then
-                pvCenterTexts[2]:Show()
-                pvCenterTexts[2]:SetText("Best Spot: Sunsail Anchorage (41)")
-                pvCenterTexts[2]:SetColorOverride(dim[1], dim[2], dim[3], dim[4])
-            else
-                pvCenterTexts[2]:Hide()
-            end
-
-            if showTips then
-                pvCenterTexts[3]:Show()
-                pvCenterTexts[3]:SetText("Tip: Use Moonpearl Lure for rare fish")
-                pvCenterTexts[3]:SetColorOverride(dim[1], dim[2], dim[3], dim[4])
-            else
-                pvCenterTexts[3]:Hide()
-            end
-        end
-        UpdatePreview()
     end
+    preview.centerTexts[1]:SetPoint("TOP", bottom, "TOP", 10, 0)
+    preview.centerTexts[2]:SetPoint("TOP", bottom, "TOP", 0, -16)
+    preview.centerTexts[3]:SetPoint("TOP", bottom, "TOP", 0, -32)
+
+    preview.faveButton = MedaUI:CreateIconButton(bottom, {
+        size = 16,
+        atlas = "Waypoint-MapPin-Tracked",
+        flat = true,
+    })
+    preview.faveButton:SetPoint("RIGHT", preview.centerTexts[1], "LEFT", -2, 0)
+    preview.faveButton:Disable()
+
+    preview.endSessionButton = MedaUI:CreateHUDTextButton(bottom, "End Session", {
+        width = 80,
+        height = 16,
+        tone = "dim",
+        hoverTone = "dim",
+    })
+    preview.endSessionButton:SetPoint("TOP", bottom, "TOP", 0, -52)
+    preview.endSessionButton:Disable()
+
+    UpdateSettingsPreview(moduleDB)
+    return true
 end
 
 -- ============================================================================
@@ -3752,6 +3806,14 @@ MedaAuras:RegisterModule({
     buildPage     = function(_, parent)
         BuildSettingsPage(parent, MedaAuras:GetModuleDB(MODULE_NAME))
         return 980
+    end,
+    onPageCacheRestore = function(pageName)
+        if pageName ~= "settings" then
+            return
+        end
+        if ShowSettingsPreview then
+            ShowSettingsPreview(MedaAuras:GetModuleDB(MODULE_NAME))
+        end
     end,
     slashCommands = slashCommands,
 })

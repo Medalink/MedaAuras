@@ -50,7 +50,7 @@ function M.BuildSettingsPage(parent, moduleDB)
         M.SetPreview(true, moduleDB)
     end
 
-    local header = MedaUI:CreateSectionHeader(parent, "Missing Pet")
+    local header = MedaUI:CreateSectionHeader(parent, "General")
     header:SetPoint("TOPLEFT", LEFT_X, yOff)
     yOff = yOff - 42
 

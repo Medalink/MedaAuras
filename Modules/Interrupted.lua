@@ -1955,38 +1955,45 @@ local function RebuildPreview()
     UpdatePreview()
 end
 
+local function ShowSettingsPreview()
+    DestroyPreview()
+
+    local anchor = MedaAurasSettingsPanel or _G["MedaAurasSettingsPanel"]
+    if not anchor then
+        return false
+    end
+
+    pvContainer = CreateFrame("Frame", nil, anchor)
+    pvContainer:SetFrameStrata("HIGH")
+    pvContainer:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 6, 0)
+    pvContainer:SetClampedToScreen(true)
+    pvContainer:SetScript("OnHide", function()
+        if pvTicker then
+            pvTicker:Cancel()
+            pvTicker = nil
+        end
+    end)
+    MedaAuras:RegisterConfigCleanup(pvContainer)
+
+    local bg = pvContainer:CreateTexture(nil, "BACKGROUND")
+    bg:SetAllPoints()
+    bg:SetTexture(BAR_TEXTURE)
+    bg:SetVertexColor(0.08, 0.08, 0.08, 0.85)
+
+    pvStartTime = GetTime()
+    CreatePreviewBars()
+    UpdatePreview()
+    pvTicker = C_Timer.NewTicker(0.1, UpdatePreview)
+    return true
+end
+
 -- ============================================================================
 -- Settings UI
 -- ============================================================================
 
 local function BuildSettingsPage(parent, moduleDB)
     db = moduleDB
-    DestroyPreview()
-
-    do
-        local anchor = MedaAurasSettingsPanel or _G["MedaAurasSettingsPanel"]
-        if anchor then
-            pvContainer = CreateFrame("Frame", nil, anchor)
-            pvContainer:SetFrameStrata("HIGH")
-            pvContainer:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 6, 0)
-            pvContainer:SetClampedToScreen(true)
-            pvContainer:SetScript("OnHide", function()
-                if pvTicker then pvTicker:Cancel(); pvTicker = nil end
-            end)
-            MedaAuras:RegisterConfigCleanup(pvContainer)
-
-            local bg = pvContainer:CreateTexture(nil, "BACKGROUND")
-            bg:SetAllPoints()
-            bg:SetTexture(BAR_TEXTURE)
-            bg:SetVertexColor(0.08, 0.08, 0.08, 0.85)
-
-            pvStartTime = GetTime()
-            CreatePreviewBars()
-            UpdatePreview()
-
-            pvTicker = C_Timer.NewTicker(0.1, UpdatePreview)
-        end
-    end
+    ShowSettingsPreview()
 
     local LEFT_X = 0
     local RIGHT_X = 240
@@ -2459,5 +2466,12 @@ MedaAuras:RegisterModule({
     buildPage   = function(_, parent)
         BuildSettingsPage(parent, MedaAuras:GetModuleDB(MODULE_NAME))
         return 1020
+    end,
+    onPageCacheRestore = function(pageName)
+        if pageName ~= "settings" then
+            return
+        end
+        db = MedaAuras:GetModuleDB(MODULE_NAME)
+        ShowSettingsPreview()
     end,
 })

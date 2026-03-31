@@ -594,6 +594,31 @@ local function UpdatePreview(db)
     end
 end
 
+local function ShowSettingsPreview(db)
+    DestroyPreview()
+
+    local anchor = MedaAurasSettingsPanel or _G["MedaAurasSettingsPanel"]
+    if not anchor then
+        return false
+    end
+
+    local pvBg = CreateFrame("Frame", nil, anchor)
+    pvBg:SetFrameStrata("HIGH")
+    pvBg:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 6, 0)
+    pvBg:SetSize(280, 180)
+    MedaAuras:RegisterConfigCleanup(pvBg)
+
+    local pvInner = CreateFrame("Frame", nil, pvBg)
+    pvInner:SetPoint("CENTER", 0, 0)
+    pvBg.inner = pvInner
+
+    previewContainer = pvBg
+    previewContainer:Show()
+    CreatePreviewDisplay(db)
+    UpdatePreview(db)
+    return true
+end
+
 -- ============================================================================
 -- Diagnostic Logging
 -- ============================================================================
@@ -819,26 +844,7 @@ local function BuildSettingsPage(parent, db)
     local mode = db.displayMode or "bar"
     local isBar = (mode == "bar")
 
-    DestroyPreview()
-    do
-        local PREVIEW_W = 280
-        local PREVIEW_H = 180
-        local anchor = MedaAurasSettingsPanel or _G["MedaAurasSettingsPanel"]
-        if anchor then
-            local pvBg = CreateFrame("Frame", nil, anchor)
-            pvBg:SetFrameStrata("HIGH")
-            pvBg:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 6, 0)
-            pvBg:SetSize(PREVIEW_W, PREVIEW_H)
-            MedaAuras:RegisterConfigCleanup(pvBg)
-            local pvInner = CreateFrame("Frame", nil, pvBg)
-            pvInner:SetPoint("CENTER", 0, 0)
-            pvBg.inner = pvInner
-            previewContainer = pvBg
-            pvBg:Show()
-            CreatePreviewDisplay(db)
-            UpdatePreview(db)
-        end
-    end
+    ShowSettingsPreview(db)
 
     local tabBar, tabs = MedaAuras:CreateConfigTabs(parent, {
         { id = "display",    label = "Display" },
@@ -1140,5 +1146,11 @@ MedaAuras:RegisterModule({
     buildPage = function(_, parent)
         BuildSettingsPage(parent, MedaAuras:GetModuleDB(MODULE_NAME))
         return 760
+    end,
+    onPageCacheRestore = function(pageName)
+        if pageName ~= "settings" then
+            return
+        end
+        ShowSettingsPreview(MedaAuras:GetModuleDB(MODULE_NAME))
     end,
 })

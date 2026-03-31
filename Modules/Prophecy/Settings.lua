@@ -26,7 +26,11 @@ function ns.Prophecy.BuildAppearancePage(parent, db)
             ns.Prophecy.OnRefresh()
         end
     end
-    -- Overlay opacity
+
+    local overlayHeader = MedaUI:CreateSectionHeader(parent, "Overlay", 440)
+    Pixel.SetPoint(overlayHeader, "TOPLEFT", LEFT_X, -yOff)
+    yOff = yOff + 38
+
     local opacitySlider = MedaUI:CreateLabeledSlider(parent, "Overlay Opacity", 200, 0, 100, 1)
     Pixel.SetPoint(opacitySlider, "TOPLEFT", LEFT_X, -yOff)
     opacitySlider:SetValue((db.overlayOpacity or 0.8) * 100)
@@ -35,14 +39,12 @@ function ns.Prophecy.BuildAppearancePage(parent, db)
         RefreshOverlay()
     end
 
-    -- Max visible
     local maxSlider = MedaUI:CreateLabeledSlider(parent, "Max Visible Prophecies", 200, 3, 15, 1)
     Pixel.SetPoint(maxSlider, "TOPLEFT", RIGHT_X, -yOff)
     maxSlider:SetValue(db.maxVisible or 5)
     maxSlider.OnValueChanged = function(_, val) db.maxVisible = val end
     yOff = yOff + 55
 
-    -- Font size
     local fontOptions = {
         { value = "xs", label = "Extra Small" },
         { value = "sm", label = "Small" },
@@ -56,7 +58,10 @@ function ns.Prophecy.BuildAppearancePage(parent, db)
     fontDropdown.OnValueChanged = function(_, val) db.fontSize = val; RefreshOverlay() end
     yOff = yOff + 60
 
-    -- Checkboxes
+    local behaviorHeader = MedaUI:CreateSectionHeader(parent, "Behavior", 440)
+    Pixel.SetPoint(behaviorHeader, "TOPLEFT", LEFT_X, -yOff)
+    yOff = yOff + 38
+
     local showBg = MedaUI:CreateCheckbox(parent, "Show Background")
     Pixel.SetPoint(showBg, "TOPLEFT", LEFT_X, -yOff)
     showBg:SetChecked(db.showBackground or false)
@@ -96,14 +101,16 @@ function ns.Prophecy.BuildAppearancePage(parent, db)
     excludeWipes.OnValueChanged = function(_, val) db.excludeWipesFromAvg = val end
     yOff = yOff + 30
 
-    -- Background opacity (conditional)
     local bgOpacity = MedaUI:CreateLabeledSlider(parent, "Background Opacity", 200, 0, 100, 1)
     Pixel.SetPoint(bgOpacity, "TOPLEFT", LEFT_X, -yOff)
     bgOpacity:SetValue((db.backgroundOpacity or 0.4) * 100)
     bgOpacity.OnValueChanged = function(_, val) db.backgroundOpacity = val / 100; RefreshOverlay() end
     yOff = yOff + 55
 
-    -- Drift thresholds
+    local syncHeader = MedaUI:CreateSectionHeader(parent, "Sync & Drift", 440)
+    Pixel.SetPoint(syncHeader, "TOPLEFT", LEFT_X, -yOff)
+    yOff = yOff + 38
+
     local neutralSlider = MedaUI:CreateLabeledSlider(parent, "Neutral Threshold (seconds)", 200, 5, 30, 1)
     Pixel.SetPoint(neutralSlider, "TOPLEFT", LEFT_X, -yOff)
     neutralSlider:SetValue(db.driftNeutralThreshold or 15)
@@ -115,10 +122,9 @@ function ns.Prophecy.BuildAppearancePage(parent, db)
     warnSlider.OnValueChanged = function(_, val) db.driftMildThreshold = val; RefreshOverlay() end
     yOff = yOff + 55
 
-    -- Category filters
     local catHeader = MedaUI:CreateSectionHeader(parent, "Category Filters", 440)
     Pixel.SetPoint(catHeader, "TOPLEFT", LEFT_X, -yOff)
-    yOff = yOff + 24
+    yOff = yOff + 38
 
     local categories = { "BUFF", "LUST", "INTERRUPT", "BOSS", "CD", "AWARENESS" }
     local catX = LEFT_X
@@ -134,18 +140,29 @@ function ns.Prophecy.BuildAppearancePage(parent, db)
         catX = catX + 80
         if catX > 400 then catX = LEFT_X; yOff = yOff + 24 end
     end
-    yOff = yOff + 30
+    yOff = yOff + 34
 
-    -- Action buttons
+    local actionsHeader = MedaUI:CreateSectionHeader(parent, "Actions", 440)
+    Pixel.SetPoint(actionsHeader, "TOPLEFT", LEFT_X, -yOff)
+    yOff = yOff + 38
+
     local resetBtn = MedaUI:CreateButton(parent, "Reset Position", 120)
     Pixel.SetPoint(resetBtn, "TOPLEFT", LEFT_X, -yOff)
     resetBtn:SetScript("OnClick", function()
         if ns.Prophecy.ResetOverlayPosition then ns.Prophecy.ResetOverlayPosition() end
     end)
 
-    local previewBtn = MedaUI:CreateButton(parent, "Preview Mode", 120)
+    local previewBtn = MedaUI:CreateButton(parent, "Toggle Preview", 120)
     Pixel.SetPoint(previewBtn, "TOPLEFT", 130, -yOff)
     previewBtn:SetScript("OnClick", function()
         if ns.Prophecy.TogglePreview then ns.Prophecy.TogglePreview() end
     end)
+
+    local previewNote = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    Pixel.SetPoint(previewNote, "TOPLEFT", LEFT_X, -(yOff + 34))
+    previewNote:SetWidth(440)
+    previewNote:SetJustifyH("LEFT")
+    previewNote:SetWordWrap(true)
+    previewNote:SetTextColor(unpack(MedaUI.Theme.textDim))
+    previewNote:SetText("Preview mode toggles a sample prophecy overlay so appearance changes can be checked without waiting for live dungeon data.")
 end

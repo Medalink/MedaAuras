@@ -1155,6 +1155,21 @@ local function DestroyFloatingPreview()
     end
 end
 
+local function RestoreAlertSettingsPreview(moduleDB)
+    if moduleDB and moduleDB.alertEnabled ~= false then
+        ShowAlertPreview(moduleDB)
+    else
+        HideAlertPreview(moduleDB)
+    end
+end
+
+local function ShowSettingsPreviews(moduleDB)
+    db = moduleDB
+    DestroyFloatingPreview()
+    CreateFloatingPreview()
+    RestoreAlertSettingsPreview(moduleDB)
+end
+
 -- ============================================================================
 -- Settings UI
 -- ============================================================================
@@ -1173,9 +1188,7 @@ local function BuildSettingsPage(parent, moduleDB)
         end
     end
 
-    DestroyFloatingPreview()
-    CreateFloatingPreview()
-    ShowAlertPreview(moduleDB)
+    ShowSettingsPreviews(moduleDB)
 
     local tabBar, tabs = MedaAuras:CreateConfigTabs(parent, {
         { id = "general",    label = "General" },
@@ -1736,7 +1749,7 @@ MedaAuras:RegisterModule({
     end,
     onPageCacheRestore = function(pageName)
         if pageName ~= "settings" then return end
-        ShowAlertPreview(MedaAuras:GetModuleDB(MODULE_NAME))
+        ShowSettingsPreviews(MedaAuras:GetModuleDB(MODULE_NAME))
     end,
     slashCommands = slashCommands,
 })
