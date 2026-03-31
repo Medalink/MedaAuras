@@ -34,7 +34,6 @@ Data\GoneFishinFish.lua
 Data\CreatureVO.lua
 Data\Interrupts.lua
 Data\Stops.lua
-Data\Defensives.lua
 Data\ProphecyData.lua
 Data\ProphecyTemplates.lua
 Data\PlaterPayloads.lua
@@ -73,10 +72,6 @@ Modules\SoulstoneReminder\Runtime.lua
 Modules\SoulstoneReminder\Display.lua
 Modules\SoulstoneReminder\Settings.lua
 Modules\Interrupted.lua
-Modules\Cracked\Init.lua
-Modules\Cracked\Runtime.lua
-Modules\Cracked\Display.lua
-Modules\Cracked\Settings.lua
 # Prophecy Module
 Modules\Prophecy\Init.lua
 Modules\Prophecy\Settings.lua
