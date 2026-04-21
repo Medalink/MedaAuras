@@ -170,7 +170,7 @@ local function DetectInterrupt()
         end
     end
 
-    MedaAuras.LogDebug("[FIH] Resolver had no result, trying legacy scan")
+    MedaAuras.LogDebug("[FIH] Resolver had no result, trying fallback scan")
     for _, info in ipairs(INTERRUPTS) do
         local known = IsSpellAvailable(info)
         if known then
@@ -898,8 +898,8 @@ end
 -- Module Lifecycle
 -- ============================================================================
 
-local function OnInitialize(db)
-    MedaAuras.Log("[FIH] OnInitialize called")
+local function StartModule(db)
+    MedaAuras.Log("[FIH] StartModule called")
     MedaAuras.LogDebug(format("[FIH] DB state: displayMode=%s, spellID=%s, cooldownDuration=%s",
         tostring(db.displayMode), tostring(db.spellID), tostring(db.cooldownDuration)))
 
@@ -966,9 +966,12 @@ local function OnInitialize(db)
     end
 end
 
+local function OnInitialize(_)
+end
+
 local function OnEnable(db)
     MedaAuras.Log("[FIH] OnEnable called")
-    OnInitialize(db)
+    StartModule(db)
 end
 
 local function OnDisable(db)

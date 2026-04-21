@@ -3614,14 +3614,13 @@ local function OnInitialize(moduleDB)
     db = moduleDB
     RunMigrations(db)
     RestoreSession()
-    if sessionActive then
-        StartSessionTimeout()
-    end
-    StartModule()
 end
 
 local function OnEnable(moduleDB)
     db = moduleDB
+    if sessionActive then
+        StartSessionTimeout()
+    end
     StartModule()
 end
 

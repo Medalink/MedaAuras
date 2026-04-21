@@ -17,6 +17,7 @@ local UnitClass = UnitClass
 local UnitGroupRolesAssigned = UnitGroupRolesAssigned
 local UnitExists = UnitExists
 local IsInGroup = IsInGroup
+local IsInRaid = IsInRaid
 local IsPlayerSpell = IsPlayerSpell
 local IsSpellKnown = IsSpellKnown
 local C_Spell = C_Spell
@@ -131,6 +132,56 @@ local function UpdateMainFrameVisibility()
         else
             stunFrame:Hide()
         end
+    end
+end
+
+local function EnsureVisibilitySettings(moduleDB)
+    if type(moduleDB) ~= "table" then
+        return
+    end
+
+    if moduleDB.showInParty == nil then
+        if moduleDB.showInDungeon ~= nil then
+            moduleDB.showInParty = moduleDB.showInDungeon
+        else
+            moduleDB.showInParty = true
+        end
+    end
+
+    if moduleDB.showInWorld == nil then
+        if moduleDB.showInOpenWorld ~= nil then
+            moduleDB.showInWorld = moduleDB.showInOpenWorld
+        else
+            moduleDB.showInWorld = false
+        end
+    end
+
+    -- Keep legacy keys mirrored so older saved variables still round-trip cleanly.
+    moduleDB.showInDungeon = moduleDB.showInParty
+    moduleDB.showInOpenWorld = moduleDB.showInWorld
+end
+
+local function GetVisibilitySetting(moduleDB, key, legacyKey)
+    if type(moduleDB) ~= "table" then
+        return false
+    end
+
+    local value = moduleDB[key]
+    if value == nil and legacyKey then
+        value = moduleDB[legacyKey]
+    end
+    return value == true
+end
+
+local function SetVisibilitySetting(moduleDB, key, value, legacyKey)
+    if type(moduleDB) ~= "table" then
+        return
+    end
+
+    local checked = value == true
+    moduleDB[key] = checked
+    if legacyKey then
+        moduleDB[legacyKey] = checked
     end
 end
 
@@ -1383,19 +1434,28 @@ end
 
 local function CheckZoneVisibility()
     local _, instanceType = IsInInstance()
-    if instanceType == "party" then
-        shouldShowByZone = db.showInDungeon
-    elseif instanceType == "raid" then
-        shouldShowByZone = db.showInRaid
-    elseif instanceType == "arena" then
-        shouldShowByZone = db.showInArena
+    local context
+
+    EnsureVisibilitySettings(db)
+
+    if instanceType == "arena" then
+        context = "arena"
+        shouldShowByZone = GetVisibilitySetting(db, "showInArena")
     elseif instanceType == "pvp" then
-        shouldShowByZone = db.showInBG
+        context = "battleground"
+        shouldShowByZone = GetVisibilitySetting(db, "showInBG")
+    elseif IsInRaid() then
+        context = "raid"
+        shouldShowByZone = GetVisibilitySetting(db, "showInRaid")
+    elseif IsInGroup() then
+        context = "party"
+        shouldShowByZone = GetVisibilitySetting(db, "showInParty", "showInDungeon")
     else
-        shouldShowByZone = db.showInOpenWorld
+        context = "world"
+        shouldShowByZone = GetVisibilitySetting(db, "showInWorld", "showInOpenWorld")
     end
-    LogDebug("CheckZoneVisibility: instanceType=%s showByZone=%s mainFrame=%s",
-        tostring(instanceType), tostring(shouldShowByZone), tostring(mainFrame ~= nil))
+    LogDebug("CheckZoneVisibility: context=%s instanceType=%s showByZone=%s mainFrame=%s",
+        tostring(context), tostring(instanceType), tostring(shouldShowByZone), tostring(mainFrame ~= nil))
     UpdateMainFrameVisibility()
 end
 
@@ -1587,6 +1647,7 @@ local function SetupRosterEvents()
     rosterFrame:SetScript("OnEvent", function(_, event, arg1)
         LogDebug("Roster event: %s arg1=%s", event, tostring(arg1))
         if event == "GROUP_ROSTER_UPDATE" then
+            CheckZoneVisibility()
             CleanPartyList()
             AutoRegisterParty()
         elseif event == "PLAYER_ENTERING_WORLD" then
@@ -1616,9 +1677,10 @@ end
 -- Module Lifecycle
 -- ============================================================================
 
-local function OnInitialize(moduleDB)
+local function StartModule(moduleDB)
     db = moduleDB
-    Log("OnInitialize starting...")
+    EnsureVisibilitySettings(db)
+    Log("StartModule starting...")
 
     LogDebug("  db.enabled=%s", tostring(moduleDB.enabled))
     LogDebug("  ns.InterruptData=%s", tostring(ns.InterruptData ~= nil))
@@ -1670,13 +1732,17 @@ local function OnInitialize(moduleDB)
     if updateTicker then updateTicker:Cancel() end
     updateTicker = C_Timer.NewTicker(0.1, UpdateDisplay)
 
-    Log("OnInitialize complete - tracking started")
+    Log("StartModule complete - tracking started")
+end
+
+local function OnInitialize(moduleDB)
+    db = moduleDB
+    EnsureVisibilitySettings(db)
 end
 
 local function OnEnable(moduleDB)
-    db = moduleDB
     Log("OnEnable called")
-    OnInitialize(moduleDB)
+    StartModule(moduleDB)
 end
 
 local function OnDisable()
@@ -1745,6 +1811,16 @@ local MODULE_DEFAULTS = {
     position = { point = "CENTER", x = 0, y = -150 },
     stunPosition = { point = "CENTER", x = 250, y = -150 },
 }
+
+local function OnResetDefaults(moduleDB)
+    if type(moduleDB) ~= "table" then
+        return
+    end
+
+    moduleDB.showInParty = MODULE_DEFAULTS.showInDungeon
+    moduleDB.showInWorld = MODULE_DEFAULTS.showInOpenWorld
+    EnsureVisibilitySettings(moduleDB)
+end
 
 -- ============================================================================
 -- Preview
@@ -1993,6 +2069,7 @@ end
 
 local function BuildSettingsPage(parent, moduleDB)
     db = moduleDB
+    EnsureVisibilitySettings(moduleDB)
     ShowSettingsPreview()
 
     local LEFT_X = 0
@@ -2227,18 +2304,29 @@ local function BuildSettingsPage(parent, moduleDB)
         local function ZoneCB(label, key, x, y)
             local cb = MedaUI:CreateCheckbox(p, label)
             cb:SetPoint("TOPLEFT", x, y)
-            cb:SetChecked(moduleDB[key])
+            cb:SetChecked(GetVisibilitySetting(moduleDB, key))
             cb.OnValueChanged = function(_, checked)
-                moduleDB[key] = checked
+                SetVisibilitySetting(moduleDB, key, checked)
                 CheckZoneVisibility()
             end
             return cb
         end
 
-        ZoneCB("Dungeons", "showInDungeon", LEFT_X, generalY)
-        ZoneCB("Raids", "showInRaid", RIGHT_X, generalY)
+        local function ContextZoneCB(label, key, legacyKey, x, y)
+            local cb = MedaUI:CreateCheckbox(p, label)
+            cb:SetPoint("TOPLEFT", x, y)
+            cb:SetChecked(GetVisibilitySetting(moduleDB, key, legacyKey))
+            cb.OnValueChanged = function(_, checked)
+                SetVisibilitySetting(moduleDB, key, checked, legacyKey)
+                CheckZoneVisibility()
+            end
+            return cb
+        end
+
+        ContextZoneCB("Party", "showInParty", "showInDungeon", LEFT_X, generalY)
+        ZoneCB("Raid", "showInRaid", RIGHT_X, generalY)
         generalY = generalY - 30
-        ZoneCB("Open World", "showInOpenWorld", LEFT_X, generalY)
+        ContextZoneCB("World", "showInWorld", "showInOpenWorld", LEFT_X, generalY)
         ZoneCB("Arena", "showInArena", RIGHT_X, generalY)
         generalY = generalY - 30
         ZoneCB("Battlegrounds", "showInBG", LEFT_X, generalY)
@@ -2458,6 +2546,7 @@ MedaAuras:RegisterModule({
     sidebarDesc = "Party stop tracker for M+ dungeons.",
     defaults    = MODULE_DEFAULTS,
     OnInitialize = OnInitialize,
+    OnResetDefaults = OnResetDefaults,
     OnEnable    = OnEnable,
     OnDisable   = OnDisable,
     pages       = {

@@ -750,30 +750,16 @@ end
 -- ============================================================================
 
 local function OnInitialize(db)
-    MedaAuras.Log(format("%s Initializing", PREFIX))
-
     EnsurePercentCurve()
     EnsureColorCurve(db.manaColor or DEFAULT_MANA_COLOR)
-
-    containerFrame = CreateContainerFrame()
-    ApplyPosition(db)
-    CreateDisplay(db)
-    UpdateLock(db)
-
-    containerFrame:Show()
-    RegisterEvents(db)
-    OnManaEvent(db)
-
-    MedaAuras.Log(format("%s Initialized, mode=%s", PREFIX, db.displayMode or "bar"))
 end
 
 local function OnEnable(db)
-    if not containerFrame then
-        OnInitialize(db)
-        return
-    end
-
+    EnsurePercentCurve()
     EnsureColorCurve(db.manaColor or DEFAULT_MANA_COLOR)
+    if not containerFrame then
+        containerFrame = CreateContainerFrame()
+    end
     CreateDisplay(db)
     ApplyPosition(db)
     UpdateLock(db)

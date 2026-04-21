@@ -885,11 +885,9 @@ end
 local function OnInitialize(moduleDB)
     MigrateSettings(moduleDB)
     db = moduleDB
-    StartModule()
 end
 
 local function OnEnable(moduleDB)
-    MigrateSettings(moduleDB)
     db = moduleDB
     StartModule()
 end

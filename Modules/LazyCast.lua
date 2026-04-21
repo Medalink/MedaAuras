@@ -556,14 +556,14 @@ end
 local function OnInitialize(db)
     EnsureDBShape(db)
     moduleDB = db
-    RegisterEvents()
-    UpdateAllButtons()
-    SyncMacros(db)
 end
 
 local function OnEnable(db)
     EnsureDBShape(db)
-    OnInitialize(db)
+    moduleDB = db
+    RegisterEvents()
+    UpdateAllButtons()
+    SyncMacros(db)
 end
 
 local function OnDisable()

@@ -896,6 +896,26 @@ local function InitializeRuntime(moduleId, runtime)
     return true
 end
 
+local function EnableRuntime(moduleId, runtime, record)
+    record = record or (GetStore() and GetStore()[moduleId]) or nil
+    if not runtime or not record then
+        return false
+    end
+
+    if not InitializeRuntime(moduleId, runtime) then
+        return false
+    end
+
+    if runtime.config.OnEnable then
+        local ok = CallRuntimeFunction(moduleId, "OnEnable", runtime.config.OnEnable, record.data)
+        if not ok then
+            return false
+        end
+    end
+
+    return true
+end
+
 local function BuildPackageFromRecord(record, exportMode)
     if not record then
         return nil
@@ -1243,7 +1263,9 @@ function MedaAuras:LoadCustomModules()
         if record.data and record.data.enabled then
             local runtime, err = EnsureRuntimeLoaded(moduleId)
             if runtime then
-                InitializeRuntime(moduleId, runtime)
+                if not EnableRuntime(moduleId, runtime, record) then
+                    record.data.enabled = false
+                end
             else
                 record.data.enabled = false
                 LogWarn(format("Failed to load custom module '%s': %s", moduleId, tostring(err)))
@@ -1266,17 +1288,9 @@ function MedaAuras:EnableCustomModule(ref)
     end
 
     record.data.enabled = true
-    if not InitializeRuntime(moduleId, runtime) then
+    if not EnableRuntime(moduleId, runtime, record) then
         record.data.enabled = false
         return false
-    end
-
-    if runtime.config.OnEnable then
-        local ok = CallRuntimeFunction(moduleId, "OnEnable", runtime.config.OnEnable, record.data)
-        if not ok then
-            record.data.enabled = false
-            return false
-        end
     end
 
     return true

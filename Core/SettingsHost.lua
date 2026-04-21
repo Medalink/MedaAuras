@@ -2,11 +2,16 @@ local ADDON_NAME, ns = ...
 
 local MedaUI = LibStub("MedaUI-2.0")
 
+local AddOnProfilerMetric = _G.Enum and _G.Enum.AddOnProfilerMetric or nil
 local format = format
+local mathAbs = math.abs
+local tconcat = table.concat
 local tinsert = table.insert
 local SIDEBAR_WIDTH = 304
 local PANEL_WIDTH = 1180
 local PANEL_HEIGHT = 840
+local DIAGNOSTICS_REFRESH_SECONDS = 5
+local DIAGNOSTICS_PAGE_HEIGHT = 620
 
 local STABILITY_LEGEND = {
     { label = "Stable",       color = MedaAuras.STABILITY_COLORS.stable },
@@ -17,6 +22,12 @@ local STABILITY_LEGEND = {
 local settingsHost
 local selectedModuleId = "General"
 local selectedPageId
+local diagnosticsState = {
+    page = nil,
+    baseYOffset = 0,
+    rows = nil,
+    ticker = nil,
+}
 
 local function SafeInvoke(label, func, ...)
     if type(func) ~= "function" then
@@ -48,6 +59,203 @@ local function ResetModuleDefaults(moduleId, moduleConfig)
 
     for key, value in pairs(moduleConfig.defaults) do
         db[key] = MedaAuras.DeepCopy(value)
+    end
+end
+
+local function StopDiagnosticsTicker()
+    if diagnosticsState.ticker then
+        diagnosticsState.ticker:Cancel()
+        diagnosticsState.ticker = nil
+    end
+end
+
+local function GetDiagnosticsRoster()
+    local roster = { "MedaAuras" }
+    if C_AddOns and C_AddOns.IsAddOnLoaded and C_AddOns.IsAddOnLoaded("MedaUI") then
+        roster[#roster + 1] = "MedaUI"
+    end
+    return roster
+end
+
+local function CountModuleStates()
+    local builtInEnabled, builtInTotal = 0, 0
+    for _, moduleName in ipairs(MedaAuras:GetRegisteredModuleNames()) do
+        builtInTotal = builtInTotal + 1
+        local db = MedaAuras:GetModuleDB(moduleName)
+        if db and db.enabled then
+            builtInEnabled = builtInEnabled + 1
+        end
+    end
+
+    local customEnabled, customTotal = 0, 0
+    if MedaAuras.GetCustomModuleEntries then
+        for _, entry in ipairs(MedaAuras:GetCustomModuleEntries()) do
+            customTotal = customTotal + 1
+            local db = MedaAuras:GetModuleDB(entry.key)
+            if db and db.enabled then
+                customEnabled = customEnabled + 1
+            end
+        end
+    end
+
+    return builtInEnabled + customEnabled,
+        builtInTotal + customTotal,
+        builtInEnabled,
+        builtInTotal,
+        customEnabled,
+        customTotal
+end
+
+local function LayoutDiagnosticsRows()
+    if not diagnosticsState.rows then
+        return DIAGNOSTICS_PAGE_HEIGHT
+    end
+
+    local yOff = diagnosticsState.baseYOffset or 0
+    for i = 1, #diagnosticsState.rows do
+        local row = diagnosticsState.rows[i]
+        row:ClearAllPoints()
+        row:SetPoint("TOPLEFT", 0, yOff)
+        yOff = yOff - row:GetHeight() - 12
+    end
+
+    return math.max(DIAGNOSTICS_PAGE_HEIGHT, mathAbs(yOff) + 16)
+end
+
+local function UpdateDiagnosticsRows()
+    if not diagnosticsState.rows then
+        return
+    end
+
+    local roster = GetDiagnosticsRoster()
+    local rosterLabel = tconcat(roster, ", ")
+    local profilerAvailable = MedaUI.IsAddOnProfilerAvailable and MedaUI:IsAddOnProfilerAvailable()
+    local profilerEnabled = profilerAvailable and MedaUI:IsAddOnProfilerEnabled()
+    local rosterNote = #roster > 1
+        and "Standalone MedaUI is loaded separately and included in the suite total."
+        or "Embedded MedaUI code is included in MedaAuras totals."
+
+    local profilerRow = diagnosticsState.rows[1]
+    profilerRow:SetLabel("Profiler")
+    if profilerAvailable then
+        local status = profilerEnabled and "Active" or "Disabled"
+        local r, g, b = profilerEnabled and 0.4 or 1.0, profilerEnabled and 0.9 or 0.8, profilerEnabled and 0.4 or 0.0
+        profilerRow:SetStatus(status, r, g, b)
+        profilerRow:SetAccentColor(r, g, b)
+        profilerRow:SetNote(format(
+            "Sampling %d addon(s): %s. Refresh runs every %d seconds only while this page is visible. %s",
+            #roster,
+            rosterLabel,
+            DIAGNOSTICS_REFRESH_SECONDS,
+            rosterNote
+        ))
+    else
+        profilerRow:SetStatus("Unavailable", 1.0, 0.3, 0.3)
+        profilerRow:SetAccentColor(1.0, 0.3, 0.3)
+        profilerRow:SetNote("This client build does not expose the Blizzard addon profiler API.")
+    end
+
+    local recentCpuRow = diagnosticsState.rows[2]
+    recentCpuRow:SetLabel("Recent CPU")
+    if profilerAvailable and profilerEnabled and AddOnProfilerMetric then
+        local fps = GetFramerate() or 0
+        local recentMs = MedaUI:GatherSuiteCPUMs(roster, AddOnProfilerMetric.RecentAverageTime)
+        local recentPct = MedaUI:ComputeFrameBudgetPercent(recentMs, fps)
+        local r, g, b = MedaUI:GetCPUColor(recentPct)
+        recentCpuRow:SetStatus(MedaUI:FormatCPUMs(recentMs), r, g, b)
+        recentCpuRow:SetAccentColor(r, g, b)
+        if fps > 0 then
+            recentCpuRow:SetNote(format("%.2f%% of the current frame budget at %.1f FPS.", recentPct, fps))
+        else
+            recentCpuRow:SetNote("Frame-budget percent is unavailable while FPS is zero.")
+        end
+    else
+        recentCpuRow:SetStatus("N/A")
+        recentCpuRow:SetAccentColor(0.45, 0.45, 0.45)
+        recentCpuRow:SetNote("Recent CPU sampling requires the Blizzard addon profiler API.")
+    end
+
+    local sessionCpuRow = diagnosticsState.rows[3]
+    sessionCpuRow:SetLabel("Session / Peak CPU")
+    if profilerAvailable and profilerEnabled and AddOnProfilerMetric then
+        local sessionMs = MedaUI:GatherSuiteCPUMs(roster, AddOnProfilerMetric.SessionAverageTime)
+        local peakMs = MedaUI:GatherSuiteCPUMs(roster, AddOnProfilerMetric.PeakTime)
+        local recentMs = MedaUI:GatherSuiteCPUMs(roster, AddOnProfilerMetric.RecentAverageTime)
+        local peakPct = MedaUI:ComputeFrameBudgetPercent(peakMs, GetFramerate() or 0)
+        local r, g, b = MedaUI:GetCPUColor(math.max(
+            MedaUI:ComputeFrameBudgetPercent(sessionMs, GetFramerate() or 0),
+            peakPct
+        ))
+        sessionCpuRow:SetStatus(format("%s / %s", MedaUI:FormatCPUMs(sessionMs), MedaUI:FormatCPUMs(peakMs)), r, g, b)
+        sessionCpuRow:SetAccentColor(r, g, b)
+        sessionCpuRow:SetNote(format(
+            "Recent sample %s. Peak spikes matter more than averages when a module feels bursty.",
+            MedaUI:FormatCPUMs(recentMs)
+        ))
+    else
+        sessionCpuRow:SetStatus("N/A")
+        sessionCpuRow:SetAccentColor(0.45, 0.45, 0.45)
+        sessionCpuRow:SetNote("Session and peak CPU metrics are unavailable without the profiler API.")
+    end
+
+    local memoryRow = diagnosticsState.rows[4]
+    memoryRow:SetLabel("Memory Snapshot")
+    local memoryKB = MedaUI:GatherSuiteMemoryKB(roster)
+    if memoryKB ~= nil then
+        local memoryMB = (tonumber(memoryKB) or 0) / 1024
+        local r, g, b = MedaUI:GetStatusColor(memoryMB, {
+            { max = 4, color = { 0.4, 0.9, 0.4 } },
+            { max = 12, color = { 1, 0.8, 0 } },
+            { color = { 1, 0.3, 0.3 } },
+        })
+        memoryRow:SetStatus(MedaUI:FormatMemoryKB(memoryKB), r, g, b)
+        memoryRow:SetAccentColor(r, g, b)
+        memoryRow:SetNote("Point-in-time snapshot only. Use scoped slash/debug probes for allocator investigations instead of a permanent runtime monitor.")
+    else
+        memoryRow:SetStatus("Unavailable", 1.0, 0.3, 0.3)
+        memoryRow:SetAccentColor(1.0, 0.3, 0.3)
+        memoryRow:SetNote("This client build does not expose addon memory snapshot APIs.")
+    end
+
+    local lifecycleRow = diagnosticsState.rows[5]
+    local enabledCount, totalCount, builtInEnabled, builtInTotal, customEnabled, customTotal = CountModuleStates()
+    lifecycleRow:SetLabel("Runtime Modules")
+    lifecycleRow:SetStatus(format("%d / %d enabled", enabledCount, totalCount), 1.0, 0.8, 0.0)
+    lifecycleRow:SetAccentColor(1.0, 0.8, 0.0)
+    lifecycleRow:SetNote(format(
+        "Built-in %d/%d, custom %d/%d. Built-in modules initialize on ADDON_LOADED and enable on PLAYER_LOGIN; enabled custom modules initialize and enable during login startup when their runtime payload is loaded.",
+        builtInEnabled,
+        builtInTotal,
+        customEnabled,
+        customTotal
+    ))
+
+    local targetHeight = LayoutDiagnosticsRows()
+    if settingsHost and settingsHost:IsShown()
+        and settingsHost.activeModuleId == "General"
+        and settingsHost.activePageId == "diagnostics" then
+        MedaAuras:SetContentHeight(targetHeight)
+    end
+end
+
+local function UpdateDiagnosticsMonitorState()
+    if not settingsHost or not settingsHost:IsShown() then
+        StopDiagnosticsTicker()
+        return
+    end
+
+    if settingsHost.activeModuleId ~= "General" or settingsHost.activePageId ~= "diagnostics" then
+        StopDiagnosticsTicker()
+        return
+    end
+
+    if not diagnosticsState.rows then
+        return
+    end
+
+    UpdateDiagnosticsRows()
+    if not diagnosticsState.ticker then
+        diagnosticsState.ticker = C_Timer.NewTicker(DIAGNOSTICS_REFRESH_SECONDS, UpdateDiagnosticsRows)
     end
 end
 
@@ -150,6 +358,50 @@ local function BuildGeneralPage(parent)
     end
 
     return math.abs(yOff)
+end
+
+local function BuildDiagnosticsPage(parent)
+    StopDiagnosticsTicker()
+    diagnosticsState.page = parent
+    diagnosticsState.rows = {}
+
+    local yOff = 0
+
+    local header = MedaUI:CreateSectionHeader(parent, "Suite Diagnostics", 520)
+    header:SetPoint("TOPLEFT", 0, yOff)
+    yOff = yOff - 40
+
+    local note = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    note:SetPoint("TOPLEFT", 0, yOff)
+    note:SetPoint("RIGHT", parent, "RIGHT", -20, 0)
+    note:SetJustifyH("LEFT")
+    note:SetWordWrap(true)
+    note:SetText("Suite-level CPU and memory snapshots for MedaAuras. Refresh is intentionally slow and only runs while this page is visible.")
+    note:SetTextColor(unpack(MedaUI.Theme.text))
+    yOff = yOff - note:GetStringHeight() - 18
+
+    diagnosticsState.baseYOffset = yOff
+
+    local function CreateDiagnosticsRow()
+        local row = MedaUI:CreateStatusRow(parent, {
+            width = 560,
+            showNote = true,
+            cardStyle = true,
+        })
+        row:SetIcon(nil)
+        diagnosticsState.rows[#diagnosticsState.rows + 1] = row
+        return row
+    end
+
+    CreateDiagnosticsRow()
+    CreateDiagnosticsRow()
+    CreateDiagnosticsRow()
+    CreateDiagnosticsRow()
+    CreateDiagnosticsRow()
+
+    UpdateDiagnosticsRows()
+    UpdateDiagnosticsMonitorState()
+    return LayoutDiagnosticsRows()
 end
 
 local function BuildImportPage(parent)
@@ -282,14 +534,30 @@ local function RegisterOptionsModules()
 
     settingsHost:RegisterModule("General", {
         title = "Settings",
-        description = "Global MedaAuras options, UI theme, debug logging, and embedded addon controls.",
+        description = "Global MedaAuras options, suite diagnostics, debug logging, and embedded addon controls.",
         sidebarGroup = "General",
         sidebarOrder = 10,
         entryType = "nav",
-        pages = { { id = "settings", label = "Settings", title = "General Settings" } },
-        defaultPageHeight = 520,
-        buildPage = function(_, parent)
+        pages = {
+            { id = "settings", label = "Settings", title = "General Settings" },
+            { id = "diagnostics", label = "Diagnostics", title = "Suite Diagnostics" },
+        },
+        pageHeights = {
+            settings = 520,
+            diagnostics = DIAGNOSTICS_PAGE_HEIGHT,
+        },
+        defaultPageHeight = DIAGNOSTICS_PAGE_HEIGHT,
+        buildPage = function(pageName, parent)
+            if pageName == "diagnostics" then
+                return BuildDiagnosticsPage(parent)
+            end
             return BuildGeneralPage(parent)
+        end,
+        onPageCacheRestore = function(pageName)
+            if pageName == "diagnostics" then
+                UpdateDiagnosticsRows()
+                UpdateDiagnosticsMonitorState()
+            end
         end,
         getHeaderBuilder = function()
             return function()
@@ -386,15 +654,20 @@ local function BuildSettingsHost()
 
     settingsHost.OnSelectionChanged = function(moduleId, pageId)
         selectedModuleId = moduleId or selectedModuleId
-        selectedPageId = pageId
+        selectedPageId = pageId or selectedPageId
         if ns.Reminders and ns.Reminders.RefreshHUDs then
             ns.Reminders.RefreshHUDs()
         end
+        UpdateDiagnosticsMonitorState()
     end
 
     local hostFrame = settingsHost.GetFrame and settingsHost:GetFrame() or nil
     if hostFrame and hostFrame.HookScript then
+        hostFrame:HookScript("OnShow", function()
+            UpdateDiagnosticsMonitorState()
+        end)
         hostFrame:HookScript("OnHide", function()
+            StopDiagnosticsTicker()
             if ns.Reminders and ns.Reminders.RefreshHUDs then
                 ns.Reminders.RefreshHUDs()
             end
@@ -412,6 +685,9 @@ function MedaAuras:ToggleSettings()
     host:Toggle()
     if host:IsShown() then
         host:SelectModule(selectedModuleId or host.activeModuleId or "General", selectedPageId)
+        UpdateDiagnosticsMonitorState()
+    else
+        StopDiagnosticsTicker()
     end
 end
 
@@ -430,6 +706,8 @@ function MedaAuras:RebuildSettingsSidebar()
     else
         settingsHost:SelectModule("General")
     end
+
+    UpdateDiagnosticsMonitorState()
 end
 
 function MedaAuras:SetContentHeight(height)
@@ -462,6 +740,7 @@ end
 function MedaAuras:RefreshModuleConfig()
     if settingsHost and settingsHost:IsShown() then
         settingsHost:RefreshActivePage(true)
+        UpdateDiagnosticsMonitorState()
     end
 end
 

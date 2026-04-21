@@ -403,7 +403,7 @@ function M.SetPreview(enabled, moduleDBOverride)
 end
 
 function M.OnInitialize(moduleDBOverride)
-    M.RefreshRuntime(moduleDBOverride)
+    moduleDB = moduleDBOverride or moduleDB or M.GetDB()
 end
 
 function M.OnEnable(moduleDBOverride)

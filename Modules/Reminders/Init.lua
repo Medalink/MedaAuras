@@ -947,8 +947,6 @@ local function OnInitialize(moduleDB)
         if (S.db.panelHeight or 0) <= 620 then S.db.panelHeight = 720 end
         S.db._sizeMigrated3 = true
     end
-
-    StartModule()
 end
 
 local function OnEnable(moduleDB)

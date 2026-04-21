@@ -2,7 +2,7 @@ local _, ns = ...
 
 ns.RemindersData = {
     dataVersion   = 1,
-    lastUpdated   = "2026-03-30",
+    lastUpdated   = "2026-04-11",
 
     sources       = {},
     capabilities  = {},
@@ -22,7 +22,7 @@ S.archon = {
     badge = "|cff00ccff[A]|r",
     color = { 0, 0.8, 1.0 },
     url   = "archon.gg",
-    lastFetched = 1774909642,
+    lastFetched = 1775918888,
 }
 
 S.wowhead = {
@@ -30,7 +30,7 @@ S.wowhead = {
     badge = "|cffff8800[W]|r",
     color = { 1.0, 0.53, 0 },
     url   = "wowhead.com",
-    lastFetched = 1774909642,
+    lastFetched = 1775918888,
 }
 
 S.icyveins = {
@@ -38,6 +38,6 @@ S.icyveins = {
     badge = "|cff33cc33[IV]|r",
     color = { 0.2, 0.8, 0.2 },
     url   = "icy-veins.com",
-    lastFetched = 1774909642,
+    lastFetched = 1775918888,
 }
 

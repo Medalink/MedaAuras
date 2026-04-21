@@ -1,7 +1,6 @@
 local ADDON_NAME, ns = ...
 
 local MedaUI = LibStub("MedaUI-2.0")
-local Pixel = MedaUI.Pixel
 local C_Secrets = _G and _G.C_Secrets or nil
 local debugstack = debugstack
 local format = format
@@ -328,6 +327,8 @@ end
 
 local modules = {}
 local moduleOrder = {}
+local moduleRuntimeState = {}
+local playerLoggedIn = false
 
 local STABILITY_COLORS = {
     experimental = { 1.0, 0.6, 0.0 },
@@ -336,6 +337,49 @@ local STABILITY_COLORS = {
 }
 
 MedaAuras.STABILITY_COLORS = STABILITY_COLORS
+
+local function GetModuleRuntimeState(name)
+    local state = moduleRuntimeState[name]
+    if not state then
+        state = {
+            initialized = false,
+        }
+        moduleRuntimeState[name] = state
+    end
+    return state
+end
+
+local function InitializeModuleRuntime(name, config, db, reason)
+    local state = GetModuleRuntimeState(name)
+    if state.initialized then
+        return true
+    end
+
+    if not config.OnInitialize then
+        LogDebug(format("InitializeModuleRuntime: '%s' has no OnInitialize handler (%s)", name, tostring(reason or "unspecified")))
+        state.initialized = true
+        return true
+    end
+
+    local ok = SafeCall(name, config.OnInitialize, db)
+    if ok then
+        state.initialized = true
+    end
+    return ok
+end
+
+local function EnableModuleRuntime(name, config, db, reason)
+    if not InitializeModuleRuntime(name, config, db, reason) then
+        return false
+    end
+
+    if config.OnEnable then
+        return SafeCall(name, config.OnEnable, db)
+    end
+
+    LogDebug(format("EnableModuleRuntime: '%s' has no OnEnable handler (%s)", name, tostring(reason or "unspecified")))
+    return true
+end
 
 function MedaAuras:RegisterModule(config)
     if not config or not config.name then
@@ -351,6 +395,7 @@ function MedaAuras:RegisterModule(config)
     end
 
     modules[config.name] = config
+    GetModuleRuntimeState(config.name)
     moduleOrder[#moduleOrder + 1] = config.name
     LogDebug(format("Module registered: %s", config.name))
 end
@@ -408,10 +453,10 @@ function MedaAuras:EnableModule(name)
     db.enabled = true
     Log(format("Enabling module: %s", name))
 
-    if config.OnEnable then
-        SafeCall(name, config.OnEnable, db)
+    if playerLoggedIn then
+        EnableModuleRuntime(name, config, db, "manual enable")
     else
-        LogDebug(format("EnableModule: '%s' has no OnEnable handler", name))
+        LogDebug(format("EnableModule: '%s' enabled before PLAYER_LOGIN; runtime enable deferred", name))
     end
     return true
 end
@@ -568,9 +613,9 @@ local function SlashHandler(msg)
     print("  /mwa disable <module> - Disable a module")
 end
 
-SLASH_MEDAAURAS1 = "/mwa"
-SLASH_MEDAAURAS2 = "/mauras"
-SlashCmdList["MEDAAURAS"] = SlashHandler
+_G.SLASH_MEDAAURAS1 = "/mwa"
+_G.SLASH_MEDAAURAS2 = "/mauras"
+_G.SlashCmdList["MEDAAURAS"] = SlashHandler
 
 -- ============================================================================
 -- Initialization
@@ -633,7 +678,16 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
             MedaUI:SetSoundsEnabled(false)
         end
 
+        for _, modName in ipairs(moduleOrder) do
+            local config = modules[modName]
+            local db = MedaAurasDB.modules[modName]
+            Log(format("ADDON_LOADED: Initializing module: %s", modName))
+            InitializeModuleRuntime(modName, config, db, "ADDON_LOADED")
+        end
+
     elseif event == "PLAYER_LOGIN" then
+        playerLoggedIn = true
+
         -- Retry debug API discovery in case MedaDebug loaded after us
         InitDebug()
 
@@ -657,12 +711,8 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
             local config = modules[modName]
             local db = MedaAurasDB.modules[modName]
             if db and db.enabled then
-                Log(format("Auto-initializing enabled module: %s", modName))
-                if config.OnInitialize then
-                    SafeCall(modName, config.OnInitialize, db)
-                else
-                    LogWarn(format("Module '%s' enabled but has no OnInitialize", modName))
-                end
+                Log(format("PLAYER_LOGIN: Enabling module: %s", modName))
+                EnableModuleRuntime(modName, config, db, "PLAYER_LOGIN")
             else
                 LogDebug(format("Skipping disabled module: %s", modName))
             end

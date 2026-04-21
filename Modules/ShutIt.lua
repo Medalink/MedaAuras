@@ -1372,7 +1372,6 @@ end
 
 local function OnInitialize(moduleDB)
     db = moduleDB
-    StartModule()
 end
 
 local function OnEnable(moduleDB)

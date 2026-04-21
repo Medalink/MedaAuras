@@ -6,8 +6,6 @@
 
 local _, ns = ...
 
-local MedaUI = LibStub("MedaUI-2.0")
-
 ns.Prophecy = {}
 
 local MODULE_NAME = "Prophecy"
@@ -57,32 +55,31 @@ end
 
 local function OnInitialize()
     local Engine = ns.Services.ProphecyEngine
-    if not Engine then return end
-    Engine:Initialize()
+    if Engine then
+        Engine:RegisterCallback("onStateChange", function(node)
+            if ns.Prophecy.OnStateChange then
+                ns.Prophecy.OnStateChange(node)
+            end
+        end)
 
-    Engine:RegisterCallback("onStateChange", function(node)
-        if ns.Prophecy.OnStateChange then
-            ns.Prophecy.OnStateChange(node)
-        end
-    end)
+        Engine:RegisterCallback("onDriftUpdate", function(drift)
+            if ns.Prophecy.OnDriftUpdate then
+                ns.Prophecy.OnDriftUpdate(drift)
+            end
+        end)
 
-    Engine:RegisterCallback("onDriftUpdate", function(drift)
-        if ns.Prophecy.OnDriftUpdate then
-            ns.Prophecy.OnDriftUpdate(drift)
-        end
-    end)
+        Engine:RegisterCallback("onWipeStateChange", function(isWiping)
+            if ns.Prophecy.OnWipeStateChange then
+                ns.Prophecy.OnWipeStateChange(isWiping)
+            end
+        end)
 
-    Engine:RegisterCallback("onWipeStateChange", function(isWiping)
-        if ns.Prophecy.OnWipeStateChange then
-            ns.Prophecy.OnWipeStateChange(isWiping)
-        end
-    end)
-
-    Engine:RegisterCallback("onRefresh", function()
-        if ns.Prophecy.OnRefresh then
-            ns.Prophecy.OnRefresh()
-        end
-    end)
+        Engine:RegisterCallback("onRefresh", function()
+            if ns.Prophecy.OnRefresh then
+                ns.Prophecy.OnRefresh()
+            end
+        end)
+    end
 
     -- Ensure MedaAurasCharDB is initialized
     MedaAurasCharDB = MedaAurasCharDB or {}
@@ -95,6 +92,11 @@ end
 local function OnEnable()
     local db = GetDB()
     if not db then return end
+
+    local Engine = ns.Services.ProphecyEngine
+    if Engine then
+        Engine:Initialize()
+    end
 
     if ns.Prophecy.CreateOverlay then
         ns.Prophecy.CreateOverlay(db)
